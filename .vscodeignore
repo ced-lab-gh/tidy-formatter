@@ -22,6 +22,7 @@ SPEC.md
 docs/**
 MINING.md
 BUILD_REPORT.md
+PUBLISHING.md
 
 # QA / coverage / CI artifacts (not shipped)
 coverage/**

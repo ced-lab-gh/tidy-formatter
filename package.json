@@ -6,6 +6,8 @@
   "publisher": "ced-lab",
   "license": "MIT",
   "icon": "media/icon.png",
+  "pricing": "Free",
+  "qna": "marketplace",
   "galleryBanner": {
     "color": "#168F7D",
     "theme": "dark"
@@ -455,6 +457,8 @@
     "pretest:integration": "tsc -p ./",
     "test:integration": "vscode-test",
     "package": "vsce package --no-dependencies",
+    "publish:vsce": "vsce publish",
+    "publish:ovsx": "ovsx publish",
     "vscode:prepublish": "npm run compile"
   },
   "dependencies": {
@@ -483,6 +487,7 @@
     "esbuild": "^0.20.0",
     "eslint": "^8.57.0",
     "mocha": "^10.3.0",
+    "ovsx": "^0.9.5",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   },

@@ -1,0 +1,165 @@
+# Release & dual-publish for Tidy Formatter — JS/CSS/HTML (ROADMAP Axe 5, T4/T5/T7).
+#
+# Triggers:
+#   * push of a tag matching v* (e.g. v0.2.0, v1.0.0, v0.2.0-rc.1) -> real release.
+#   * workflow_dispatch (manual) -> DRY-RUN: runs every gate and packages the VSIX
+#     but publishes NOTHING (ROADMAP 5.T4 "workflow_dispatch dry-run"). Useful to
+#     rehearse the pipeline without cutting a tag or touching either registry.
+#
+# What it does, in order (same fail-fast gate philosophy as ci.yml):
+#   version guard     -> on a tag push, assert the tag (vX.Y.Z) == package.json
+#                        "version" (ROADMAP 5.T4: same artefact, parity enforced;
+#                        5.T7: SemVer pre-release suffixes -rc/-beta accepted)
+#   npm ci            -> reproducible install from the lockfile
+#   compile           -> esbuild production bundle (dist/extension.js)
+#   test              -> mocha unit corpus
+#   integration       -> @vscode/test-cli headless under xvfb
+#   package           -> @vscode/vsce -> tidy-formatter.vsix (single artifact, reused
+#                        byte-identically by both publish steps so the two registries
+#                        get the exact same build)
+#   publish           -> VS Marketplace AND Open VSX, each CONDITIONAL on its secret
+#                        AND skipped entirely on a manual dry-run
+#   release           -> the .vsix is always uploaded as a build artifact
+#
+# ── REQUIRED SECRETS (Settings > Secrets and variables > Actions > Secrets) ──
+#   VSCE_PAT  : Azure DevOps Personal Access Token for the `ced-lab` Marketplace
+#               publisher (scope: Marketplace > Manage). Used by `vsce publish`.
+#   OVSX_PAT  : Open VSX access token for the `ced-lab` namespace. Used by `ovsx publish`.
+#
+# Both publish steps SKIP CLEANLY when their secret is absent: pushing a tag with no
+# secrets configured still runs the gates, packages the VSIX, and uploads it as an
+# artifact — it just publishes nothing. This lets you cut a tag for a dry/staging run,
+# or before the publisher accounts exist, without failing the workflow.
+#
+# See PUBLISHING.md for the full, step-by-step publishing guide (account creation,
+# token generation, adding secrets, and local fallback commands).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why this manual dry-run (packages the VSIX, publishes nothing).'
+        required: false
+        default: 'Manual dry-run'
+
+# Least-privilege: only the GitHub Release upload needs write access to the repo.
+permissions:
+  contents: write
+
+# Never run two releases for the same tag at once.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package & dual-publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # Gate 0 — version parity. On a tag push, the tag (minus its leading "v")
+      # MUST equal package.json "version", so the two registries can never receive
+      # a build whose manifest version disagrees with the tag (ROADMAP 5.T4). A
+      # SemVer pre-release suffix (-rc.N / -beta.N) is allowed and carried through
+      # verbatim (5.T7). Skipped on a manual workflow_dispatch (no tag to check).
+      - name: Verify tag matches package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG  package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match package.json version '$PKG'. Aborting — nothing published."
+            exit 1
+          fi
+
+      # Gate 1 — reproducible install from package-lock.json.
+      - name: Install (npm ci)
+        run: npm ci
+
+      # Gate 2 — production bundle.
+      - name: Compile (production bundle)
+        run: npm run compile
+
+      # Gate 3 — unit corpus (pure modules, no VS Code host).
+      - name: Unit tests
+        run: npm test
+
+      # Gate 4 — headless integration tests inside a real VS Code host. xvfb-run
+      # provides the virtual display the Electron-based VS Code requires on Linux.
+      - name: Integration tests (headless, xvfb)
+        run: xvfb-run -a npm run test:integration
+
+      # Gate 5 — package the extension into a single, reusable .vsix. Both publish
+      # steps below point at this exact file so the two registries get an identical
+      # build.
+      - name: Package (.vsix)
+        run: npx @vscode/vsce package --no-dependencies -o tidy-formatter.vsix
+
+      # ── Conditional publish steps ──
+      # Each step probes its secret first and exports a boolean flag to
+      # $GITHUB_OUTPUT. The publish step then guards on that flag, so a missing
+      # secret is a clean skip (not a failure).
+
+      # VS Marketplace --------------------------------------------------------
+      - name: Detect VSCE_PAT
+        id: vsce_secret
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -n "$VSCE_PAT" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VSCE_PAT secret is not set — skipping VS Marketplace publish."
+          fi
+
+      - name: Publish to VS Marketplace
+        if: github.ref_type == 'tag' && steps.vsce_secret.outputs.present == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx @vscode/vsce publish -p "$VSCE_PAT" --packagePath tidy-formatter.vsix
+
+      # Open VSX --------------------------------------------------------------
+      - name: Detect OVSX_PAT
+        id: ovsx_secret
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -n "$OVSX_PAT" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OVSX_PAT secret is not set — skipping Open VSX publish."
+          fi
+
+      - name: Publish to Open VSX
+        if: github.ref_type == 'tag' && steps.ovsx_secret.outputs.present == 'true'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx ovsx publish tidy-formatter.vsix -p "$OVSX_PAT"
+
+      # The .vsix is uploaded in ALL cases (publish or not), so a secret-less tag
+      # still produces a downloadable, installable artifact.
+      - name: Upload VSIX artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidy-formatter-vsix
+          path: tidy-formatter.vsix
+          if-no-files-found: error
+          retention-days: 30
