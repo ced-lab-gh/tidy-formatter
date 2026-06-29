@@ -36,6 +36,10 @@ export default defineConfig({
     // covers the cold first integration run on a slow/shared CI runner (VS Code
     // download + Electron boot + readiness poll) without masking a real hang.
     timeout: 120000,
+    // Fail fast on CI so the best-effort integration job stops at the first
+    // failure instead of waiting out every suite's timeout (~15 min) when the
+    // hosted Electron host hangs. Locally we run the full suite for complete signal.
+    bail: !!process.env.CI,
     color: true
   },
   // Disable OTHER extensions for a hermetic host. The extension under test is
