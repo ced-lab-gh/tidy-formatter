@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Superiority features — ignore, deference & preview (ROADMAP Axe 4, v1.0).**
+  - **In-source ignore directives.** A head `tidy-ignore-file` / `tidy-ignore` /
+    `prettier-ignore` comment skips the whole file; `tidy-ignore-start` …
+    `tidy-ignore-end` preserves a region **byte-for-byte**; a lone `// tidy-ignore`
+    / `// prettier-ignore` protects the next node. On the Prettier path (TS/TSX/JSX)
+    `// prettier-ignore` is honoured **natively at the node level**; on the
+    js-beautify path (CSS/SCSS/LESS/HTML/JSON/JS) regions are protected via a pure
+    mask-and-restore behind the guard (node-level masking is best-effort, with the
+    limitation documented — never a corruption risk). The scanner/mask are pure,
+    `vscode`-free modules.
+  - **`.soukformatignore` (gitignore syntax).** Exclude files project-wide so Tidy
+    leaves them byte-identical: `*`, `?`, `**`, anchoring, directory patterns, and
+    last-wins `!negation`, cascading up the tree. Trust-gated (ignored in Restricted
+    Mode) and fail-safe (unreadable ignore file → format anyway). Opt-out via
+    `tidy.respectSoukformatignore`. The matcher **reuses/extends** the dependency-free
+    glob from `.soukformatrc` — **no new npm dependency**.
+  - **Deference to competing formatters.** Detects Prettier (`.prettierrc*` or a
+    `package.json` `prettier` key), Biome (`biome.json`), and dprint (`dprint.json`)
+    and **surfaces** a one-time, deduplicated (`globalState`) notification.
+    Controlled by `tidy.deferToOtherFormatters` (`notify` default / `silent-defer` /
+    `off`). Anti-hijack: deference **never** changes `editor.defaultFormatter`,
+    never disables Tidy silently, and writes no setting on its own. A `.prettierignore`
+    alone does not trigger it (CFG-07). Detection is Trust-gated.
+  - **`Tidy: Preview Format (diff)` command.** Read-only side-by-side diff of what
+    Tidy would change (opening it writes nothing / leaves dirty state intact), driven
+    by the same pipeline + equivalence guard; a guard rejection shows no diff. An
+    explicit **Apply** writes the result as a **single undo entry** (one `Ctrl+Z`
+    reverts). The decision planner is a pure, `vscode`-free module.
+  - **Show Effective Configuration** now reports the active document's ignore &
+    coexistence status: whether it is skipped (`.soukformatignore` / in-source
+    marker), the consulted `.soukformatignore` path, the count of protected regions,
+    the detected competing formatters, and the effective `deferToOtherFormatters`.
+  - Guard + anti-hijack preserved end to end: every ignore/region path returns the
+    input verbatim (so `guard.check` accepts), any non-parsable splice is rejected
+    (file intact), and no `defaultFormatter`/`configurationDefaults`/save·change·startup
+    hook is added (ARCH-01/02 integration tests stay green).
 - **Configurability — the full option set ("not enough options", ROADMAP Axe 3).**
   - **24 new formatting options** on top of the 5 already shipped (29 total): the
     complete js-beautify surface by family (`preserve_newlines`,

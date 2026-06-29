@@ -8,6 +8,10 @@ polyglot/
 config-options/
 .soukformatrc
 
+# Throwaway fixtures written by the power-features integration tests at runtime.
+power-features/
+.soukformatignore
+
 # Throwaway readiness-probe files written by ensureTidyDefaultFormatter.
 .tidy-readiness/
 

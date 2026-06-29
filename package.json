@@ -73,6 +73,11 @@
         "command": "tidy.runMigration",
         "title": "Migrate from JS-CSS-HTML Formatter",
         "category": "Tidy"
+      },
+      {
+        "command": "tidy.previewFormat",
+        "title": "Preview Format (diff)",
+        "category": "Tidy"
       }
     ],
     "walkthroughs": [
@@ -413,6 +418,27 @@
           "default": true,
           "scope": "resource",
           "description": "Read the project's .soukformatrc file (JSONC) for per-language formatting options and glob overrides, layered above .editorconfig. Disable to ignore .soukformatrc entirely. A workspace .soukformatrc is always ignored in Restricted Mode."
+        },
+        "tidy.respectSoukformatignore": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Skip formatting files matched by the project's .soukformatignore (gitignore syntax), so Tidy leaves them byte-identical. Disable to format every file regardless. A workspace .soukformatignore is always ignored in Restricted Mode."
+        },
+        "tidy.deferToOtherFormatters": {
+          "type": "string",
+          "default": "notify",
+          "enum": [
+            "notify",
+            "silent-defer",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Show a one-time notification when this workspace already configures another formatter (Prettier, Biome, dprint). Tidy never takes over — your default formatter is unchanged.",
+            "Do not notify, but acknowledge another formatter is configured. Tidy still never disables itself or changes any setting.",
+            "Ignore detection of other formatters entirely (no notification)."
+          ],
+          "description": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically — this only controls a one-time, informational notification."
         }
       }
     }

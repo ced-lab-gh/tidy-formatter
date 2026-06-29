@@ -65,8 +65,34 @@ export interface ReportInput {
   readonly soukformatrcPath?: string;
   /** Non-fatal .soukformatrc warnings to surface (never throws). */
   readonly warnings: readonly string[];
+  /**
+   * Ignore + coexistence (deference) status for the ACTIVE document (Axe 4.T8).
+   * Optional so the pure builder stays usable by callers that do not resolve it;
+   * when present, a dedicated section surfaces whether Tidy would skip this file
+   * and how it reacts to a competing formatter — all read-only, never a write.
+   */
+  readonly ignoreStatus?: IgnoreStatus;
   /** Injected only by tests for a deterministic header timestamp. */
   readonly now?: string;
+}
+
+/**
+ * Read-only ignore + coexistence status for the active document (Axe 4.T8). PURE
+ * data: every field is a fact about what Tidy WOULD do, never an action.
+ */
+export interface IgnoreStatus {
+  /** True when a .soukformatignore pattern excludes this file. */
+  readonly fileIgnoredByList: boolean;
+  /** Absolute path of the .soukformatignore consulted, if any. */
+  readonly soukformatignorePath?: string;
+  /** True when a head/file-level in-source marker leaves the whole file verbatim. */
+  readonly fileIgnoredByMarker: boolean;
+  /** Count of in-source REGION/NODE protected spans found (0 when none). */
+  readonly protectedRegionCount: number;
+  /** Competing formatters detected in the workspace (e.g. ["Prettier"]). */
+  readonly competingFormatters: readonly string[];
+  /** The effective tidy.deferToOtherFormatters value (notify/silent-defer/off). */
+  readonly deferenceSetting: string;
 }
 
 /**
@@ -263,6 +289,12 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
     }
   }
 
+  // Ignore + coexistence status (Axe 4.T8): what Tidy WOULD do for this document.
+  if (input.ignoreStatus) {
+    lines.push('');
+    lines.push(...renderIgnoreStatus(input.ignoreStatus));
+  }
+
   if (input.warnings.length > 0) {
     lines.push('');
     lines.push('.soukformatrc warnings (non-fatal)');
@@ -273,6 +305,55 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Render the read-only "Ignore & coexistence" section (Axe 4.T8). PURE: it only
+ * describes what Tidy WOULD do for the active document — every line is a fact, no
+ * action is offered and nothing is written. Surfaces the .soukformatignore /
+ * in-source ignore state and the deference posture toward a competing formatter.
+ */
+function renderIgnoreStatus(status: IgnoreStatus): string[] {
+  const lines: string[] = [];
+  lines.push('Ignore & coexistence (this document)');
+  lines.push('------------------------------------');
+
+  const wholeFileIgnored =
+    status.fileIgnoredByList || status.fileIgnoredByMarker;
+  if (wholeFileIgnored) {
+    const why = status.fileIgnoredByList
+      ? '.soukformatignore'
+      : 'in-source file-ignore marker';
+    lines.push(`  Tidy SKIPS this file (left byte-identical) — via ${why}.`);
+  } else {
+    lines.push('  Tidy formats this file (not ignored).');
+  }
+
+  lines.push(
+    `  .soukformatignore : ${status.soukformatignorePath ?? '(none found)'}`
+  );
+  lines.push(
+    `  .soukformatignore excludes this file : ${status.fileIgnoredByList ? 'yes' : 'no'}`
+  );
+  lines.push(
+    `  in-source file-ignore marker : ${status.fileIgnoredByMarker ? 'yes' : 'no'}`
+  );
+  lines.push(
+    `  in-source protected regions : ${status.protectedRegionCount}` +
+      (status.protectedRegionCount > 0 ? ' (kept verbatim)' : '')
+  );
+
+  const competing =
+    status.competingFormatters.length > 0
+      ? status.competingFormatters.join(', ')
+      : '(none detected)';
+  lines.push(`  competing formatters : ${competing}`);
+  lines.push(
+    `  deferToOtherFormatters : ${status.deferenceSetting} ` +
+      '(Tidy never changes your default formatter)'
+  );
+
+  return lines;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -320,6 +401,10 @@ function getOutputChannel(vscode: any): {
 export async function showEffectiveConfiguration(): Promise<void> {
   const vscode = require('vscode');
   const { readResolvedOptionsWithDiagnostics } = require('../config/vscodeConfig');
+  const { scanMarkers } = require('../ignore/markers');
+  const { resolveDocumentIgnore } = require('../ignore/ignoreGate');
+  const { detectCompetingFormatters } = require('../deference/detect');
+  const { normalizeSetting, DEFERENCE_SETTING_KEY } = require('../deference/decide');
 
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
@@ -367,12 +452,39 @@ export async function showEffectiveConfiguration(): Promise<void> {
     return;
   }
 
+  // Resolve the read-only ignore + coexistence status for the active document
+  // (Axe 4.T8). Every call here is a READ: it never writes a setting nor touches
+  // editor.defaultFormatter. Any failure is fail-soft (the section is omitted).
+  let ignoreStatus: IgnoreStatus | undefined;
+  try {
+    const fullText = document.getText();
+    const scan = scanMarkers(fullText, languageId);
+    const listLookup = resolveDocumentIgnore(document);
+    const competingFormatters = await detectCompetingFormatters();
+    const deferenceSetting = normalizeSetting(
+      vscode.workspace.getConfiguration().get(DEFERENCE_SETTING_KEY)
+    );
+    ignoreStatus = {
+      fileIgnoredByList: listLookup.ignored === true,
+      soukformatignorePath: listLookup.path,
+      fileIgnoredByMarker: scan.ignoreFile === true,
+      protectedRegionCount: scan.protectedRanges.length,
+      competingFormatters,
+      deferenceSetting
+    };
+  } catch {
+    // Fail-soft: the ignore/coexistence section is informational; never let it
+    // break the (already resolved) option report.
+    ignoreStatus = undefined;
+  }
+
   const report = buildEffectiveConfigReport({
     documentPath: document.uri.fsPath || document.uri.toString(),
     languageId,
     options,
     soukformatrcPath,
-    warnings
+    warnings,
+    ignoreStatus
   });
 
   const channel = getOutputChannel(vscode);

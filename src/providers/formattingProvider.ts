@@ -4,20 +4,31 @@
 // Each provider follows the same safe pipeline:
 //   1. respect `tidy.<lang>.enable` (disabled -> [] so VS Code does nothing);
 //   2. respect `tidy.maxFileSizeKB` (oversized -> [] + non-blocking notice);
-//   3. read the resolved options via vscodeConfig (precedence layers);
-//   4. dispatch the format off the UI thread;
-//   5. run the safety Guard (semantic equivalence modulo whitespace);
-//   6. ONLY if equivalent, return a single TextEdit replacing the formatted span;
+//   3. consult the IGNORE layer (Axe 4): if .soukformatignore matches the file OR
+//      an in-source FILE-ignore marker is present -> [] (Tidy does nothing here);
+//   4. read the resolved options via vscodeConfig (precedence layers);
+//   5. dispatch the format off the UI thread — for the js-beautify path, in-source
+//      ignore REGIONS are protected with mask/restore (the protected bytes are put
+//      back VERBATIM); for the Prettier path, Prettier honours `// prettier-ignore`
+//      natively, so no masking is needed;
+//   6. run the safety Guard (semantic equivalence modulo whitespace) on the
+//      ORIGINAL input vs the (restored) output — so a region splice can never
+//      slip a non-equivalent or non-parsable result through;
+//   7. ONLY if equivalent, return a single TextEdit replacing the formatted span;
 //      otherwise return [] (file stays intact) + a non-blocking warning and a
 //      detailed entry in the Tidy output channel.
 //
 // This is the only file in providers/* that owns VS Code integration; all the
-// engine/safety/config logic lives behind 'vscode'-free modules.
+// engine/safety/config/ignore logic lives behind 'vscode'-free modules (the
+// .soukformatignore lookup is gated by a tiny Workspace-Trust seam, ignoreGate).
 import * as vscode from 'vscode';
 import type { FormatOutcome, FormatRequest, LangId, ResolvedOptions } from '../types';
 import { dispatchFormat, pickEngine } from '../engine/dispatcher';
 import { guard } from '../safety/guard';
 import { readResolvedOptions } from '../config/vscodeConfig';
+import { scanMarkers } from '../ignore/markers';
+import { applyMask, restoreMask } from '../ignore/mask';
+import { resolveDocumentIgnore } from '../ignore/ignoreGate';
 
 /**
  * Supported document selectors (one languageId each) for registration.
@@ -36,6 +47,26 @@ export const SUPPORTED_LANGUAGES: readonly LangId[] = [
 ];
 
 const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set(SUPPORTED_LANGUAGES);
+
+/**
+ * Languages whose engine does NOT natively honour in-source ignore directives, so
+ * Tidy protects `tidy-ignore-start`/`-end` regions itself via mask/restore. These
+ * are the js-beautify languages. The Prettier path (typescript / typescriptreact
+ * / javascriptreact, and plain javascript that gets re-routed to Prettier for JSX)
+ * honours `// prettier-ignore` natively at the NODE level, so we never mask there
+ * — masking would be redundant and Prettier's own directive support is richer.
+ * Region masking for the Prettier path is a documented v1 limitation (no
+ * corruption either way: the guard validates whatever the engine produced).
+ */
+const REGION_MASKING_LANGUAGES: ReadonlySet<LangId> = new Set<LangId>([
+  'css',
+  'scss',
+  'less',
+  'html',
+  'json',
+  'jsonc',
+  'javascript'
+]);
 
 /**
  * Exact, user-facing message shown when the guard rejects a format. Kept as a
@@ -132,9 +163,28 @@ function logDiagnostic(
 }
 
 /**
+ * How an in-source region mask should be applied around the engine call.
+ *  - `engineInput`  : the (possibly masked) text actually sent to the engine;
+ *  - `restore`      : maps the engine output back to the verbatim-restored text,
+ *                     or undefined when the restore is unsafe (placeholder
+ *                     missing/duplicated) — in which case we abort (file intact).
+ * When absent, the engine input is the original input and no restore runs.
+ */
+interface RegionMask {
+  readonly engineInput: string;
+  readonly restore: (engineOutput: string) => string | undefined;
+}
+
+/**
  * Run the full safe format pipeline for a given input span and return a
  * FormatOutcome. Pure orchestration over the 'vscode'-free modules; the caller
  * translates the outcome into VS Code edits / notifications.
+ *
+ * `input` is the ORIGINAL span text and is always what the safety guard compares
+ * the final output against. When `mask` is provided, the engine instead formats
+ * `mask.engineInput` (with ignore regions replaced by placeholders) and the
+ * output is restored verbatim via `mask.restore` BEFORE the guard runs — so a
+ * region splice can never apply a non-equivalent or non-parsable result.
  *
  * Never throws: any engine/guard failure is captured and reported as a
  * non-applied outcome so VS Code leaves the file untouched.
@@ -144,7 +194,8 @@ async function runFormat(
   input: string,
   options: ResolvedOptions,
   range: { startOffset: number; endOffset: number } | undefined,
-  token: vscode.CancellationToken
+  token: vscode.CancellationToken,
+  mask?: RegionMask
 ): Promise<FormatOutcome> {
   const engineId = pickEngine(languageId).id;
 
@@ -154,14 +205,14 @@ async function runFormat(
 
   const request: FormatRequest = {
     languageId,
-    code: input,
+    code: mask ? mask.engineInput : input,
     options,
     range
   };
 
-  let output: string;
+  let rawOutput: string;
   try {
-    output = await dispatchFormat(request);
+    rawOutput = await dispatchFormat(request);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'unknown error';
     return {
@@ -176,13 +227,30 @@ async function runFormat(
     return { applied: false, aborted: true, reason: 'cancelled', engineId };
   }
 
+  // Restore protected regions verbatim. A failed restore (placeholder dropped or
+  // duplicated by the engine) is fail-safe: abort so the file is left intact.
+  let output = rawOutput;
+  if (mask) {
+    const restored = mask.restore(rawOutput);
+    if (restored === undefined) {
+      return {
+        applied: false,
+        aborted: true,
+        reason: 'ignore-region restore failed (placeholder altered by engine)',
+        engineId
+      };
+    }
+    output = restored;
+  }
+
   // No textual change: nothing to apply, but this is a success (not an abort).
   if (output === input) {
     return { applied: false, output, engineId };
   }
 
   // Safety guard: never apply output that is not semantically equivalent to the
-  // input (modulo whitespace/style). This is the product's core promise.
+  // ORIGINAL input (modulo whitespace/style). This is the product's core promise,
+  // and it validates the restored output — corruption is therefore impossible.
   let verdict;
   try {
     verdict = guard.check(languageId, input, output);
@@ -206,6 +274,33 @@ async function runFormat(
   }
 
   return { applied: true, output, engineId };
+}
+
+/**
+ * Build a RegionMask for the full-document js-beautify path from the in-source
+ * ignore markers, or undefined when there is nothing to protect (no regions) or
+ * masking is unsafe (placeholder collision). When undefined, the caller formats
+ * the document normally (no masking). PURE orchestration over the mask module.
+ */
+function buildRegionMask(
+  languageId: LangId,
+  input: string
+): RegionMask | undefined {
+  if (!REGION_MASKING_LANGUAGES.has(languageId)) {
+    return undefined; // Prettier path honours `// prettier-ignore` natively.
+  }
+  const scan = scanMarkers(input, languageId);
+  if (scan.protectedRanges.length === 0) {
+    return undefined;
+  }
+  const masked = applyMask(input, scan.protectedRanges);
+  if (masked === undefined) {
+    return undefined; // collision / malformed ranges -> format normally.
+  }
+  return {
+    engineInput: masked.masked,
+    restore: (engineOutput) => restoreMask(engineOutput, masked.restorations)
+  };
 }
 
 /**
@@ -264,6 +359,19 @@ async function provideEdits(
 
   // Size guard: never block the UI thread on a huge document.
   const fullText = document.getText();
+
+  // Ignore layer (Axe 4) — consulted BEFORE any formatting work:
+  //   (a) .soukformatignore matches this file -> Tidy does nothing here;
+  //   (b) an in-source FILE-ignore marker (tidy-ignore-file / a head
+  //       tidy-ignore / prettier-ignore) is present -> leave the file verbatim.
+  // Both return [] so VS Code applies no edit and the file is byte-identical.
+  // (REGION-level ignore is handled later, around the engine call, via masking.)
+  if (resolveDocumentIgnore(document).ignored) {
+    return [];
+  }
+  if (scanMarkers(fullText, languageId).ignoreFile) {
+    return [];
+  }
   const maxBytes = getMaxFileSizeBytes(document);
   if (maxBytes !== undefined && byteLength(fullText) > maxBytes) {
     const config = vscode.workspace.getConfiguration('tidy', document.uri);
@@ -299,12 +407,19 @@ async function provideEdits(
     ? { startOffset: 0, endOffset: input.length }
     : undefined;
 
+  // Protect in-source ignore REGIONS for the full-document js-beautify path only.
+  // Range formatting is a user-selected span where region semantics are ambiguous,
+  // so we keep it simple (no masking) — the guard still protects against any
+  // corruption regardless.
+  const mask = range ? undefined : buildRegionMask(languageId, input);
+
   const outcome = await runFormat(
     languageId,
     input,
     options,
     requestRange,
-    token
+    token,
+    mask
   );
 
   if (token.isCancellationRequested) {

@@ -24,6 +24,7 @@ import {
   buildEffectiveConfigReport,
   effectiveValueFor,
   renderLine,
+  type IgnoreStatus,
   type ReportInput
 } from '../../../src/commands/showConfig';
 import { resolveOptions, type ConfigLayer } from '../../../src/config/resolver';
@@ -283,6 +284,70 @@ describe('commands/showConfig — warnings', () => {
   it('omits the warnings section when there are none', () => {
     const report = reportFor('css', resolved());
     assert.ok(!report.includes('warnings (non-fatal)'));
+  });
+});
+
+describe('commands/showConfig — ignore & coexistence (Axe 4.T8)', () => {
+  const baseStatus: IgnoreStatus = {
+    fileIgnoredByList: false,
+    fileIgnoredByMarker: false,
+    protectedRegionCount: 0,
+    competingFormatters: [],
+    deferenceSetting: 'notify'
+  };
+
+  it('omits the section entirely when no ignoreStatus is provided', () => {
+    const report = reportFor('css', resolved());
+    assert.ok(!report.includes('Ignore & coexistence'));
+  });
+
+  it('reports a not-ignored file with no competitors', () => {
+    const report = reportFor('css', resolved(), { ignoreStatus: baseStatus });
+    assert.match(report, /Ignore & coexistence \(this document\)/);
+    assert.match(report, /Tidy formats this file \(not ignored\)\./);
+    assert.match(report, /competing formatters : \(none detected\)/);
+    assert.match(report, /deferToOtherFormatters : notify/);
+  });
+
+  it('surfaces a .soukformatignore exclusion as a SKIP (with the file path)', () => {
+    const report = reportFor('css', resolved(), {
+      ignoreStatus: {
+        ...baseStatus,
+        fileIgnoredByList: true,
+        soukformatignorePath: '/proj/.soukformatignore'
+      }
+    });
+    assert.match(report, /Tidy SKIPS this file .* via \.soukformatignore\./);
+    assert.match(report, /\.soukformatignore : \/proj\/\.soukformatignore/);
+    assert.match(report, /\.soukformatignore excludes this file : yes/);
+  });
+
+  it('surfaces a head file-ignore marker as a SKIP', () => {
+    const report = reportFor('css', resolved(), {
+      ignoreStatus: { ...baseStatus, fileIgnoredByMarker: true }
+    });
+    assert.match(report, /Tidy SKIPS this file .* via in-source file-ignore marker\./);
+    assert.match(report, /in-source file-ignore marker : yes/);
+  });
+
+  it('counts in-source protected regions kept verbatim', () => {
+    const report = reportFor('css', resolved(), {
+      ignoreStatus: { ...baseStatus, protectedRegionCount: 2 }
+    });
+    assert.match(report, /in-source protected regions : 2 \(kept verbatim\)/);
+  });
+
+  it('lists detected competing formatters and the deference setting', () => {
+    const report = reportFor('typescript', resolved(), {
+      ignoreStatus: {
+        ...baseStatus,
+        competingFormatters: ['Prettier', 'Biome'],
+        deferenceSetting: 'silent-defer'
+      }
+    });
+    assert.match(report, /competing formatters : Prettier, Biome/);
+    assert.match(report, /deferToOtherFormatters : silent-defer/);
+    assert.match(report, /Tidy never changes your default formatter/);
   });
 });
 

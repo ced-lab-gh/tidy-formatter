@@ -277,6 +277,77 @@ In short: keep Prettier exactly as it is. Tidy only ever runs on the languages y
 
 ---
 
+## Ignore & coexistence
+
+Tidy gives you fine-grained control over *what* it touches and gets out of the way when another formatter already owns the project — three things the abandoned incumbent never did. None of this can corrupt a file: every protected span is restored **verbatim**, so the equivalence guard sees output equal to the input and accepts it; if a splice ever produced non-parsable output the guard rejects it and your file is left intact.
+
+| Capability | lonefy (#16, abandoned 2017) | Tidy |
+|---|---|---|
+| Skip a region / node in-source | ✗ none ([#16](https://github.com/lonefy/vscode-js-css-html-formatter/issues/16)) | `tidy-ignore-start/end`, `// tidy-ignore`, `// prettier-ignore` |
+| Exclude files project-wide | ✗ none | `.soukformatignore` (gitignore syntax) |
+| Step back for Prettier/Biome/dprint | ✗ hijacks the default slot ([#92](https://github.com/lonefy/vscode-js-css-html-formatter/issues/92)) | one-shot deference notice; **never** changes `editor.defaultFormatter` |
+
+### In-source ignore directives
+
+Write a comment (in the host language's syntax) to keep part of a file exactly as authored:
+
+```css
+/* tidy-ignore-start */
+.keep   {  color : red ;  }   /* this block is preserved BYTE-for-BYTE */
+/* tidy-ignore-end */
+
+.rest { color: blue; }        /* …while everything else is reformatted */
+```
+
+- **Whole file** — a head comment containing `tidy-ignore-file`, `tidy-ignore`, or `prettier-ignore` (the first significant comment at the top) leaves the entire document untouched.
+- **A region** — `tidy-ignore-start` … `tidy-ignore-end` preserves everything in between, verbatim (markers included). An unterminated region protects to end-of-file (conservative — it protects more, never less).
+- **The next node** — a lone `// tidy-ignore` or `// prettier-ignore` comment protects the node on the following line (best-effort, conservative line heuristic).
+
+**Engine coverage.** For TS/TSX/JSX (the Prettier path) `// prettier-ignore` is honoured **natively at the node level** by Prettier itself — the richer, syntax-aware behaviour. For CSS/SCSS/LESS/HTML/JSON and plain JS (the js-beautify path) Tidy protects `tidy-ignore-*` **regions** itself via a mask-and-restore step behind the guard. Node-level masking on the js-beautify path is best-effort: if a coarse span can't be spliced back safely, the guard simply rejects and the file stays intact (never corruption). Node-level directives are richest on the Prettier path; this js-beautify limitation is documented rather than risked.
+
+### `.soukformatignore`
+
+Drop a `.soukformatignore` at your project root (or any sub-folder) to exclude files from formatting entirely — Tidy leaves them **byte-identical**. It uses familiar **gitignore syntax**:
+
+```gitignore
+# vendored / generated — never reformat
+*.min.css
+dist/
+vendor/**/*.js
+
+# …but DO keep this one tidy (negation re-includes it)
+!vendor/keep.css
+```
+
+- Last matching pattern wins; a trailing `!negation` re-includes a previously-excluded path (git semantics).
+- The cascade walks up from the file: a root `.soukformatignore` and a sub-folder one both apply.
+- It is read only in **trusted** workspaces (ignored in Restricted Mode → the file is formatted). If the ignore file can't be read, Tidy fails **safe** and formats normally.
+- Turn it off entirely with `"tidy.respectSoukformatignore": false`.
+
+### Preview command (read-only diff + atomic undo)
+
+Run **Tidy: Preview Format (diff)** (`tidy.previewFormat`) from the Command Palette to see *exactly* what Tidy would change before committing to it:
+
+- Opens a **read-only** side-by-side diff (original vs. formatted). Opening it writes nothing — your file's dirty state is unchanged.
+- The preview runs the **same** pipeline as a normal format, including the equivalence guard. If the guard would reject the output, no diff opens and you get a non-blocking notice (file intact).
+- Click **Apply** to write the result as a **single undo entry** — one `Ctrl+Z` fully reverts it. Dismiss the prompt and nothing is written.
+
+### Deference behavior (coexisting with other formatters)
+
+When a workspace already configures another formatter — Prettier (`.prettierrc*` or a `prettier` key in `package.json`), Biome (`biome.json`), or dprint (`dprint.json`) — Tidy **surfaces** that fact once, and otherwise stays out of the way. Controlled by `tidy.deferToOtherFormatters` (default `notify`):
+
+| Value | Behavior |
+|---|---|
+| `notify` *(default)* | Show a **one-time**, informational notification per workspace that another formatter is configured. Deduplicated via `globalState` — never a repeat nag. |
+| `silent-defer` | Acknowledge the competitor without notifying. Still writes nothing and disables nothing. |
+| `off` | Ignore detection entirely (no read, no notification). |
+
+**The anti-hijack contract (non-negotiable):** deference **never** changes `editor.defaultFormatter`, **never** disables Tidy silently, and **never** writes any setting on its own. The notification is purely informational — it reminds you that you can disable Tidy per language (`tidy.<lang>.enable`) for this workspace if you prefer the other tool to own formatting. The choice, and any write, is always yours. A `.prettierignore` on its own does **not** trigger deference (it only narrows what Prettier would touch, it doesn't configure Prettier as a formatter). Detection reads workspace files only in **trusted** workspaces.
+
+> Tip: run **Tidy: Show Effective Configuration** to see, for the active document, whether it would be skipped (`.soukformatignore` / in-source marker), how many regions are protected, and which competing formatters were detected.
+
+---
+
 ## Key settings
 
 All settings live under the `tidy.*` namespace. Indentation defaults come from your editor (`editor.tabSize` / `editor.insertSpaces`); the `tidy.*` values below are fallbacks used only when neither the editor nor a project config provides one.
@@ -292,6 +363,8 @@ All settings live under the `tidy.*` namespace. Indentation defaults come from y
 | `tidy.maxFileSizeKB` | `5120` | Skip (with a notice) documents larger than this, so huge files never freeze the editor. `0` disables the guard. |
 | `tidy.editorconfig` | `true` | Read the project's `.editorconfig` cascade and let it override plain VS Code settings. Set to `false` to ignore `.editorconfig`. |
 | `tidy.soukformatrc` | `true` | Read the project's `.soukformatrc` file (JSONC) for per-language options and glob overrides, layered above `.editorconfig`. Set to `false` to ignore it. Always ignored in Restricted Mode. |
+| `tidy.respectSoukformatignore` | `true` | Skip files matched by a project `.soukformatignore` (gitignore syntax), leaving them byte-identical. Set to `false` to format every file regardless. Always ignored in Restricted Mode. See [Ignore & coexistence](#ignore--coexistence). |
+| `tidy.deferToOtherFormatters` | `notify` | How Tidy reacts when another formatter (Prettier/Biome/dprint) is already configured: `notify` (one-time notice), `silent-defer` (no notice), or `off`. **Never** changes your default formatter. See [Deference behavior](#deference-behavior-coexisting-with-other-formatters). |
 
 **The full option set ("not enough options" — fixed).** Beyond the headline knobs above, Tidy exposes the complete js-beautify surface by family and the AST-safe Prettier stylistic options for TS/JSX. A few highlights:
 
@@ -340,6 +413,7 @@ All Tidy commands are in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
 | `tidy.showEffectiveConfiguration` | Tidy: Show Effective Configuration | Shows every resolved option and the exact source of each value. |
 | `tidy.useAsFormatter` | Tidy: Use Tidy as my Formatter | Opt in per language: writes `editor.defaultFormatter` (Workspace by default) for the languages you pick. Never writes `editor.formatOnSave`; cancelling writes nothing. |
 | `tidy.runMigration` | Tidy: Migrate from JS-CSS-HTML Formatter | Imports a legacy `.jsbeautifyrc` into `tidy.*` settings after a confirmation recap (trusted workspaces only), then optionally runs *Use Tidy as my Formatter*. |
+| `tidy.previewFormat` | Tidy: Preview Format (diff) | Opens a **read-only** diff of what Tidy would change, then applies it on an explicit *Apply* click as a **single undo entry**. Opening the diff writes nothing. See [Preview command](#preview-command-read-only-diff--atomic-undo). |
 
 ---
 
@@ -369,6 +443,15 @@ It declares support for untrusted and virtual workspaces. In Restricted Mode it 
 **How do I stop Tidy from formatting a specific language?**
 Set `tidy.<lang>.enable` to `false` (e.g. `"tidy.json.enable": false`), or simply don't choose it as the default formatter for that language.
 
+**How do I stop Tidy from touching a specific file or region?**
+Three ways, all covered in [Ignore & coexistence](#ignore--coexistence): a `.soukformatignore` (gitignore syntax) excludes files project-wide; `tidy-ignore-start`/`tidy-ignore-end` comments preserve a region byte-for-byte; and a head `tidy-ignore-file` / `// prettier-ignore` comment skips the whole file.
+
+**Another formatter (Prettier/Biome) is already set up — will Tidy fight it?**
+No. Tidy detects it and shows a one-time, informational notice (`tidy.deferToOtherFormatters`, default `notify`). It never changes `editor.defaultFormatter` and never disables itself silently — see [Deference behavior](#deference-behavior-coexisting-with-other-formatters).
+
+**Can I preview a format before applying it?**
+Yes — run **Tidy: Preview Format (diff)** for a read-only side-by-side diff, then *Apply* it as a single undo entry. See [Preview command](#preview-command-read-only-diff--atomic-undo).
+
 **Does it read `.editorconfig`?**
 Yes. Tidy reads the `.editorconfig` cascade (respecting `root = true`) and maps the common keys (`indent_style`, `indent_size`/`tab_width`, `end_of_line`, `insert_final_newline`, `trim_trailing_whitespace`, `max_line_length`). Disable with `"tidy.editorconfig": false`.
 
@@ -376,7 +459,7 @@ Yes. Tidy reads the `.editorconfig` cascade (respecting `root = true`) and maps 
 Yes. Tidy reads a `.soukformatrc` (JSONC) from your project root — per-language sections plus ordered glob `overrides`, layered above `.editorconfig` and shared across the team. See [Key settings](#key-settings) for the schema. (YAML support is on the roadmap.)
 
 **Where's the indented-`.sass` / Vue support?**
-Not in this build. The remaining roadmap (`.soukformatrc` YAML, ignore regions, deferral notifications, Open VSX, more languages) is described in [SPEC.md](./SPEC.md).
+Not in this build. The remaining roadmap (`.soukformatrc` YAML, real CSS-in-JS reformatting, Vue SFCs, Open VSX, more languages) is described in [SPEC.md](./SPEC.md). Ignore directives, `.soukformatignore`, the preview diff, and deference notifications **are** shipped — see [Ignore & coexistence](#ignore--coexistence).
 
 ---
 

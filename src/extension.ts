@@ -34,6 +34,17 @@ import {
   shouldPromptMigration,
   MIGRATION_PROMPTED_KEY
 } from './migration/detectLonefy';
+import {
+  PREVIEW_FORMAT_COMMAND_ID,
+  previewFormat
+} from './commands/previewFormat';
+import { detectCompetingFormatters } from './deference/detect';
+import {
+  decide,
+  normalizeSetting,
+  DEFERENCE_SETTING_KEY,
+  DEFERENCE_PROMPTED_KEY
+} from './deference/decide';
 
 export function activate(context: vscode.ExtensionContext): void {
   const documentProvider = new TidyDocumentFormattingProvider();
@@ -73,10 +84,24 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(RUN_MIGRATION_COMMAND_ID, runMigration)
   );
 
+  // Preview format (Axe 4.T6): a read-only diff of what Tidy WOULD do, with an
+  // explicit single-undo "Apply". Registering it writes nothing; it acts only on
+  // an explicit command invocation + explicit "Apply" click.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(PREVIEW_FORMAT_COMMAND_ID, previewFormat)
+  );
+
   // One-shot, deduplicated migration prompt (1.T4). Fire-and-forget so it never
   // blocks activation; it writes nothing before the user confirms inside the
   // migration command. Shown at most once per machine+profile via globalState.
   void maybePromptMigration(context);
+
+  // One-shot, deduplicated deference notification (Axe 4.T5). Fire-and-forget so
+  // it never blocks activation. It only ever SURFACES that another formatter is
+  // configured — it never disables Tidy, never touches editor.defaultFormatter,
+  // and writes no setting on its own (anti-hijack). Uses a globalState key
+  // DISTINCT from the migration prompt so the two never collide.
+  void maybeSurfaceDeference(context);
 }
 
 /**
@@ -101,6 +126,54 @@ async function maybePromptMigration(
   } catch {
     // A failure here must never break activation; the command remains available
     // from the palette regardless.
+  }
+}
+
+/**
+ * Decide and (at most once) surface the deference notification (Axe 4.T5).
+ *
+ * Pure decision via `decide` over the detected competing formatters, the user's
+ * `tidy.deferToOtherFormatters` preference (default 'notify'), and a one-shot
+ * dedup flag in globalState. The host ONLY shows a non-modal, informational
+ * notification — it NEVER disables Tidy, NEVER writes any setting, and NEVER
+ * touches editor.defaultFormatter (ARCH-02). Detection is Workspace-Trust gated
+ * inside detectCompetingFormatters (Restricted Mode => no reads => nothing shown).
+ *
+ * Never throws: any failure must not break activation.
+ */
+async function maybeSurfaceDeference(
+  context: vscode.ExtensionContext
+): Promise<void> {
+  try {
+    const setting = normalizeSetting(
+      vscode.workspace
+        .getConfiguration()
+        .get<string>(DEFERENCE_SETTING_KEY)
+    );
+    // Cheap exits before any workspace read: 'off' ignores detection entirely and
+    // an already-shown one-shot must never nag again.
+    const alreadyPrompted = context.globalState.get<boolean>(
+      DEFERENCE_PROMPTED_KEY,
+      false
+    );
+    if (setting === 'off' || (setting === 'notify' && alreadyPrompted)) {
+      return;
+    }
+
+    const detected = await detectCompetingFormatters();
+    const decision = decide(detected, setting, alreadyPrompted);
+    if (decision.action !== 'notify' || decision.message === undefined) {
+      // 'defer' (silent-defer) and 'none' both surface nothing and write nothing.
+      return;
+    }
+
+    // Mark the one-shot BEFORE awaiting the toast so a slow dismissal can never
+    // re-trigger the prompt on a quick re-activation.
+    await context.globalState.update(DEFERENCE_PROMPTED_KEY, true);
+    void vscode.window.showInformationMessage(decision.message);
+  } catch {
+    // A failure here must never break activation; the setting still governs and
+    // the user keeps full control.
   }
 }
 

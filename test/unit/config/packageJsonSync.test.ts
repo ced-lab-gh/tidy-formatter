@@ -59,7 +59,9 @@ describe('config/packageJsonSync — catalogue ⇄ package.json', () => {
     const allowed = new Set([
       'tidy.maxFileSizeKB',
       'tidy.editorconfig',
-      'tidy.soukformatrc'
+      'tidy.soukformatrc',
+      'tidy.respectSoukformatignore',
+      'tidy.deferToOtherFormatters'
     ]);
     for (const key of Object.keys(props)) {
       if (key.endsWith('.enable')) {
