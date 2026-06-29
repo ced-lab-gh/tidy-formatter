@@ -1,0 +1,11 @@
+<div class="profile">
+<h1>{{ user.name }}</h1>
+<p>Member since {{ user.joined | date }}</p>
+<ul>
+{% for badge in user.badges %}
+<li class="badge">{{ badge.label }}</li>
+{% endfor %}
+</ul>
+<div class="legacy"><% if (showBanner) { %><banner>Hi <%= user.name %></banner><% } %></div>
+<span data-count="{{count}}">{{ count }} items</span>
+</div>

@@ -1,0 +1,19 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>Dashboard</title>
+<style>body{margin:0;font-family:system-ui}.card{padding:8px;color:#222}.card:hover{color:#000}</style>
+</head><body>
+<nav class="top" data-role="navigation"><a href="/home">Home</a><a href="/about">About</a></nav>
+<main>
+<section class="card" data-count="{{count}}"><h1>{{ user.name }}</h1>
+{% for badge in user.badges %}<span class="badge">{{ badge }}</span>{% endfor %}
+<img src="/logo.png" alt="logo"><hr><input type="checkbox" checked disabled></section>
+<pre>  line one
+    line two (indented)
+  line three</pre>
+<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="url(#g1)"></circle></svg>
+</main>
+<script>
+const items=[1,2,3];function total(xs){let s=0;for(const x of xs){s+=x}return s}
+document.querySelector(".card")?.addEventListener("click",()=>{console.log(total(items)??0)});
+</script>
+</body></html>

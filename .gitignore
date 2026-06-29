@@ -1,0 +1,21 @@
+node_modules/
+out/
+dist/
+*.vsix
+.vscode-test/
+
+# Coverage / test artifacts (contain absolute local paths)
+coverage/
+.nyc_output/
+
+# Generated sample output
+samples/out/
+
+# Internal strategy / mining artifacts — NOT for the public repo (kept local only)
+SPEC.md
+ROADMAP.md
+BUILD_REPORT.md
+MINING.md
+spec.json
+data/
+docs/

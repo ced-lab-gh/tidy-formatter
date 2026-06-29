@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>App</title>
+<style>
+body{margin:0;font-family:sans-serif}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<main id="root"></main>
+<script type="application/json" id="state">
+{"user":{"id":1,"name":"Ada"},"flags":["a","b"]}
+</script>
+<script>
+window.__init=function(){const el=document.getElementById("root");el.textContent="ready";};
+window.__init();
+</script>
+</body>
+</html>

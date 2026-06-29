@@ -1,0 +1,41 @@
+# Source & build inputs (we ship dist/ only)
+src/**
+test/**
+out/**
+node_modules/**
+
+# Tooling / config
+.vscode/**
+.vscode-test/**
+.vscode-test.mjs
+esbuild.js
+tsconfig.json
+.eslintrc.json
+.gitignore
+.vscodeignore
+
+# Project research artifacts (not shipped)
+samples/**
+data/**
+spec.json
+SPEC.md
+docs/**
+MINING.md
+BUILD_REPORT.md
+
+# QA / coverage / CI artifacts (not shipped)
+coverage/**
+.c8rc.json
+.github/**
+
+# Media generator scripts (dev-only helpers; the .png/.md they produce ARE shipped)
+# Only the *.mjs generators are excluded — media/icon.png and media/walkthrough/*.{md,png} ship.
+media/**/*.mjs
+media/*.mjs
+ROADMAP.md
+
+# Misc
+**/*.map
+**/*.ts
+**/.DS_Store
+**/tsconfig.tsbuildinfo

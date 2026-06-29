@@ -1,0 +1,107 @@
+# CI for Tidy Formatter — JS/CSS/HTML (SPEC QA-01 / QA-02).
+#
+# Ordered, fail-fast gates so a regression stops the pipeline at the cheapest
+# stage that can detect it (SPEC §9 "CI à gates ordonnés") :
+#
+#   npm ci            -> reproducible install from the lockfile
+#   lint              -> eslint (incl. the no-empty-catch safety rule)
+#   typecheck         -> tsc --noEmit
+#   test:unit         -> mocha unit corpus (guard / engine / config / templates)
+#   coverage          -> c8, FAILS the build if line coverage < 80% (.c8rc.json
+#                        scopes this to the pure adapter/safety logic; the
+#                        vscode-host glue is proven by the integration tier)
+#   perf              -> format+guard budgets (QA-03): P95 < 200ms, 5MB JSON < 2s,
+#                        event loop never blocked > 50ms outside an awaited format
+#   integration       -> @vscode/test-cli headless under xvfb (QA-04 lifecycle)
+#   compile           -> esbuild production bundle (dist/extension.js)
+#   package           -> vsce package -> .vsix
+#
+# The job runs the whole matrix on ubuntu-latest across Node 20 and Node 24.
+# The packaged .vsix is uploaded as a build artifact.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege: the pipeline only needs to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Run every Node version even if one fails, so we see the full picture.
+      fail-fast: false
+      matrix:
+        node: ['20', '24']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # Gate 1 — reproducible install from package-lock.json.
+      - name: Install (npm ci)
+        run: npm ci
+
+      # Gate 2 — lint (enforces no-empty-catch and the TS rules).
+      - name: Lint
+        run: npm run lint
+
+      # Gate 3 — typecheck with no emit.
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      # Gate 4 — unit corpus (pure modules, no VS Code host).
+      - name: Unit tests
+        run: npm run test:unit
+
+      # Gate 5 — coverage threshold (>= 80% lines, enforced by c8 --check-coverage).
+      - name: Coverage (>= 80% lines)
+        run: npm run coverage
+
+      # Gate 6 — perf budgets (format + guard end-to-end). Pure Node, no VS Code
+      # host, so it runs before the heavier integration tier to fail faster.
+      # Exits non-zero on any breach (P95, 5MB JSON, or event-loop budget).
+      - name: Perf budgets
+        run: npm run perf
+
+      # Gate 7 — headless integration tests inside a real VS Code host. xvfb-run
+      # provides the virtual display the Electron-based VS Code requires on Linux.
+      - name: Integration tests (headless, xvfb)
+        run: xvfb-run -a npm run test:integration
+
+      # Gate 8 — production bundle.
+      - name: Compile (production bundle)
+        run: npm run compile
+
+      # Gate 9 — package the extension into a .vsix.
+      - name: Package (.vsix)
+        run: npm run package
+
+      # Publish the .vsix as a build artifact (one per Node version in the matrix).
+      - name: Upload VSIX artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidy-formatter-vsix-node${{ matrix.node }}
+          path: '*.vsix'
+          if-no-files-found: warn
+          retention-days: 14

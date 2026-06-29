@@ -1,0 +1,15 @@
+# Throwaway fixtures written by the lifecycle integration tests at runtime.
+lifecycle/
+
+# Throwaway fixtures written by the polyglot integration tests at runtime.
+polyglot/
+
+# Throwaway fixtures + .soukformatrc written by the config-options tests at runtime.
+config-options/
+.soukformatrc
+
+# Throwaway readiness-probe files written by ensureTidyDefaultFormatter.
+.tidy-readiness/
+
+# VS Code writes per-workspace state here when the test host updates settings.
+.vscode/

@@ -1,0 +1,22 @@
+{
+  "//": "Coverage scope (SPEC QA-02). The 80% line gate measures the PURE adapter/safety logic that unit tests can exercise outside the Electron host: engine/*, safety/*, and the pure config modules (resolver, templates, editorconfig). The vscode-importing glue (extension.ts, providers/*, commands/*, config/vscodeConfig.ts) cannot be unit-tested without a VS Code host and is verified by the headless integration tier (QA-04), so it is excluded here to avoid diluting the unit-coverage signal. types.ts is type-only (no runtime code). This file overrides package.json's c8 field without editing package.json.",
+  "include": [
+    "src/**"
+  ],
+  "exclude": [
+    "test/**",
+    "dist/**",
+    "out/**",
+    "**/*.d.ts",
+    "src/types.ts",
+    "src/extension.ts",
+    "src/providers/**",
+    "src/commands/**",
+    "src/config/vscodeConfig.ts"
+  ],
+  "all": true,
+  "reporter": [
+    "text",
+    "lcov"
+  ]
+}
