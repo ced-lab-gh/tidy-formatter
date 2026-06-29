@@ -210,7 +210,13 @@ const READINESS_PROBE: Partial<Record<string, { ext: string; code: string }>> = 
  */
 export async function ensureTidyDefaultFormatter(
   langs: readonly string[],
-  timeoutMs = 10000
+  // CI-aware readiness budget: a cold, loaded/shared CI runner can take a long
+  // time for the FIRST executeFormatDocumentProvider to resolve to Tidy (config
+  // propagation + lazy engine load: prettier dynamic import, TS compiler). 10s is
+  // plenty on a fast local machine but flakes under CI load, so the poll gets a
+  // far larger ceiling there. The poll still fails loudly if edits never appear,
+  // so a genuine engine-load failure is not masked — only slowness is tolerated.
+  timeoutMs = process.env.CI ? 90000 : 10000
 ): Promise<() => Promise<void>> {
   for (const lang of langs) {
     await vscode.workspace

@@ -63,7 +63,8 @@ async function formatFixtureInHost(
 describe('COMPLEX integration — Tidy is safe end-to-end in a real VS Code host', function () {
   // First run downloads/opens the Electron host; large fixtures + prettier are
   // heavier than the lifecycle cases, so give generous headroom.
-  this.timeout(60000);
+  // CI-aware: slow/shared CI runners get a much larger ceiling; local stays strict.
+  this.timeout(process.env.CI ? 180000 : 60000);
 
   let restoreFormatter: (() => Promise<void>) | undefined;
 

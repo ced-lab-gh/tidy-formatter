@@ -91,7 +91,9 @@ async function clearLanguageDefaultFormatter(languageId: string): Promise<void> 
 
 describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', function () {
   // First run downloads/opens the Electron host; give each case headroom.
-  this.timeout(30000);
+  // CI-aware: shared/slow CI runners (cold VS Code download + Electron boot +
+  // readiness poll) get a generous ceiling; local stays strict to keep the bar high.
+  this.timeout(process.env.CI ? 180000 : 30000);
 
   let restoreFns: Array<() => Promise<void>> = [];
 

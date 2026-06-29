@@ -40,7 +40,8 @@ import {
 
 describe('Tidy configurability (AXE 3) — options drive output end-to-end', function () {
   // Cold Electron host + per-language formatter readiness needs headroom.
-  this.timeout(30000);
+  // CI-aware: slow/shared CI runners get a generous ceiling; local stays strict.
+  this.timeout(process.env.CI ? 180000 : 30000);
 
   const LANGS = ['css', 'typescript', 'javascript'];
 
@@ -85,6 +86,33 @@ describe('Tidy configurability (AXE 3) — options drive output end-to-end', fun
     await vscode.window.showTextDocument(document);
     await runFormatDocument();
     return document.getText();
+  }
+
+  /**
+   * Deterministically wait for a NEW project config (an on-disk .soukformatrc) to
+   * govern the output before asserting on it. Unlike a VS Code setting — where
+   * setTidyConfig awaits onDidChangeConfiguration — a .soukformatrc is plain disk
+   * content the provider reads at format time; on a cold/slow host the first
+   * Format Document of a freshly-opened document can still resolve to a no-op
+   * before everything has settled, leaving the document at its unformatted source
+   * (so the indent assertion sees nothing). This re-runs Format Document until the
+   * `predicate` holds (the config has demonstrably taken effect) or a deadline is
+   * hit, at which point it returns the last text so the assertion fails loudly with
+   * the real output rather than flaking on timing. It NEVER weakens the assertion:
+   * the caller still asserts the exact 2-space indent on what this returns.
+   */
+  async function formatUntil(
+    document: vscode.TextDocument,
+    predicate: (text: string) => boolean,
+    timeoutMs = process.env.CI ? 60000 : 10000
+  ): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    let text = await formatAndRead(document);
+    while (!predicate(text) && Date.now() < deadline) {
+      await flushEventLoop();
+      text = await formatAndRead(document);
+    }
+    return text;
   }
 
   // (1a) A Prettier stylistic option set at Workspace scope changes the output
@@ -203,12 +231,19 @@ describe('Tidy configurability (AXE 3) — options drive output end-to-end', fun
       'css'
     );
 
-    const formatted = await formatAndRead(document);
+    // Wait deterministically until the on-disk .soukformatrc has demonstrably
+    // taken effect (a 2-space-indented declaration), rather than asserting after a
+    // single possibly-premature format on a cold/slow host. The predicate is the
+    // exact effect we assert below, so this cannot mask a genuine failure: if the
+    // config never propagates, the loop hits its deadline and the assertions fire
+    // on the real (wrong) output.
+    const twoSpaceIndent = (text: string): boolean => /\n {2}color: red;/.test(text);
+    const formatted = await formatUntil(document, twoSpaceIndent);
 
     // The .soukformatrc took effect: the declaration is indented exactly 2 spaces
     // (not the built-in default of 4), with no VS Code tidy.* setting involved.
     assert.ok(
-      /\n {2}color: red;/.test(formatted),
+      twoSpaceIndent(formatted),
       `.soukformatrc css.indent=2 must produce a 2-space indent; got:\n${formatted}`
     );
     assert.ok(

@@ -31,7 +31,8 @@ import {
 } from './helpers';
 
 describe('Tidy power features (Axe 4) — ignore / region / preview / deference', function () {
-  this.timeout(30000);
+  // CI-aware: generous on slow/shared CI runners, strict locally.
+  this.timeout(process.env.CI ? 180000 : 30000);
 
   // The "Tidy does nothing" assertions must go through the REAL Format Document
   // path (editor.action.formatDocument), which honours editor.defaultFormatter —

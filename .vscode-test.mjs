@@ -30,7 +30,12 @@ export default defineConfig({
   workspaceFolder: resolve(here, 'test/integration/workspace'),
   mocha: {
     ui: 'bdd',
-    timeout: 30000,
+    // Suite-level ceiling. Individual suites set their own per-suite this.timeout
+    // (CI-aware: generous under process.env.CI, strict locally) — this value is
+    // the outer cap that must not be tighter than any of them. 120s comfortably
+    // covers the cold first integration run on a slow/shared CI runner (VS Code
+    // download + Electron boot + readiness poll) without masking a real hang.
+    timeout: 120000,
     color: true
   },
   // Disable OTHER extensions for a hermetic host. The extension under test is

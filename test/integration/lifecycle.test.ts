@@ -37,7 +37,8 @@ import {
 describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
   // Opening the Electron host + downloading VS Code on first run is slow; give
   // each case headroom beyond the engine work itself.
-  this.timeout(30000);
+  // CI-aware: slow/shared CI runners get a generous ceiling; local stays strict.
+  this.timeout(process.env.CI ? 180000 : 30000);
 
   let restoreFns: Array<() => Promise<void>> = [];
 

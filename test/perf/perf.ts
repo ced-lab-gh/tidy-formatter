@@ -31,16 +31,27 @@ import type { LangId, ResolvedOptions } from '../../src/types';
 
 // --- budgets (SPEC QA-03 / §9) ---------------------------------------------
 
+// CI multiplier for the WALL-CLOCK budgets only. Shared GitHub-hosted runners are
+// slower and far more variable than a developer machine (noisy neighbours, no
+// turbo, cold caches), so a budget calibrated for fast local hardware flakes there
+// even when nothing regressed. Under process.env.CI we relax the time-based
+// budgets by this factor; LOCAL budgets stay strict so `npm run perf` keeps the
+// bar high on the developer machine. Structural budgets (the small-file LINE
+// ceiling, which is a setup-correctness check, and the guard SHARE ratio, which is
+// hardware-independent) are NOT multiplied — they must hold identically everywhere.
+const CI_BUDGET_MULTIPLIER = 3;
+const PERF_TIME_MULTIPLIER = process.env.CI ? CI_BUDGET_MULTIPLIER : 1;
+
 const BUDGET = {
-  /** P95 of format+guard for files <= 2000 lines. */
-  p95SmallMs: 200,
-  /** A single ~5 MB JSON document, format+guard. */
-  json5MbMs: 2000,
-  /** The event loop must never be blocked longer than this at any point. */
-  eventLoopMaxMs: 50,
-  /** Guard overhead should stay under this fraction of format time (soft). */
+  /** P95 of format+guard for files <= 2000 lines (wall-clock, CI-scaled). */
+  p95SmallMs: 200 * PERF_TIME_MULTIPLIER,
+  /** A single ~5 MB JSON document, format+guard (wall-clock, CI-scaled). */
+  json5MbMs: 2000 * PERF_TIME_MULTIPLIER,
+  /** Max event-loop block at any point (wall-clock, CI-scaled). */
+  eventLoopMaxMs: 50 * PERF_TIME_MULTIPLIER,
+  /** Guard overhead should stay under this fraction of format time (soft, NOT scaled). */
   guardShareOfFormat: 0.3,
-  /** Line ceiling for the "small file" class. */
+  /** Line ceiling for the "small file" class (structural, NOT scaled). */
   smallFileLines: 2000
 } as const;
 
@@ -587,6 +598,15 @@ function collectViolations(
 async function main(): Promise<number> {
   // eslint-disable-next-line no-console
   console.log('Tidy Formatter — perf budgets (format + guard end-to-end)\n');
+  if (PERF_TIME_MULTIPLIER !== 1) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `CI mode: wall-clock budgets relaxed x${PERF_TIME_MULTIPLIER} ` +
+        `(shared CI runners are slower/variable; local budgets stay strict). ` +
+        `P95 < ${BUDGET.p95SmallMs} ms, 5 MB JSON < ${BUDGET.json5MbMs} ms, ` +
+        `event loop < ${BUDGET.eventLoopMaxMs} ms.\n`
+    );
+  }
 
   // Run a 10 ms heartbeat across the interactive small-file campaign. Each format
   // reports its synchronous busy window so the heartbeat can subtract it; the

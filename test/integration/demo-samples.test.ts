@@ -31,7 +31,9 @@ const MESSY_TSX =
   '}\n';
 
 describe('DEMO — Tidy formats the real sample files in a real VS Code host', function () {
-  this.timeout(30000);
+  // CI-aware: slow/shared CI runners get headroom for the cold first run; local
+  // stays strict (fast machine, rigour preserved).
+  this.timeout(process.env.CI ? 180000 : 30000);
 
   const LANGS = ['css', 'typescriptreact'];
 

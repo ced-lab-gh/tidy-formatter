@@ -60,7 +60,8 @@ async function formatFixtureInHost(
 describe('POLYGLOT integration — embedded sub-languages stay intact in a real VS Code host', function () {
   // First run downloads/opens the Electron host; these are the largest fixtures
   // in the suite and prettier (TSX) is heavy, so give generous headroom.
-  this.timeout(60000);
+  // CI-aware: slow/shared CI runners get a much larger ceiling; local stays strict.
+  this.timeout(process.env.CI ? 180000 : 60000);
 
   let restoreFormatter: (() => Promise<void>) | undefined;
 

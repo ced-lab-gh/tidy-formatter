@@ -83,8 +83,24 @@ jobs:
       - name: Perf budgets
         run: npm run perf
 
+      # Cache the downloaded VS Code build (~200 MB) that @vscode/test-electron
+      # fetches into ./.vscode-test on first run. Without this, every CI run pays
+      # the full download + unzip before the Electron host even starts, which on a
+      # slow/shared runner pushes the cold first integration run past the suite
+      # timeouts. The key is stable across runs but busts when the pinned version
+      # (.vscode-test.mjs) or the runner OS changes, so we never serve a stale or
+      # wrong-platform binary. Restored BEFORE the integration step below.
+      - name: Cache VS Code test binary
+        uses: actions/cache@v4
+        with:
+          path: .vscode-test
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('.vscode-test.mjs') }}
+          restore-keys: |
+            vscode-test-${{ runner.os }}-
+
       # Gate 7 — headless integration tests inside a real VS Code host. xvfb-run
       # provides the virtual display the Electron-based VS Code requires on Linux.
+      # -a auto-assigns a free display number so concurrent jobs never collide.
       - name: Integration tests (headless, xvfb)
         run: xvfb-run -a npm run test:integration
 
