@@ -1,6 +1,6 @@
-# Tidy Formatter — JS/CSS/HTML
+# Tidy — JS/CSS/HTML Formatter & Beautifier
 
-**Safe, modern beautifier for JS, CSS, HTML & JSON that respects your VS Code config — never auto-formats or hijacks your files unless you ask.**
+**Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON — safely. Tidy respects your VS Code config and never auto-formats or hijacks your files unless you ask.**
 
 [![Version](https://img.shields.io/visual-studio-marketplace/v/ced-lab.tidy-formatter?label=Marketplace&color=168F7D)](https://marketplace.visualstudio.com/items?itemName=ced-lab.tidy-formatter)
 [![Installs](https://img.shields.io/visual-studio-marketplace/i/ced-lab.tidy-formatter?label=installs&color=168F7D)](https://marketplace.visualstudio.com/items?itemName=ced-lab.tidy-formatter)

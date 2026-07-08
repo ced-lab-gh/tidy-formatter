@@ -40,3 +40,6 @@ ROADMAP.md
 **/*.ts
 **/.DS_Store
 **/tsconfig.tsbuildinfo
+
+# GTM / marketing assets (internal, not shipped)
+gtm/**

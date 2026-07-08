@@ -4,10 +4,11 @@ All notable changes to **Tidy Formatter — JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.1] - 2026-07-08
 
 ### Added
 
+- **Marketplace metadata / ASO refresh.** Clearer display name ("Tidy — JS/CSS/HTML Formatter & Beautifier"), a description that names every supported language (TypeScript, JSX/TSX, SCSS and LESS now included), and keyword cleanup (added `typescript` and `less`; removed `editorconfig` and `format on save`). No behaviour change.
 - **Superiority features — ignore, deference & preview (ROADMAP Axe 4, v1.0).**
   - **In-source ignore directives.** A head `tidy-ignore-file` / `tidy-ignore` /
     `prettier-ignore` comment skips the whole file; `tidy-ignore-start` …
