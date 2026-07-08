@@ -57,6 +57,12 @@ jobs:
       - name: Typecheck (tsc --noEmit)
         run: npm run typecheck
 
+      # Anti-empty-bump: a version bump must ship a documented change. Fails the
+      # build if package.json "version" has no matching "## [<version>]" heading
+      # in CHANGELOG.md. Pure-Node, zero-dependency (see scripts/check-changelog.mjs).
+      - name: Changelog entry present (anti-empty-bump)
+        run: npm run check:changelog
+
       - name: Unit tests
         run: npm run test:unit
 

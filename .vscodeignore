@@ -34,6 +34,8 @@ coverage/**
 media/**/*.mjs
 media/*.mjs
 ROADMAP.md
+RELEASE_PLAN.md
+PLAN_RESUME.md
 
 # Misc
 **/*.map

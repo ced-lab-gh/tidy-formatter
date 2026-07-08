@@ -14,6 +14,8 @@ samples/out/
 # Internal strategy / mining artifacts — NOT for the public repo (kept local only)
 SPEC.md
 ROADMAP.md
+RELEASE_PLAN.md
+PLAN_RESUME.md
 BUILD_REPORT.md
 MINING.md
 spec.json

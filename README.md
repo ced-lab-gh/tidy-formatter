@@ -265,6 +265,32 @@ Tidy also reads your project's **`.editorconfig`** cascade (honouring `root = tr
 
 ---
 
+## Languages & how Tidy formats each
+
+Tidy handles every language below the same consent-first way: it reformats a file only when you run *Format Document* (`Shift+Alt+F`), *Format Selection*, or **Tidy: Preview Format (diff)** — and you can make it the default for any subset of these languages in one step with **Tidy: Use Tidy as my Formatter** (`tidy.useAsFormatter`). Here is what each family covers.
+
+### HTML
+
+Tidy is a full HTML formatter and beautifier: it re-indents tags, normalises attribute spacing, and wraps long attribute lists the way you configure them (`tidy.wrap_attributes`), while leaving embedded `<script>` / `<style>` islands and templating syntax intact. Trigger it with *Format Document* on any `.html` file, or set it as your HTML default via **Tidy: Use Tidy as my Formatter**. What separates it from the old JS-CSS-HTML Formatter is the parse5 tree comparison that runs after every format — if beautifying would add a stray space to a class or id name, or otherwise alter the document tree, Tidy discards the result and leaves your file untouched.
+
+### CSS, SCSS & LESS
+
+CSS, SCSS and LESS are all first-class: Tidy beautifies collapsed rules into readable blocks, aligns declarations, and controls selector and rule spacing (`tidy.selector_separator_newline`, `tidy.newline_between_rules`, `tidy.space_around_combinator`). Run *Format Document* on a `.css`, `.scss` or `.less` file, or opt in per language with **Tidy: Use Tidy as my Formatter**. Every result is checked against a PostCSS tree before it is written, so fragile constructs like `calc()` and SCSS interpolation (`#{…}`) survive formatting instead of being mangled.
+
+### JavaScript & TypeScript
+
+For JavaScript, Tidy uses js-beautify for a familiar layout and honours your indent settings (`editor.tabSize` / `editor.insertSpaces`) with no config file needed; TypeScript is formatted by Prettier under the hood. Format either with *Format Document*, or assign Tidy as the default formatter for those languages with **Tidy: Use Tidy as my Formatter**. Whichever engine runs, an AST-equivalence guard compares the parse tree before and after — so modern syntax such as optional chaining (`?.`), nullish coalescing (`??`) and BigInt literals (`1n`) is preserved exactly, and any output that would change program meaning is thrown away rather than written.
+
+### JSX & TSX (React)
+
+React files — `.jsx` and `.tsx` — are formatted with Prettier, the same engine most React teams already trust, so JSX elements reflow correctly instead of `<App />` turning into `< App / >`. Use *Format Document*, or pick these languages in **Tidy: Use Tidy as my Formatter** to make Tidy their default. On top of the AST check, a dedicated JSX tag-boundary guard rejects any output where a tag boundary was mangled — even when the broken result still happens to re-parse as valid TSX — and a plain `.js` file that actually contains JSX is automatically re-routed to the real parser rather than risk broken output.
+
+### JSON & JSONC
+
+Tidy formats both strict JSON and JSON-with-comments (JSONC): it re-indents and normalises structure while keeping comments intact for JSONC. Trigger it with *Format Document*, or enable it as your JSON default through **Tidy: Use Tidy as my Formatter**. Because the parsed value is compared before and after, formatting can never change the data your JSON represents — and since Tidy only ever touches the file you invoke it on, it will not reformat `package.json` behind your back.
+
+---
+
 ## Works alongside Prettier
 
 Tidy is a *configurable beautifier*, not an opinionated replacement for Prettier — and it is built to sit next to it, not on top of it.
@@ -418,6 +444,24 @@ All Tidy commands are in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
 ---
 
 ## FAQ
+
+**Why does VS Code keep formatting my code on save?**
+Something in your setup has `editor.formatOnSave` enabled and a default formatter assigned for that language — often an extension that made itself the default without asking. VS Code, not the extension, owns the save trigger, so the fix is to turn off `editor.formatOnSave` (globally or per language) or change `editor.defaultFormatter`. If code is *still* reformatted with format-on-save off, an extension is hooking save itself; disabling or uninstalling it is the only reliable fix. Tidy deliberately never hooks save, so it can never be the cause.
+
+**How do I stop an extension from formatting on save?**
+Start by setting `"editor.formatOnSave": false` — you can scope it per language, e.g. `"[javascript]": { "editor.formatOnSave": false }`. If code is still reformatted on save, the culprit is an extension that registers its own save handler instead of relying on VS Code's (the JS-CSS-HTML Formatter is a well-known example), and you have to disable or uninstall that extension from the Extensions view. No other extension — Tidy included — can turn off a save hook that a different extension installed.
+
+**Is there a safe alternative to JS-CSS-HTML Formatter?**
+That is exactly why Tidy exists. It covers the same languages — JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML and JSON — but never formats on save, never makes itself the default formatter, and never writes a setting unless you confirm it. Every format is verified against your original (AST for JS/TS/JSX/TSX, tree compare for CSS/HTML, value compare for JSON), so it cannot produce the corrupted output the incumbent was reported for. See [Migrating from JS-CSS-HTML Formatter](#migrating-from-js-css-html-formatter) for a two-minute switch.
+
+**How is Tidy different from Prettier?**
+Prettier is opinionated: it enforces one canonical style with very few knobs. Tidy is a *configurable* beautifier that respects your VS Code and project settings, so it fills the "lots of options" niche the JS-CSS-HTML Formatter used to. The two are built to coexist — a common setup is Prettier for JS/TS and Tidy for CSS/HTML/JSON — and for TypeScript, JSX and TSX Tidy actually runs Prettier under the hood, then adds its own equivalence guard on top. See [Works alongside Prettier](#works-alongside-prettier).
+
+**Does Tidy work in Cursor, Windsurf or VSCodium?**
+Tidy is a standard VS Code extension with no proprietary Marketplace dependencies, so it runs in editors built on VS Code — Cursor, Windsurf, VSCodium and similar — as long as you can install it. It is currently published on the Visual Studio Marketplace; Open-VSX-only builds such as VSCodium may need you to install the packaged `.vsix` manually until an Open VSX release lands (that release is on the roadmap in [SPEC.md](./SPEC.md)). Nothing in the formatting pipeline is tied to a specific distribution.
+
+**Will Tidy break my JSX or modern JS?**
+No. JSX, TSX and TypeScript are formatted with a real parser (Prettier), not a token-level find-and-replace, so `<App />` stays `<App />`. On top of that, the AST-equivalence guard — plus a dedicated JSX tag-boundary check — compares the parse tree before and after and discards any output that changed meaning, so optional chaining (`?.`), nullish coalescing (`??`) and BigInt literals (`1n`) are always preserved. If a format ever couldn't be proven safe, you get zero edits and an intact file.
 
 **Will Tidy format my files on save?**
 Only if *you* enable `editor.formatOnSave` and select Tidy as the default formatter for that language. Out of the box it does nothing on save.

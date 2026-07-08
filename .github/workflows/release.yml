@@ -87,6 +87,12 @@ jobs:
             exit 1
           fi
 
+      # Gate 0.5 — anti-empty-bump. A version bump MUST ship a documented change:
+      # CHANGELOG.md has to carry a "## [<version>]" heading matching package.json.
+      # Pure-Node and zero-dependency, so it runs before `npm ci` and fails fast.
+      - name: Changelog entry present (anti-empty-bump)
+        run: node scripts/check-changelog.mjs
+
       # Gate 1 — reproducible install from package-lock.json.
       - name: Install (npm ci)
         run: npm ci

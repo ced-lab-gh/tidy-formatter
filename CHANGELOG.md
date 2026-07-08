@@ -4,6 +4,16 @@ All notable changes to **Tidy Formatter — JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-07-09
+
+### Changed
+
+- **Docs & discoverability.** Richer README: a per-language section (HTML; CSS/SCSS/LESS; JavaScript/TypeScript; JSX/TSX; JSON) explaining what Tidy formats and how to trigger it, plus an FAQ answering common questions ("why does VS Code format my code on save?", safe alternatives to JS-CSS-HTML Formatter, how Tidy differs from Prettier, and forked-editor support). No behaviour change.
+
+### Added
+
+- **Release guardrail (anti-empty-bump).** A `check:changelog` gate (run in CI and the release pipeline) fails a release unless `CHANGELOG.md` documents the current `package.json` version — enforcing the "never ship an empty version bump" rule.
+
 ## [0.1.1] - 2026-07-08
 
 ### Added
