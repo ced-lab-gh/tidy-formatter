@@ -2,7 +2,7 @@
   "name": "tidy-formatter",
   "displayName": "Tidy — JS/CSS/HTML Formatter & Beautifier",
   "description": "Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON — a safe, config-respecting replacement for JS-CSS-HTML Formatter that never touches your files unless you ask.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "ced-lab",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -475,6 +475,7 @@
     "prettier": "^3.2.0"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "@types/js-beautify": "^1.14.3",
     "@types/mocha": "^10.0.6",
     "@types/node": "^18.19.0",

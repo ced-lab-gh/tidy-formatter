@@ -13,6 +13,27 @@ If you arrived here after a formatter quietly rewrote your code on save, that is
 
 ---
 
+## See it in action
+
+<!--
+  These two images are generated PNGs committed at media/before-after/css.png
+  and media/before-after/tsx.png. Keep them PNG on purpose: the VS Code
+  Marketplace rewrites relative image paths to raw.githubusercontent.com and
+  renders PNG reliably on the listing, whereas SVG is NOT guaranteed to render
+  there. If a build only produces .svg siblings, point the two srcs below at
+  css.svg / tsx.svg as a fallback — but the committed, Marketplace-safe asset
+  must stay PNG. Regenerate the pair from the real samples/ (before) and
+  samples/out/ (after) files before publishing.
+-->
+
+![CSS before and after: collapsed, comma-jammed rules become readable blocks while the `>` combinator and `calc(100% - 20px)` survive intact.](media/before-after/css.png)
+
+![TSX before and after: minified React reflowed by a real parser — `<div className="card" … />` stays valid JSX and `n?.toString() ?? "none"` keeps both its `?.` and `??` operators.](media/before-after/tsx.png)
+
+These are the real [`samples/`](./samples) inputs run through *Format Document* — the messy original next to Tidy's output. Nothing changed meaning along the way: if a format would mangle a JSX tag or split a `?.` into `? .`, the equivalence guard discards the result and leaves your file untouched.
+
+---
+
 ## Migrating from JS-CSS-HTML Formatter
 
 [JS-CSS-HTML Formatter](https://marketplace.visualstudio.com/items?itemName=lonefy.vscode-JS-CSS-HTML-formatter) (`lonefy.vscode-JS-CSS-HTML-formatter`) is a popular beautifier (~3.95M installs) that has not been updated since 2017 and sits at roughly 1.7★. Most of its one-star reviews are not about *bad* formatting — they are about a formatter that acts **without consent**: it formats on save even when you disabled it, makes itself the default formatter, overrides your editor settings, and occasionally breaks valid code. Tidy is a clean-room replacement that keeps the "configurable beautify" niche while removing the destructive behaviour.

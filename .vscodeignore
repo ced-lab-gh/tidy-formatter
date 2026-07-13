@@ -33,6 +33,10 @@ coverage/**
 # Only the *.mjs generators are excluded — media/icon.png and media/walkthrough/*.{md,png} ship.
 media/**/*.mjs
 media/*.mjs
+
+# Build / CI helper scripts (dev-only; generate assets or gate releases, never run at runtime).
+# The assets they produce (media/before-after/*.png) ARE shipped; the generators are not.
+scripts/**
 ROADMAP.md
 RELEASE_PLAN.md
 PLAN_RESUME.md

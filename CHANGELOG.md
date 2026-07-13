@@ -4,6 +4,16 @@ All notable changes to **Tidy Formatter — JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-07-16
+
+### Changed
+
+- **Marketplace listing visuals — new "See it in action" section.** The README now opens with two real **before/after** images (CSS and TSX) so the listing shows what Tidy does at a glance. Both are rendered verbatim from this repo's own inputs — `samples/messy.css` / `samples/messy.tsx` (before) next to `samples/out/messy.css` / `samples/out/messy.tsx` (after): collapsed, comma-jammed CSS becomes readable while `calc(100% - 20px)` and the `>` combinator survive, and minified React reflows through a real parser with `<div className="card" … />` staying valid JSX and `n?.toString() ?? "none"` keeping both its `?.` and `??`. Nothing in the visuals is faked.
+- **Committed as PNG on purpose.** The pair ships at `media/before-after/css.png` and `media/before-after/tsx.png` because the Marketplace rewrites relative README image paths to raw.githubusercontent.com and renders PNG reliably on the listing, whereas SVG is not guaranteed to render there.
+- **Dev-only visuals generator.** A new `scripts/build-visuals.mjs` regenerates the pair from `samples/` using `@resvg/resvg-js` as a **devDependency** only — **no new runtime dependency**, and neither the generator nor `samples/` is packaged into the VSIX (only the produced PNGs are). The extension icon is unchanged (still the 256×256 PNG shipped since 0.1.0).
+
+This is a documentation/asset release only — **no change to formatting behaviour, settings, or the safety guard.**
+
 ## [0.1.2] - 2026-07-09
 
 ### Changed
