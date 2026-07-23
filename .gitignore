@@ -1,24 +1,30 @@
+# ── Dependencies & build output ──────────────────────────────
 node_modules/
-out/
 dist/
+out/
 *.vsix
-.vscode-test/
+*.tsbuildinfo
 
-# Coverage / test artifacts (contain absolute local paths)
+# ── Test / coverage artifacts (contain absolute local paths) ──
 coverage/
 .nyc_output/
-
-# Generated sample output
+.vscode-test/
 samples/out/
 
-# Internal strategy / mining artifacts — NOT for the public repo (kept local only)
-SPEC.md
-ROADMAP.md
-RELEASE_PLAN.md
-PLAN_RESUME.md
-BUILD_REPORT.md
-MINING.md
-spec.json
-data/
-docs/
-gtm/
+# ── Local-only working docs: strategy, mining data, growth/GTM,
+#    build reports, and the vsix archive — all consolidated under
+#    _internal/. NEVER for the public repo: the mining data can
+#    contain third-party PII scraped from store reviews.
+_internal/
+STRUCTURE.md
+
+# ── Secrets & personal data (defensive — none tracked today) ──
+*.env
+.env*
+*.pat
+*.pem
+*.key
+*.p12
+*secret*.json
+.DS_Store
+Thumbs.db

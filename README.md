@@ -282,7 +282,7 @@ Plain `.js` files are formatted with js-beautify for familiarity, but if Tidy de
 
 Tidy also reads your project's **`.editorconfig`** cascade (honouring `root = true`) and maps `indent_style`, `indent_size` / `tab_width`, `end_of_line`, `insert_final_newline`, `trim_trailing_whitespace` and `max_line_length`. A team `.editorconfig` therefore wins over plain VS Code settings. Opt out with `"tidy.editorconfig": false`. In Restricted Mode the workspace `.editorconfig` is ignored (it is workspace-authored content), falling back to built-in and user settings.
 
-`.sass` (indented syntax) and Vue/Astro single-file components are **not** in this build; see [the spec](./SPEC.md) for the v1.0/v2 roadmap.
+`.sass` (indented syntax) and Vue/Astro single-file components are **not** in this build; they are on the roadmap for a future release.
 
 ---
 
@@ -486,7 +486,7 @@ That is exactly why Tidy exists. It covers the same languages — JavaScript, Ty
 Prettier is opinionated: it enforces one canonical style with very few knobs. Tidy is a *configurable* beautifier that respects your VS Code and project settings, so it fills the "lots of options" niche the JS-CSS-HTML Formatter used to. The two are built to coexist — a common setup is Prettier for JS/TS and Tidy for CSS/HTML/JSON — and for TypeScript, JSX and TSX Tidy actually runs Prettier under the hood, then adds its own equivalence guard on top. See [Works alongside Prettier](#works-alongside-prettier).
 
 **Does Tidy work in Cursor, Windsurf or VSCodium?**
-Tidy is a standard VS Code extension with no proprietary Marketplace dependencies, so it runs in editors built on VS Code — Cursor, Windsurf, VSCodium and similar — as long as you can install it. It is currently published on the Visual Studio Marketplace; Open-VSX-only builds such as VSCodium may need you to install the packaged `.vsix` manually until an Open VSX release lands (that release is on the roadmap in [SPEC.md](./SPEC.md)). Nothing in the formatting pipeline is tied to a specific distribution.
+Tidy is a standard VS Code extension with no proprietary Marketplace dependencies, so it runs in editors built on VS Code — Cursor, Windsurf, VSCodium and similar. It is published on **both** the Visual Studio Marketplace and the [Open VSX Registry](https://open-vsx.org/extension/ced-lab/tidy-formatter), so editors that use Open VSX (VSCodium, Cursor, Windsurf, Gitpod, code-server…) can install it straight from their Extensions view — no manual `.vsix` needed. Nothing in the formatting pipeline is tied to a specific distribution.
 
 **Will Tidy break my JSX or modern JS?**
 No. JSX, TSX and TypeScript are formatted with a real parser (Prettier), not a token-level find-and-replace, so `<App />` stays `<App />`. On top of that, the AST-equivalence guard — plus a dedicated JSX tag-boundary check — compares the parse tree before and after and discards any output that changed meaning, so optional chaining (`?.`), nullish coalescing (`??`) and BigInt literals (`1n`) are always preserved. If a format ever couldn't be proven safe, you get zero edits and an intact file.
@@ -531,7 +531,7 @@ Yes. Tidy reads the `.editorconfig` cascade (respecting `root = true`) and maps 
 Yes. Tidy reads a `.soukformatrc` (JSONC) from your project root — per-language sections plus ordered glob `overrides`, layered above `.editorconfig` and shared across the team. See [Key settings](#key-settings) for the schema. (YAML support is on the roadmap.)
 
 **Where's the indented-`.sass` / Vue support?**
-Not in this build. The remaining roadmap (`.soukformatrc` YAML, real CSS-in-JS reformatting, Vue SFCs, Open VSX, more languages) is described in [SPEC.md](./SPEC.md). Ignore directives, `.soukformatignore`, the preview diff, and deference notifications **are** shipped — see [Ignore & coexistence](#ignore--coexistence).
+Not in this build. The remaining roadmap covers `.soukformatrc` YAML, real CSS-in-JS reformatting, Vue SFCs, and more languages. Ignore directives, `.soukformatignore`, the preview diff, deference notifications, and Open VSX distribution **are** shipped — see [Ignore & coexistence](#ignore--coexistence).
 
 ---
 

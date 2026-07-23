@@ -1,51 +1,44 @@
-# Source & build inputs (we ship dist/ only)
+# The extension ships ONLY the production bundle (dist/) plus README /
+# CHANGELOG / LICENSE / media. Everything below is dev, build, or internal
+# and is never packaged into the VSIX.
+
+# ── Source & build inputs (we ship dist/ only) ──
 src/**
 test/**
 out/**
 node_modules/**
 
-# Tooling / config
+# ── Tooling / config ──
 .vscode/**
 .vscode-test/**
 .vscode-test.mjs
 esbuild.js
 tsconfig.json
 .eslintrc.json
+.c8rc.json
 .gitignore
 .vscodeignore
 
-# Project research artifacts (not shipped)
-samples/**
-data/**
-spec.json
-SPEC.md
-docs/**
-MINING.md
-BUILD_REPORT.md
-PUBLISHING.md
-
-# QA / coverage / CI artifacts (not shipped)
+# ── QA / coverage / CI artifacts ──
 coverage/**
-.c8rc.json
 .github/**
 
-# Media generator scripts (dev-only helpers; the .png/.md they produce ARE shipped)
-# Only the *.mjs generators are excluded — media/icon.png and media/walkthrough/*.{md,png} ship.
+# ── Dev-only assets & scripts (the .png/.md they PRODUCE are shipped) ──
+samples/**
 media/**/*.mjs
 media/*.mjs
-
-# Build / CI helper scripts (dev-only; generate assets or gate releases, never run at runtime).
-# The assets they produce (media/before-after/*.png) ARE shipped; the generators are not.
 scripts/**
-ROADMAP.md
-RELEASE_PLAN.md
-PLAN_RESUME.md
 
-# Misc
+# ── Repo doc not needed inside the VSIX ──
+PUBLISHING.md
+
+# ── Local-only internal working docs (strategy / mining / growth /
+#    build reports / vsix archive) — consolidated under _internal/. ──
+_internal/**
+STRUCTURE.md
+
+# ── Misc ──
 **/*.map
 **/*.ts
 **/.DS_Store
 **/tsconfig.tsbuildinfo
-
-# GTM / marketing assets (internal, not shipped)
-gtm/**
