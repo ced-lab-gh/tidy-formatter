@@ -4,6 +4,19 @@ All notable changes to **Tidy Formatter — JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] - 2026-07-24
+
+### Added
+
+- **`Tidy: Report an Issue` command.** A new Command Palette entry (under the **Tidy** category) opens a **prefilled GitHub issue** for the repo with the environment details a good bug report needs — Tidy version, VS Code version, OS, and the active document's `languageId` — plus empty *What happened / Minimal input to reproduce / Expected vs. actual* sections, so filing an actionable report takes seconds. This is the actionable counterpart to the README's "a reproducible input is worth a thousand stars", and it feeds the bug → fix → confidence loop that a young extension lives on.
+- **Read-only by construction.** The command only *reads* host state and opens an external URL via `env.openExternal`. It writes **no** file and changes **no** setting, so it carries none of the anti-hijack surface of the onboarding/migration commands. The URL builder is a pure, `vscode`-free module (`buildIssueUrl` / `platformLabel`) covered by unit tests; the thin host surface is loaded lazily inside the handler, exactly like the other Tidy commands.
+
+### Changed
+
+- **README / discoverability (SEO).** The new command is documented in the Commands table and the Feedback section, and the FAQ gains two answers to common, generic searches — *"How do I format HTML, CSS and JavaScript in VS Code?"* and *"Is there a VS Code formatter that only runs when I ask — not on save?"* — broadening the listing beyond the incumbent-specific questions already covered.
+
+No change to formatting behaviour, settings, or the safety guard.
+
 ## [0.1.3] - 2026-07-16
 
 ### Changed

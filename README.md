@@ -461,10 +461,17 @@ All Tidy commands are in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
 | `tidy.useAsFormatter` | Tidy: Use Tidy as my Formatter | Opt in per language: writes `editor.defaultFormatter` (Workspace by default) for the languages you pick. Never writes `editor.formatOnSave`; cancelling writes nothing. |
 | `tidy.runMigration` | Tidy: Migrate from JS-CSS-HTML Formatter | Imports a legacy `.jsbeautifyrc` into `tidy.*` settings after a confirmation recap (trusted workspaces only), then optionally runs *Use Tidy as my Formatter*. |
 | `tidy.previewFormat` | Tidy: Preview Format (diff) | Opens a **read-only** diff of what Tidy would change, then applies it on an explicit *Apply* click as a **single undo entry**. Opening the diff writes nothing. See [Preview command](#preview-command-read-only-diff--atomic-undo). |
+| `tidy.reportIssue` | Tidy: Report an Issue | Opens a **prefilled GitHub issue** with your environment (Tidy version, VS Code version, OS, the active file's language) already filled in, so a bug report takes seconds. Read-only: it opens a browser tab and writes nothing. |
 
 ---
 
 ## FAQ
+
+**How do I format HTML, CSS and JavaScript in VS Code?**
+Open the file and run **Format Document** (`Shift+Alt+F`), or select a block and run **Format Selection**. VS Code needs a formatter registered for that language; Tidy provides one for HTML, CSS, SCSS, LESS, JavaScript, TypeScript, JSX/TSX and JSON. If more than one formatter is installed, pick which runs with **Format Document With… → Tidy Formatter**, or set it per language via **Tidy: Use Tidy as my Formatter**. Nothing formats automatically until you enable `editor.formatOnSave` yourself.
+
+**Is there a VS Code formatter that only runs when I ask — not on save?**
+Yes — that is Tidy's whole design. It registers *only* as an on-demand formatting provider (*Format Document* / *Format Selection*), never hooks the save event, and never sets `editor.formatOnSave` or `editor.defaultFormatter` for you. So it formats exactly when you invoke it and stays silent otherwise. If you *want* format-on-save later, you enable the stock VS Code setting yourself — see [60-second opt-in setup](#60-second-opt-in-setup).
 
 **Why does VS Code keep formatting my code on save?**
 Something in your setup has `editor.formatOnSave` enabled and a default formatter assigned for that language — often an extension that made itself the default without asking. VS Code, not the extension, owns the save trigger, so the fix is to turn off `editor.formatOnSave` (globally or per language) or change `editor.defaultFormatter`. If code is *still* reformatted with format-on-save off, an extension is hooking save itself; disabling or uninstalling it is the only reliable fix. Tidy deliberately never hooks save, so it can never be the cause.
@@ -530,7 +537,7 @@ Not in this build. The remaining roadmap (`.soukformatrc` YAML, real CSS-in-JS r
 
 ## Feedback
 
-Found a bug or a file Tidy got wrong? A reproducible input is worth a thousand stars — open an issue with the smallest snippet that reproduces it. If Tidy has saved you from a save-on-format disaster, you're welcome to [leave a review](https://marketplace.visualstudio.com/items?itemName=ced-lab.tidy-formatter). No in-product nagging, ever.
+Found a bug or a file Tidy got wrong? A reproducible input is worth a thousand stars — open an issue with the smallest snippet that reproduces it. The fastest way is the **Tidy: Report an Issue** command (Command Palette → *Tidy: Report an Issue*): it opens a prefilled GitHub issue with your Tidy version, VS Code version, OS and active language already filled in, so you only have to paste the snippet. If Tidy has saved you from a save-on-format disaster, you're welcome to [leave a review](https://marketplace.visualstudio.com/items?itemName=ced-lab.tidy-formatter). No in-product nagging, ever.
 
 ## License
 

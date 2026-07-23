@@ -38,6 +38,10 @@ import {
   PREVIEW_FORMAT_COMMAND_ID,
   previewFormat
 } from './commands/previewFormat';
+import {
+  REPORT_ISSUE_COMMAND_ID,
+  reportIssue
+} from './commands/reportIssue';
 import { detectCompetingFormatters } from './deference/detect';
 import {
   decide,
@@ -89,6 +93,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // an explicit command invocation + explicit "Apply" click.
   context.subscriptions.push(
     vscode.commands.registerCommand(PREVIEW_FORMAT_COMMAND_ID, previewFormat)
+  );
+
+  // Report an Issue: opens a prefilled GitHub issue with environment details.
+  // Read-only — it opens an external URL and writes nothing (no setting, no file).
+  context.subscriptions.push(
+    vscode.commands.registerCommand(REPORT_ISSUE_COMMAND_ID, reportIssue)
   );
 
   // One-shot, deduplicated migration prompt (1.T4). Fire-and-forget so it never
