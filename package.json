@@ -1,7 +1,7 @@
 {
   "name": "tidy-formatter",
-  "displayName": "Tidy — JS/CSS/HTML Formatter & Beautifier",
-  "description": "Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON — a safe, config-respecting replacement for JS-CSS-HTML Formatter that never touches your files unless you ask.",
+  "displayName": "Tidy: JS/CSS/HTML Formatter & Beautifier",
+  "description": "Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON. A safe, config-respecting replacement for JS-CSS-HTML Formatter that never touches your files unless you ask.",
   "version": "0.1.4",
   "publisher": "ced-lab",
   "license": "MIT",
@@ -96,7 +96,7 @@
           {
             "id": "tidy.gettingStarted.safety",
             "title": "Safety first",
-            "description": "Tidy never writes a file that fails an equivalence check against your original — file corruption is impossible by design.",
+            "description": "Tidy never writes a file that fails an equivalence check against your original. File corruption is impossible by design.",
             "media": {
               "markdown": "media/walkthrough/safety.md"
             }
@@ -104,7 +104,7 @@
           {
             "id": "tidy.gettingStarted.choose",
             "title": "Use Tidy as your formatter",
-            "description": "Run [Tidy: Use Tidy as my Formatter](command:tidy.useAsFormatter) to opt in per language — fully reversible, nothing is written until you confirm.",
+            "description": "Run [Tidy: Use Tidy as my Formatter](command:tidy.useAsFormatter) to opt in per language: fully reversible, nothing is written until you confirm.",
             "media": {
               "markdown": "media/walkthrough/choose.md"
             },
@@ -114,7 +114,7 @@
           },
           {
             "id": "tidy.gettingStarted.formatOnSave",
-            "title": "Format on save — your choice",
+            "title": "Format on save: your choice",
             "description": "Tidy never enables Format On Save and never hooks save. Turn on $(gear) editor.formatOnSave yourself if you want it.",
             "media": {
               "markdown": "media/walkthrough/formatonsave.md"
@@ -361,7 +361,7 @@
         "tidy.prettier.semi": {
           "type": "boolean",
           "default": true,
-          "description": "Print semicolons at the end of statements (Prettier semi). Stylistic only — does not change the AST.",
+          "description": "Print semicolons at the end of statements (Prettier semi). Stylistic only; does not change the AST.",
           "scope": "language-overridable"
         },
         "tidy.prettier.singleQuote": {
@@ -441,11 +441,11 @@
             "off"
           ],
           "enumDescriptions": [
-            "Show a one-time notification when this workspace already configures another formatter (Prettier, Biome, dprint). Tidy never takes over — your default formatter is unchanged.",
+            "Show a one-time notification when this workspace already configures another formatter (Prettier, Biome, dprint). Tidy never takes over; your default formatter is unchanged.",
             "Do not notify, but acknowledge another formatter is configured. Tidy still never disables itself or changes any setting.",
             "Ignore detection of other formatters entirely (no notification)."
           ],
-          "description": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically — this only controls a one-time, informational notification."
+          "description": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification."
         }
       }
     }

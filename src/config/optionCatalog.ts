@@ -388,7 +388,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     languages: PRETTIER_LANGS,
     scope: 'language-overridable',
     description:
-      'Print semicolons at the end of statements (Prettier semi). Stylistic only — does not change the AST.'
+      'Print semicolons at the end of statements (Prettier semi). Stylistic only; does not change the AST.'
   },
   {
     settingKey: 'tidy.prettier.singleQuote',
