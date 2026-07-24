@@ -2,7 +2,7 @@
   "name": "tidy-formatter",
   "displayName": "Tidy: JS/CSS/HTML Formatter & Beautifier",
   "description": "Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON. A safe, config-respecting replacement for JS-CSS-HTML Formatter that never touches your files unless you ask.",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "publisher": "ced-lab",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -84,6 +84,11 @@
       {
         "command": "tidy.reportIssue",
         "title": "Report an Issue",
+        "category": "Tidy"
+      },
+      {
+        "command": "tidy.explainLastFormat",
+        "title": "Explain last format",
         "category": "Tidy"
       }
     ],

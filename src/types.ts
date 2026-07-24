@@ -14,6 +14,24 @@ export type LangId =
   | 'typescriptreact'
   | 'javascriptreact';
 
+/**
+ * The single source of truth for the languageIds Tidy handles. Both the formatting
+ * provider (registration) and the "Explain last format" command (support check)
+ * derive from this list so they can never drift apart. vscode-free.
+ */
+export const SUPPORTED_LANG_IDS: readonly LangId[] = [
+  'css',
+  'scss',
+  'less',
+  'html',
+  'json',
+  'jsonc',
+  'javascript',
+  'typescript',
+  'typescriptreact',
+  'javascriptreact'
+];
+
 export interface ResolvedOptions {
   tabSize: number;
   insertSpaces: boolean;

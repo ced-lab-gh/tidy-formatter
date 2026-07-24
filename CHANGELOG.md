@@ -4,6 +4,20 @@ All notable changes to **Tidy Formatter — JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-07-24
+
+### Added
+
+- **`Tidy: Explain last format` command + a structured Output channel.** The antidote to "I installed Tidy and Format Document does nothing." Run it (Command Palette, **Tidy** category) and Tidy tells you, for the active file, exactly what its most recent format attempt did, or **why it did nothing**: the safety guard rejected a non-equivalent result (file left intact), a `.soukformatignore` rule or an in-source `tidy-ignore` / `prettier-ignore` marker excluded the file, the file exceeded `tidy.maxFileSizeKB`, the language is disabled, or the run was cancelled. When Tidy has not run on the file at all, it says whether **another formatter owns the language** (naming it) and how to switch to Tidy. Every attempt is also traced in the shared **Tidy Formatter** output channel.
+  - **Privacy by construction.** The stored record and the channel carry only language, engine, status and a short reason, never your source. Engine/parser error messages are truncated to their first line and sanitized, so a code frame can never leak into the record, the channel, or a copied bug report.
+  - **Observational and anti-hijack safe.** It adds no save/change hook, sets no `editor.defaultFormatter`, and changes no formatting behaviour.
+
+### Changed
+
+- **Marketplace listing and in-editor copy: em dashes removed.** The title, description, README, walkthrough and settings text no longer use the "—" character, per a style preference. Copy only.
+
+No change to the formatting engine or to any decision the safety guard makes.
+
 ## [0.1.4] - 2026-07-24
 
 ### Added

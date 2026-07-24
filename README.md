@@ -461,6 +461,7 @@ All Tidy commands are in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
 | `tidy.runMigration` | Tidy: Migrate from JS-CSS-HTML Formatter | Imports a legacy `.jsbeautifyrc` into `tidy.*` settings after a confirmation recap (trusted workspaces only), then optionally runs *Use Tidy as my Formatter*. |
 | `tidy.previewFormat` | Tidy: Preview Format (diff) | Opens a **read-only** diff of what Tidy would change, then applies it on an explicit *Apply* click as a **single undo entry**. Opening the diff writes nothing. See [Preview command](#preview-command-read-only-diff--atomic-undo). |
 | `tidy.reportIssue` | Tidy: Report an Issue | Opens a **prefilled GitHub issue** with your environment (Tidy version, VS Code version, OS, the active file's language) already filled in, so a bug report takes seconds. Read-only: it opens a browser tab and writes nothing. |
+| `tidy.explainLastFormat` | Tidy: Explain last format | Tells you what Tidy's most recent format did on the active file, or **why it did nothing** (safety guard, an ignore rule, the size limit, another default formatter, a disabled language). Writes a content-free trace to the **Tidy Formatter** output channel. Read-only. |
 
 ---
 
@@ -497,7 +498,7 @@ Only if *you* enable `editor.formatOnSave` and select Tidy as the default format
 No. Tidy never sets or contributes `editor.defaultFormatter`. If another formatter is your default, Tidy does not run unless you explicitly invoke it.
 
 **I installed it and nothing happens when I save. Is it broken?**
-No, that is the intended default. See [60-second opt-in setup](#60-second-opt-in-setup) to choose the behaviour you want.
+No, that is the intended default. If you are not sure what happened, run **Tidy: Explain last format** from the Command Palette: it tells you exactly what Tidy did on the active file, or why it did nothing (for example, another formatter owns the language, or the safety guard rejected the result). See [60-second opt-in setup](#60-second-opt-in-setup) to choose the behaviour you want.
 
 **Can it corrupt my code?**
 Tidy refuses to apply any output that fails its equivalence guard (AST for JS/TS/JSX/TSX, tree compare for CSS/HTML, value compare for JSON). If formatting would change meaning, you get zero edits and an intact file plus a notice.

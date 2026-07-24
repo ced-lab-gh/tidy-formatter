@@ -42,6 +42,11 @@ import {
   REPORT_ISSUE_COMMAND_ID,
   reportIssue
 } from './commands/reportIssue';
+import {
+  EXPLAIN_LAST_FORMAT_COMMAND_ID,
+  explainLastFormat
+} from './commands/explainLastFormat';
+import { getTidyOutputChannel } from './diagnostics/outputChannel';
 import { detectCompetingFormatters } from './deference/detect';
 import {
   decide,
@@ -99,6 +104,17 @@ export function activate(context: vscode.ExtensionContext): void {
   // Read-only — it opens an external URL and writes nothing (no setting, no file).
   context.subscriptions.push(
     vscode.commands.registerCommand(REPORT_ISSUE_COMMAND_ID, reportIssue)
+  );
+
+  // Explain last format (v0.2.0): reports what the most recent format attempt did,
+  // or why it did nothing (guard, ignore, size, another default formatter...).
+  // Read-only. Owns disposal of the shared "Tidy Formatter" output channel.
+  context.subscriptions.push(getTidyOutputChannel());
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      EXPLAIN_LAST_FORMAT_COMMAND_ID,
+      explainLastFormat
+    )
   );
 
   // One-shot, deduplicated migration prompt (1.T4). Fire-and-forget so it never

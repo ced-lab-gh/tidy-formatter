@@ -23,28 +23,27 @@
 // .soukformatignore lookup is gated by a tiny Workspace-Trust seam, ignoreGate).
 import * as vscode from 'vscode';
 import type { FormatOutcome, FormatRequest, LangId, ResolvedOptions } from '../types';
+import { SUPPORTED_LANG_IDS } from '../types';
 import { dispatchFormat, pickEngine } from '../engine/dispatcher';
 import { guard } from '../safety/guard';
 import { readResolvedOptions } from '../config/vscodeConfig';
 import { scanMarkers } from '../ignore/markers';
 import { applyMask, restoreMask } from '../ignore/mask';
 import { resolveDocumentIgnore } from '../ignore/ignoreGate';
+import { getTidyOutputChannel } from '../diagnostics/outputChannel';
+import {
+  recordLastFormat,
+  formatChannelLine,
+  sanitizeDetail,
+  type FormatStatus,
+  type FormatScope,
+  type LastFormatRecord
+} from '../diagnostics/lastFormat';
 
 /**
  * Supported document selectors (one languageId each) for registration.
  */
-export const SUPPORTED_LANGUAGES: readonly LangId[] = [
-  'css',
-  'scss',
-  'less',
-  'html',
-  'json',
-  'jsonc',
-  'javascript',
-  'typescript',
-  'typescriptreact',
-  'javascriptreact'
-];
+export const SUPPORTED_LANGUAGES: readonly LangId[] = SUPPORTED_LANG_IDS;
 
 const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set(SUPPORTED_LANGUAGES);
 
@@ -73,22 +72,7 @@ const REGION_MASKING_LANGUAGES: ReadonlySet<LangId> = new Set<LangId>([
  * constant so the wording stays consistent (and matches the product spec).
  */
 const ABORT_WARNING_MESSAGE =
-  'Formatage annule: la sortie aurait casse la syntaxe — fichier intact';
-
-const OUTPUT_CHANNEL_NAME = 'Tidy Formatter';
-
-/**
- * Lazily-created, reused output channel for diagnostic detail. We never log the
- * document content itself — only language, engine, and an error/abort summary.
- */
-let outputChannel: vscode.OutputChannel | undefined;
-
-function getOutputChannel(): vscode.OutputChannel {
-  if (!outputChannel) {
-    outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
-  }
-  return outputChannel;
-}
+  'Formatage annule: la sortie aurait casse la syntaxe, fichier intact';
 
 /**
  * Narrow a raw VS Code languageId to a supported LangId, or return undefined if
@@ -149,17 +133,59 @@ function buildReplaceEdit(
   return vscode.TextEdit.replace(range, output);
 }
 
+/** Basename of a URI path (no 'vscode' path util needed). */
+function basenameFromPath(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
 /**
- * Log a one-shot diagnostic line. Never includes document content.
+ * First line of an error message only. Engine/parser errors (Prettier, babel, ...)
+ * can embed a multi-line code frame containing the user's SOURCE after the first
+ * line; we must never surface that in a stored/logged/displayed record. The detail
+ * is sanitized again downstream (sanitizeDetail); we also strip at the source.
  */
-function logDiagnostic(
-  languageId: LangId,
-  engineId: string,
-  summary: string
+function firstLineOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'unknown error';
+  return message.split('\n', 1)[0].trim();
+}
+
+/**
+ * Record the outcome of a format attempt (the single most-recent record) AND append
+ * a concise, content-free line to the shared "Tidy Formatter" output channel. Every
+ * exit point below calls this, so a no-op always has a stored, explainable reason:
+ * that is what powers "Tidy: Explain last format".
+ */
+function recordOutcome(
+  document: vscode.TextDocument,
+  languageId: string,
+  scope: FormatScope,
+  status: FormatStatus,
+  extra?: { engineId?: string; detail?: string }
 ): void {
-  const channel = getOutputChannel();
-  const timestamp = new Date().toISOString();
-  channel.appendLine(`[${timestamp}] [${languageId}] [${engineId}] ${summary}`);
+  const record: LastFormatRecord = {
+    uri: document.uri.toString(),
+    fileName: basenameFromPath(document.uri.path),
+    languageId,
+    status,
+    scope,
+    engineId: extra?.engineId,
+    detail: extra?.detail !== undefined ? sanitizeDetail(extra.detail) : undefined,
+    at: new Date().toISOString()
+  };
+  recordLastFormat(record);
+  getTidyOutputChannel().appendLine(formatChannelLine(record));
+}
+
+/**
+ * Map an aborted FormatOutcome's reason (produced in runFormat, this file) to a
+ * FormatStatus. Kept beside runFormat so the two never drift.
+ */
+function statusFromReason(reason: string): FormatStatus {
+  if (reason.startsWith('engine error')) return 'engine-error';
+  if (reason.startsWith('guard error')) return 'engine-error';
+  if (reason.startsWith('ignore-region restore failed')) return 'restore-failed';
+  return 'guard-rejected';
 }
 
 /**
@@ -214,11 +240,10 @@ async function runFormat(
   try {
     rawOutput = await dispatchFormat(request);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'unknown error';
     return {
       applied: false,
       aborted: true,
-      reason: `engine error: ${message}`,
+      reason: `engine error: ${firstLineOf(error)}`,
       engineId
     };
   }
@@ -255,11 +280,10 @@ async function runFormat(
   try {
     verdict = guard.check(languageId, input, output);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'unknown error';
     return {
       applied: false,
       aborted: true,
-      reason: `guard error: ${message}`,
+      reason: `guard error: ${firstLineOf(error)}`,
       engineId
     };
   }
@@ -305,16 +329,21 @@ function buildRegionMask(
 
 /**
  * Translate a FormatOutcome for a whole-span replacement into VS Code edits,
- * surfacing aborts as a non-blocking warning + an output-channel detail line.
+ * recording the outcome (for "Explain last format") and surfacing aborts as a
+ * non-blocking warning.
  */
 function outcomeToEdits(
   document: vscode.TextDocument,
   languageId: LangId,
+  scope: FormatScope,
   startOffset: number,
   endOffset: number,
   outcome: FormatOutcome
 ): vscode.TextEdit[] {
   if (outcome.applied && typeof outcome.output === 'string') {
+    recordOutcome(document, languageId, scope, 'applied', {
+      engineId: outcome.engineId
+    });
     return [buildReplaceEdit(document, startOffset, endOffset, outcome.output)];
   }
 
@@ -322,14 +351,23 @@ function outcomeToEdits(
     const engineId = outcome.engineId ?? 'unknown';
     const reason = outcome.reason ?? 'aborted';
     // A user-initiated cancellation is not an error worth nagging about.
-    if (reason !== 'cancelled') {
-      logDiagnostic(languageId, engineId, `aborted — ${reason}`);
+    if (reason === 'cancelled') {
+      recordOutcome(document, languageId, scope, 'cancelled', { engineId });
+    } else {
+      recordOutcome(document, languageId, scope, statusFromReason(reason), {
+        engineId,
+        detail: reason
+      });
       // Non-blocking, non-modal: the file is intact, we just inform.
       void vscode.window.showWarningMessage(ABORT_WARNING_MESSAGE);
     }
+    return [];
   }
 
-  // No-op (output === input) or aborted: apply nothing, file stays intact.
+  // No-op: the engine produced output identical to the input.
+  recordOutcome(document, languageId, scope, 'already-tidy', {
+    engineId: outcome.engineId
+  });
   return [];
 }
 
@@ -343,17 +381,22 @@ async function provideEdits(
   token: vscode.CancellationToken,
   range: vscode.Range | undefined
 ): Promise<vscode.TextEdit[]> {
+  const scope: FormatScope = range ? 'selection' : 'document';
+
   const languageId = toSupportedLangId(document.languageId);
   if (!languageId) {
+    recordOutcome(document, document.languageId, scope, 'unsupported');
     return [];
   }
 
   // Respect per-language opt-out: if disabled, behave as if not registered.
   if (!isLanguageEnabled(document, languageId)) {
+    recordOutcome(document, languageId, scope, 'disabled');
     return [];
   }
 
   if (token.isCancellationRequested) {
+    recordOutcome(document, languageId, scope, 'cancelled');
     return [];
   }
 
@@ -367,20 +410,21 @@ async function provideEdits(
   // Both return [] so VS Code applies no edit and the file is byte-identical.
   // (REGION-level ignore is handled later, around the engine call, via masking.)
   if (resolveDocumentIgnore(document).ignored) {
+    recordOutcome(document, languageId, scope, 'ignored-file');
     return [];
   }
   if (scanMarkers(fullText, languageId).ignoreFile) {
+    recordOutcome(document, languageId, scope, 'ignored-marker');
     return [];
   }
   const maxBytes = getMaxFileSizeBytes(document);
   if (maxBytes !== undefined && byteLength(fullText) > maxBytes) {
     const config = vscode.workspace.getConfiguration('tidy', document.uri);
     const maxKb = config.get<number>('maxFileSizeKB', 5120);
-    logDiagnostic(
-      languageId,
-      pickEngine(languageId).id,
-      `skipped — document exceeds maxFileSizeKB (${maxKb} KB)`
-    );
+    recordOutcome(document, languageId, scope, 'too-large', {
+      engineId: pickEngine(languageId).id,
+      detail: String(maxKb)
+    });
     void vscode.window.showInformationMessage(
       `Tidy: fichier ignore (au-dela de ${maxKb} KB). Ajustez tidy.maxFileSizeKB si besoin.`
     );
@@ -392,7 +436,10 @@ async function provideEdits(
     options = readResolvedOptions(document, languageId, formattingOptions);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'unknown error';
-    logDiagnostic(languageId, 'config', `config resolution failed — ${message}`);
+    recordOutcome(document, languageId, scope, 'config-error', {
+      engineId: 'config',
+      detail: message
+    });
     // Cannot safely format without resolved options: leave the file intact.
     return [];
   }
@@ -423,10 +470,13 @@ async function provideEdits(
   );
 
   if (token.isCancellationRequested) {
+    recordOutcome(document, languageId, scope, 'cancelled', {
+      engineId: outcome.engineId
+    });
     return [];
   }
 
-  return outcomeToEdits(document, languageId, startOffset, endOffset, outcome);
+  return outcomeToEdits(document, languageId, scope, startOffset, endOffset, outcome);
 }
 
 /**

@@ -92,6 +92,7 @@ export function buildIssueUrl(env: IssueEnv): string {
  * workspace: it opens an external URL and does nothing else. Never throws in a way
  * that reaches the user — any failure is reported as a non-blocking message.
  */
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */
 export async function reportIssue(): Promise<void> {
   const vscode = require('vscode');
   try {
