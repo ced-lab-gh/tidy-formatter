@@ -20,14 +20,14 @@ import {
 } from '../../../src/migration/runMigration';
 import { mapLonefyOptions } from '../../../src/migration/lonefyOptions';
 
-describe('migration/runMigration — constants', () => {
+describe('migration/runMigration : constants', () => {
   it('exposes the stable command id and legacy filename', () => {
     assert.equal(RUN_MIGRATION_COMMAND_ID, 'tidy.runMigration');
     assert.equal(JSBEAUTIFYRC_FILENAME, '.jsbeautifyrc');
   });
 });
 
-describe('migration/runMigration — buildMigrationRecap', () => {
+describe('migration/runMigration : buildMigrationRecap', () => {
   it('carries the mapper settings / unmapped / warnings through', () => {
     const mapping = mapLonefyOptions({
       indent_size: 2,
@@ -67,7 +67,7 @@ describe('migration/runMigration — buildMigrationRecap', () => {
   });
 });
 
-describe('migration/runMigration — hasSettingsToWrite', () => {
+describe('migration/runMigration : hasSettingsToWrite', () => {
   it('is true when there is at least one setting', () => {
     const recap = buildMigrationRecap(true, mapLonefyOptions({ indent_size: 2 }));
     assert.equal(hasSettingsToWrite(recap), true);
@@ -79,7 +79,7 @@ describe('migration/runMigration — hasSettingsToWrite', () => {
   });
 });
 
-describe('migration/runMigration — formatRecapMessage', () => {
+describe('migration/runMigration : formatRecapMessage', () => {
   it('always states nothing has changed yet and never enables Format On Save', () => {
     const recap = buildMigrationRecap(true, mapLonefyOptions({ indent_size: 2 }));
     const message = formatRecapMessage(recap);

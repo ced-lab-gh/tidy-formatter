@@ -27,7 +27,7 @@ function resolveFromProps(props: Parameters<typeof mapEditorConfigLayer>[0]) {
   return resolveOptions({ languageId: 'css', layers });
 }
 
-describe('config/editorconfig — mapEditorConfigLayer corpus', () => {
+describe('config/editorconfig : mapEditorConfigLayer corpus', () => {
   for (const f of editorConfigFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, () => {
       const result = resolveFromProps(f.props);
@@ -78,7 +78,7 @@ describe('config/editorconfig — mapEditorConfigLayer corpus', () => {
   }
 });
 
-describe('config/editorconfig — mapEditorConfigLayer shape', () => {
+describe('config/editorconfig : mapEditorConfigLayer shape', () => {
   it('returns undefined for empty props (no empty layer is contributed)', () => {
     assert.equal(mapEditorConfigLayer({}), undefined);
   });
@@ -113,7 +113,7 @@ describe('config/editorconfig — mapEditorConfigLayer shape', () => {
   });
 });
 
-describe('config/editorconfig — precedence (layer 3 over VS Code)', () => {
+describe('config/editorconfig : precedence (layer 3 over VS Code)', () => {
   it('.editorconfig wins over the VS Code+FormattingOptions layer (team config governs)', () => {
     const vscodeLayer = {
       source: 'VS Code settings (tidy.*)',
@@ -152,7 +152,7 @@ describe('config/editorconfig — precedence (layer 3 over VS Code)', () => {
   });
 });
 
-describe('config/editorconfig — readEditorConfigLayer on-disk cascade', () => {
+describe('config/editorconfig : readEditorConfigLayer on-disk cascade', () => {
   let root: string;
 
   beforeEach(() => {

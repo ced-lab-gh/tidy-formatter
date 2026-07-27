@@ -2,10 +2,10 @@
 //
 // PURE (no 'vscode'): we import only `shouldPromptMigration` and the constants.
 // The `isLonefyInstalled` wrapper loads 'vscode' lazily INSIDE its body, so this
-// import does not pull in 'vscode' at module load — a regression that hoisted a
+// import does not pull in 'vscode' at module load : a regression that hoisted a
 // top-level 'vscode' import would make this file fail to load (the point).
 //
-// Coverage focus — the one-shot dedup contract (anti-nag, SPEC §10):
+// Coverage focus : the one-shot dedup contract (anti-nag, SPEC §10):
 //   - prompt only when lonefy present AND not yet prompted;
 //   - never prompt when already prompted (dedup), regardless of presence;
 //   - never prompt when lonefy absent.
@@ -16,7 +16,7 @@ import {
   MIGRATION_PROMPTED_KEY
 } from '../../../src/migration/detectLonefy';
 
-describe('migration/detectLonefy — constants', () => {
+describe('migration/detectLonefy : constants', () => {
   it('targets the abandoned incumbent id', () => {
     assert.equal(LONEFY_EXTENSION_ID, 'lonefy.vscode-JS-CSS-HTML-formatter');
   });
@@ -26,7 +26,7 @@ describe('migration/detectLonefy — constants', () => {
   });
 });
 
-describe('migration/detectLonefy — shouldPromptMigration', () => {
+describe('migration/detectLonefy : shouldPromptMigration', () => {
   it('prompts when lonefy is present and we have not prompted before', () => {
     assert.equal(shouldPromptMigration(true, false), true);
   });

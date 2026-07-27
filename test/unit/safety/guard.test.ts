@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { guard, astEqualJs, cssTreeEqual, htmlTreeEqual, jsonEqual } from '../../../src/safety/guard';
 import { guardFixtures } from '../../fixtures/guardFixtures';
 
-describe('safety/guard — anti-incumbent regression corpus', () => {
+describe('safety/guard : anti-incumbent regression corpus', () => {
   for (const f of guardFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, () => {
       const verdict = guard.check(f.lang, f.input, f.output);
@@ -33,7 +33,7 @@ describe('safety/guard — anti-incumbent regression corpus', () => {
   });
 });
 
-describe('safety/guard — the mandatory acceptance test (SPEC §5)', () => {
+describe('safety/guard : the mandatory acceptance test (SPEC §5)', () => {
   it('rejects the mangled JSX that still re-parses as valid TSX', () => {
     // This is the load-bearing test from the SPEC: '< Foo bar = {x} />' parses
     // fine, so a parse-only guard would WRONGLY accept it. The boundary check
@@ -49,7 +49,7 @@ describe('safety/guard — the mandatory acceptance test (SPEC §5)', () => {
   });
 });
 
-describe('safety/guard — legitimate JSX reflow is accepted (regression)', () => {
+describe('safety/guard : legitimate JSX reflow is accepted (regression)', () => {
   // Regression for the "safe but does nothing" false positive: Prettier reflows
   // adjacent JSX children onto indented lines, inserting whitespace-only JSXText
   // nodes the input lacked. Those are insignificant in JSX and must NOT be seen
@@ -76,7 +76,7 @@ describe('safety/guard — legitimate JSX reflow is accepted (regression)', () =
   });
 });
 
-describe('safety/guard — fast path & dispatch', () => {
+describe('safety/guard : fast path & dispatch', () => {
   it('returns equivalent immediately when input === output', () => {
     const verdict = guard.check('css', '.a{}', '.a{}');
     assert.deepEqual(verdict, { equivalent: true });

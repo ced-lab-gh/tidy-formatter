@@ -7,12 +7,12 @@
 //   3. consult the IGNORE layer (Axe 4): if .soukformatignore matches the file OR
 //      an in-source FILE-ignore marker is present -> [] (Tidy does nothing here);
 //   4. read the resolved options via vscodeConfig (precedence layers);
-//   5. dispatch the format off the UI thread — for the js-beautify path, in-source
+//   5. dispatch the format off the UI thread : for the js-beautify path, in-source
 //      ignore REGIONS are protected with mask/restore (the protected bytes are put
 //      back VERBATIM); for the Prettier path, Prettier honours `// prettier-ignore`
 //      natively, so no masking is needed;
 //   6. run the safety Guard (semantic equivalence modulo whitespace) on the
-//      ORIGINAL input vs the (restored) output — so a region splice can never
+//      ORIGINAL input vs the (restored) output : so a region splice can never
 //      slip a non-equivalent or non-parsable result through;
 //   7. ONLY if equivalent, return a single TextEdit replacing the formatted span;
 //      otherwise return [] (file stays intact) + a non-blocking warning and a
@@ -53,7 +53,7 @@ const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set(SUPPORTED_LANGUAGES)
  * are the js-beautify languages. The Prettier path (typescript / typescriptreact
  * / javascriptreact, and plain javascript that gets re-routed to Prettier for JSX)
  * honours `// prettier-ignore` natively at the NODE level, so we never mask there
- * — masking would be redundant and Prettier's own directive support is richer.
+ * : masking would be redundant and Prettier's own directive support is richer.
  * Region masking for the Prettier path is a documented v1 limitation (no
  * corruption either way: the guard validates whatever the engine produced).
  */
@@ -111,7 +111,7 @@ function getMaxFileSizeBytes(document: vscode.TextDocument): number | undefined 
 
 /**
  * Best-effort byte size of the text using UTF-8 (matches on-disk encoding for
- * the common case and keeps the guard cheap — no document re-read).
+ * the common case and keeps the guard cheap : no document re-read).
  */
 function byteLength(text: string): number {
   return Buffer.byteLength(text, 'utf8');
@@ -193,7 +193,7 @@ function statusFromReason(reason: string): FormatStatus {
  *  - `engineInput`  : the (possibly masked) text actually sent to the engine;
  *  - `restore`      : maps the engine output back to the verbatim-restored text,
  *                     or undefined when the restore is unsafe (placeholder
- *                     missing/duplicated) — in which case we abort (file intact).
+ *                     missing/duplicated) : in which case we abort (file intact).
  * When absent, the engine input is the original input and no restore runs.
  */
 interface RegionMask {
@@ -209,7 +209,7 @@ interface RegionMask {
  * `input` is the ORIGINAL span text and is always what the safety guard compares
  * the final output against. When `mask` is provided, the engine instead formats
  * `mask.engineInput` (with ignore regions replaced by placeholders) and the
- * output is restored verbatim via `mask.restore` BEFORE the guard runs — so a
+ * output is restored verbatim via `mask.restore` BEFORE the guard runs : so a
  * region splice can never apply a non-equivalent or non-parsable result.
  *
  * Never throws: any engine/guard failure is captured and reported as a
@@ -275,7 +275,7 @@ async function runFormat(
 
   // Safety guard: never apply output that is not semantically equivalent to the
   // ORIGINAL input (modulo whitespace/style). This is the product's core promise,
-  // and it validates the restored output — corruption is therefore impossible.
+  // and it validates the restored output : corruption is therefore impossible.
   let verdict;
   try {
     verdict = guard.check(languageId, input, output);
@@ -403,7 +403,7 @@ async function provideEdits(
   // Size guard: never block the UI thread on a huge document.
   const fullText = document.getText();
 
-  // Ignore layer (Axe 4) — consulted BEFORE any formatting work:
+  // Ignore layer (Axe 4) : consulted BEFORE any formatting work:
   //   (a) .soukformatignore matches this file -> Tidy does nothing here;
   //   (b) an in-source FILE-ignore marker (tidy-ignore-file / a head
   //       tidy-ignore / prettier-ignore) is present -> leave the file verbatim.
@@ -456,7 +456,7 @@ async function provideEdits(
 
   // Protect in-source ignore REGIONS for the full-document js-beautify path only.
   // Range formatting is a user-selected span where region semantics are ambiguous,
-  // so we keep it simple (no masking) — the guard still protects against any
+  // so we keep it simple (no masking) : the guard still protects against any
   // corruption regardless.
   const mask = range ? undefined : buildRegionMask(languageId, input);
 

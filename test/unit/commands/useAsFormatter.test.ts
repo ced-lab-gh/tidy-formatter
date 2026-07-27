@@ -1,6 +1,6 @@
 // Unit tests for the PURE planner of the "Use Tidy as my formatter" command
 // (Axe 1 / 1.T2). These tests import ONLY the pure decision function and its
-// constants — never the VS Code handler — so they run under plain mocha+tsx with
+// constants : never the VS Code handler : so they run under plain mocha+tsx with
 // no Electron host. The module is written with no top-level 'vscode' import, so
 // this import does not pull in 'vscode'; a regression that re-introduces a
 // top-level 'vscode' import would make this very file fail to load (which is the
@@ -24,14 +24,14 @@ import {
   type WriteTarget
 } from '../../../src/commands/useAsFormatter';
 
-describe('commands/useAsFormatter — constants', () => {
+describe('commands/useAsFormatter : constants', () => {
   it('exposes the stable command id and extension id', () => {
     assert.equal(USE_AS_FORMATTER_COMMAND_ID, 'tidy.useAsFormatter');
     assert.equal(EXTENSION_ID, 'ced-lab.tidy-formatter');
   });
 });
 
-describe('commands/useAsFormatter — planUseAsFormatter scope selection', () => {
+describe('commands/useAsFormatter : planUseAsFormatter scope selection', () => {
   it('requested Workspace with a workspace open => workspace, no warning', () => {
     const plan = planUseAsFormatter(['css'], true, 'workspace');
     assert.equal(plan.target, 'workspace');
@@ -71,7 +71,7 @@ describe('commands/useAsFormatter — planUseAsFormatter scope selection', () =>
   });
 });
 
-describe('commands/useAsFormatter — planUseAsFormatter language validation', () => {
+describe('commands/useAsFormatter : planUseAsFormatter language validation', () => {
   it('keeps every supported language in the given order', () => {
     const input = [
       'css',
@@ -125,7 +125,7 @@ describe('commands/useAsFormatter — planUseAsFormatter language validation', (
   });
 });
 
-describe('commands/useAsFormatter — planUseAsFormatter is pure', () => {
+describe('commands/useAsFormatter : planUseAsFormatter is pure', () => {
   it('never mutates the input array', () => {
     const input = Object.freeze(['css', 'css', 'python', 'html']);
     // A frozen array would throw on any in-place mutation attempt.

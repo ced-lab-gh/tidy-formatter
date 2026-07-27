@@ -4,9 +4,9 @@
 // 128x128. We render at 256x256 for crispness when the Marketplace downsamples
 // it to the ~32px list size.
 //
-// Design (a PRO, swappable placeholder — final art can land later):
+// Design (a PRO, swappable placeholder : final art can land later):
 //   - A rounded-corner square filled with the brand teal #168F7D. Teal connotes
-//     "clean / orderly" — the opposite of "breaks / destroys".
+//     "clean / orderly" : the opposite of "breaks / destroys".
 //   - A simple, high-contrast white glyph: three left-aligned horizontal bars
 //     with rounded ends, decreasing in width top-to-bottom. It reads as
 //     "neatly arranged text / tidy lines" and stays legible at 32px far better
@@ -17,7 +17,7 @@
 //
 // ZERO new dependencies: the PNG is hand-encoded with Node's built-in `zlib`
 // (IHDR + IDAT + IEND, RGBA truecolour+alpha, filter type 0 per scanline) with
-// CRC-32 computed inline — same approach as media/walkthrough/build-placeholders.mjs.
+// CRC-32 computed inline : same approach as media/walkthrough/build-placeholders.mjs.
 // Reproducible: re-running overwrites media/icon.png deterministically.
 //
 // Usage (from the extension root):  node media/build-icon.mjs
@@ -34,7 +34,7 @@ const H = SIZE * SS;
 const OUT_PATH = join(dirname(fileURLToPath(import.meta.url)), 'icon.png');
 
 // --- Brand palette ----------------------------------------------------------
-const TEAL = [0x16, 0x8f, 0x7d]; // #168F7D — clean / orderly
+const TEAL = [0x16, 0x8f, 0x7d]; // #168F7D : clean / orderly
 const INK = [0xff, 0xff, 0xff]; // crisp white glyph on the teal field
 
 // --- CRC-32 (PNG chunk checksum) -------------------------------------------

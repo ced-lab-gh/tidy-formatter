@@ -161,7 +161,7 @@ export const cssAcceptFixtures: CssAcceptFixture[] = [
   },
   {
     id: 'CPLX-CSS-COMBINATORS',
-    desc: 'child/sibling combinators (>, +, ~) — js-beautify tightens whitespace (false-positive guard)',
+    desc: 'child/sibling combinators (>, +, ~) : js-beautify tightens whitespace (false-positive guard)',
     ref: '#67 combinator false-positive',
     lang: 'css',
     input: '.menu > .item + .item ~ .last{color:red}'
@@ -360,7 +360,7 @@ export const cssRejectFixtures: CssRejectFixture[] = [
   },
   {
     id: 'CPLX-REJ-NTH-N-SPLIT',
-    desc: ':nth-child(2n) corrupted to (2 n) — the exact historical lonefy breakage',
+    desc: ':nth-child(2n) corrupted to (2 n) : the exact historical lonefy breakage',
     ref: '#77,#78 "SASS selector spacing"',
     lang: 'css',
     input: 'li:nth-child(2n){color:red}',

@@ -30,7 +30,7 @@ const MESSY_TSX =
   'return <div className="card"   onClick={()=>setN(n+1)}><h1>{title}</h1><span>{n}</span></div>\n' +
   '}\n';
 
-describe('DEMO — Tidy formats the real sample files in a real VS Code host', function () {
+describe('DEMO : Tidy formats the real sample files in a real VS Code host', function () {
   // CI-aware: slow/shared CI runners get headroom for the cold first run; local
   // stays strict (fast machine, rigour preserved).
   this.timeout(process.env.CI ? 180000 : 30000);

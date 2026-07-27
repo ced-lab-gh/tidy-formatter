@@ -2,7 +2,7 @@
 //
 // PURE (no 'vscode'): we import only the pure functions + label/constant exports.
 // `detectCompetingFormatters` loads 'vscode' lazily INSIDE its body, so importing
-// this module does NOT pull in 'vscode' — a regression that hoisted a top-level
+// this module does NOT pull in 'vscode' : a regression that hoisted a top-level
 // 'vscode' import would make this file fail to load (the point).
 //
 // Coverage focus (ROADMAP 4.T4 acceptance):
@@ -22,7 +22,7 @@ import {
   PACKAGE_JSON_FILENAME
 } from '../../../src/deference/detect';
 
-describe('deference/detect — constants', () => {
+describe('deference/detect : constants', () => {
   it('exposes stable formatter labels', () => {
     assert.equal(FORMATTER_PRETTIER, 'Prettier');
     assert.equal(FORMATTER_BIOME, 'Biome');
@@ -34,7 +34,7 @@ describe('deference/detect — constants', () => {
   });
 });
 
-describe('deference/detect — detectFromFilenames (Prettier variants)', () => {
+describe('deference/detect : detectFromFilenames (Prettier variants)', () => {
   const prettierVariants = [
     '.prettierrc',
     '.prettierrc.json',
@@ -63,7 +63,7 @@ describe('deference/detect — detectFromFilenames (Prettier variants)', () => {
   }
 });
 
-describe('deference/detect — detectFromFilenames (Biome / dprint)', () => {
+describe('deference/detect : detectFromFilenames (Biome / dprint)', () => {
   it('recognises biome.json and biome.jsonc', () => {
     assert.deepEqual(detectFromFilenames(['biome.json']), [FORMATTER_BIOME]);
     assert.deepEqual(detectFromFilenames(['biome.jsonc']), [FORMATTER_BIOME]);
@@ -77,7 +77,7 @@ describe('deference/detect — detectFromFilenames (Biome / dprint)', () => {
   });
 });
 
-describe('deference/detect — CFG-07 (.prettierignore alone activates nothing)', () => {
+describe('deference/detect : CFG-07 (.prettierignore alone activates nothing)', () => {
   it('does NOT detect Prettier from .prettierignore by itself', () => {
     assert.deepEqual(detectFromFilenames(['.prettierignore']), []);
   });
@@ -89,7 +89,7 @@ describe('deference/detect — CFG-07 (.prettierignore alone activates nothing)'
   });
 });
 
-describe('deference/detect — package.json prettier key', () => {
+describe('deference/detect : package.json prettier key', () => {
   it('detects Prettier when the package.json prettier flag is true', () => {
     assert.deepEqual(detectFromFilenames(['package.json'], true), [FORMATTER_PRETTIER]);
   });
@@ -105,7 +105,7 @@ describe('deference/detect — package.json prettier key', () => {
   });
 });
 
-describe('deference/detect — ordering, dedup, irrelevant names', () => {
+describe('deference/detect : ordering, dedup, irrelevant names', () => {
   it('returns nothing for an empty / unrelated listing', () => {
     assert.deepEqual(detectFromFilenames([]), []);
     assert.deepEqual(detectFromFilenames(['README.md', 'src', 'tsconfig.json']), []);
@@ -126,7 +126,7 @@ describe('deference/detect — ordering, dedup, irrelevant names', () => {
   });
 });
 
-describe('deference/detect — defensive against malformed input', () => {
+describe('deference/detect : defensive against malformed input', () => {
   it('treats a non-array input as empty', () => {
     assert.deepEqual(detectFromFilenames(undefined as unknown as string[]), []);
     assert.deepEqual(detectFromFilenames(null as unknown as string[]), []);
@@ -142,7 +142,7 @@ describe('deference/detect — defensive against malformed input', () => {
   });
 });
 
-describe('deference/detect — mergeDetected', () => {
+describe('deference/detect : mergeDetected', () => {
   it('merges per-folder results, de-duped and stably ordered', () => {
     assert.deepEqual(
       mergeDetected([FORMATTER_DPRINT], [FORMATTER_PRETTIER], [FORMATTER_PRETTIER]),
@@ -165,7 +165,7 @@ describe('deference/detect — mergeDetected', () => {
   });
 });
 
-describe('deference/detect — packageJsonDeclaresPrettier', () => {
+describe('deference/detect : packageJsonDeclaresPrettier', () => {
   it('is true only when a top-level prettier key is present', () => {
     assert.equal(packageJsonDeclaresPrettier({ prettier: { semi: false } }), true);
     assert.equal(packageJsonDeclaresPrettier({ prettier: 'tailwind-preset' }), true);

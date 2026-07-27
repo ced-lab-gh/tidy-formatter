@@ -1,4 +1,4 @@
-// POLYGLOT HTML corpus — HTML documents that embed SEVERAL languages at once and
+// POLYGLOT HTML corpus : HTML documents that embed SEVERAL languages at once and
 // must survive the format -> guard -> idempotence pipeline on the `html`
 // languageId.
 //
@@ -22,18 +22,18 @@
 // islands in text/attributes are plain HTML text/attr strings, preserved as-is.
 //
 // The ACCEPT contract (per fixture):
-//   1. CHANGED     — the engine actually reformatted the input (not a vacuous
+//   1. CHANGED     : the engine actually reformatted the input (not a vacuous
 //                    no-op pass that would make the guard assertion meaningless),
-//   2. EQUIVALENT  — guard.check('html', input, output).equivalent === true
+//   2. EQUIVALENT  : guard.check('html', input, output).equivalent === true
 //                    (embedded JS/CSS/JSON re-indented but semantically identical;
 //                     islands + verbatim blocks intact). A false rejection here is
 //                    the "safe but does nothing" failure SPEC §12 forbids,
-//   3. IDEMPOTENT  — format(format(x)) === format(x) (SAFE-03, no right-drift),
-//   4. PRESERVED   — every pinned `mustContain` token survives in the output.
+//   3. IDEMPOTENT  : format(format(x)) === format(x) (SAFE-03, no right-drift),
+//   4. PRESERVED   : every pinned `mustContain` token survives in the output.
 //
 // The REJECT block is the security half: a meaning change in ANY embedded
 // language (JS / CSS / JSON / inline handler / inline style / SVG attr / island
-// text / <pre>/<textarea> whitespace) MUST be rejected by the guard — the guard
+// text / <pre>/<textarea> whitespace) MUST be rejected by the guard : the guard
 // must never let a meaning change through, even when the tampered output is itself
 // well-formed HTML (the parse-only trap).
 //
@@ -56,10 +56,10 @@ async function formatHtml(code: string): Promise<string> {
   return dispatchFormat({ languageId: 'html', code, options: OPTS });
 }
 
-describe('polyglot HTML (embedded JS/CSS/JSON + islands) — format + guard + idempotence', () => {
+describe('polyglot HTML (embedded JS/CSS/JSON + islands) : format + guard + idempotence', () => {
   describe('ACCEPT: each polyglot fixture reformats safely and idempotently', () => {
     for (const fixture of polyglotFixtures) {
-      describe(`${fixture.id} — ${fixture.desc}`, () => {
+      describe(`${fixture.id} : ${fixture.desc}`, () => {
         let out = '';
         let out2 = '';
 
@@ -251,7 +251,7 @@ describe('polyglot HTML (embedded JS/CSS/JSON + islands) — format + guard + id
     // changing the bytes. The guard cannot prove the reflow is meaning-preserving
     // (the body does not JS-parse), so canonicalizeEmbeddedCode falls back to a
     // VERBATIM comparison: input-verbatim != reflowed-output-verbatim => REJECT.
-    // The file is therefore left intact upstream — the correct safe outcome for an
+    // The file is therefore left intact upstream : the correct safe outcome for an
     // ambiguous templated script (SPEC §12 "faux négatif"/conservative-by-default).
     it('the engine reflows the templated default-script body (bytes change)', async () => {
       const input = '<div><script>const tpl={{ jsonData }};render(tpl)</script></div>';

@@ -4,7 +4,7 @@
 // .soukformatignore while honouring the same two policy gates the .editorconfig /
 // .soukformatrc readers use:
 //   1. opt-out  `tidy.respectSoukformatignore` (default true) is not disabled;
-//   2. Workspace Trust — a .soukformatignore is workspace-authored content, so in
+//   2. Workspace Trust : a .soukformatignore is workspace-authored content, so in
 //      Restricted Mode we must not read it (the file is formatted, fail-safe);
 //   3. the document has a real on-disk path (scheme 'file'); virtual / untitled
 //      documents have no tree to walk and are never ignored by this path.
@@ -12,7 +12,7 @@
 // The matching itself lives in the PURE soukformatignore module (resolveIgnore);
 // this module only applies the VS Code policy gates, so the ignore logic stays
 // unit-testable outside the Electron host. Never throws: any failure is fail-SAFE
-// (treated as "not ignored", so formatting proceeds — Axe 4.T3 "lecture echoue ->
+// (treated as "not ignored", so formatting proceeds : Axe 4.T3 "lecture echoue ->
 // on formate").
 import * as vscode from 'vscode';
 import { resolveIgnore, type IgnoreLookup } from './soukformatignore';
@@ -50,7 +50,7 @@ export function resolveDocumentIgnore(document: vscode.TextDocument): IgnoreLook
     return resolveIgnore(document.uri.fsPath);
   } catch {
     // Defensive: the pure resolver is already fail-safe, but never let an
-    // unexpected error block formatting — treat as "not ignored".
+    // unexpected error block formatting : treat as "not ignored".
     return { ignored: false };
   }
 }

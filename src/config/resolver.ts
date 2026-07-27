@@ -153,7 +153,7 @@ interface Accumulator {
  * normalising aliases and routing canonical keys to typed fields while
  * everything else lands in engineOptions. A key that fails coercion is ignored
  * (kept at the prior layer's value) rather than silently corrupting the typed
- * field — fail-safe, never fail-destructive.
+ * field : fail-safe, never fail-destructive.
  */
 function applyEntry(
   acc: Accumulator,

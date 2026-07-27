@@ -2,13 +2,13 @@
 // a user writes inside the code itself. Three kinds, all expressed as comments
 // using the host language's comment syntax:
 //
-//   (a) FILE ignore   — the first significant comment at the very top contains
+//   (a) FILE ignore   : the first significant comment at the very top contains
 //                       "tidy-ignore-file" / "tidy-ignore", OR a leading
 //                       "prettier-ignore". The whole document is left verbatim.
-//   (b) REGION ignore — a "tidy-ignore-start" comment opens a protected span that
+//   (b) REGION ignore : a "tidy-ignore-start" comment opens a protected span that
 //                       a "tidy-ignore-end" comment closes; the byte range
 //                       in-between (markers included) is preserved verbatim.
-//   (c) NODE ignore   — a "tidy-ignore" / "prettier-ignore" comment immediately
+//   (c) NODE ignore   : a "tidy-ignore" / "prettier-ignore" comment immediately
 //                       preceding a node protects that node (best-effort,
 //                       conservative line heuristic).
 //
@@ -16,7 +16,7 @@
 // the raw text + the languageId only, so it is exhaustively unit-testable. The
 // caller (the provider, behind the safety guard) is responsible for splicing the
 // protected ranges back VERBATIM so the final output stays equivalent to the
-// input — meaning the guard always accepts and the file can never be corrupted.
+// input : meaning the guard always accepts and the file can never be corrupted.
 import type { LangId } from '../types';
 
 /** Directive keyword recognised to ignore a whole FILE (anywhere in the head). */
@@ -54,7 +54,7 @@ export interface MarkerScan {
 
 /** Which comment delimiters a language uses, for region/node detection. */
 interface CommentSyntax {
-  /** Line-comment opener, e.g. "//" — undefined when the language has none. */
+  /** Line-comment opener, e.g. "//" : undefined when the language has none. */
   readonly line?: string;
   /** Block-comment delimiters, e.g. ["/*", "*\/"] or ["<!--", "-->"]. */
   readonly block?: readonly [string, string];
@@ -175,7 +175,7 @@ interface CommentHit {
  * Enumerate every comment in the document, in order. A best-effort lexical scan:
  * it understands the language's line/block delimiters and skips over string
  * literals so a "// ..." inside a JS string is not mistaken for a comment.
- * Conservative by design — it never claims a comment it is unsure about, so a
+ * Conservative by design : it never claims a comment it is unsure about, so a
  * marker in odd contexts simply protects nothing (never over-deletes).
  */
 function scanComments(text: string, syntax: CommentSyntax): CommentHit[] {
@@ -270,7 +270,7 @@ function startOfNextLine(text: string, offset: number): number {
 /**
  * Build the protected REGION ranges between matched start/end markers. Regions
  * do not nest: the first start opens, the next end closes; an unterminated start
- * protects to end-of-file (conservative — protect MORE, never less). The whole
+ * protects to end-of-file (conservative : protect MORE, never less). The whole
  * span from the start marker's line through the end marker's line is preserved.
  */
 function collectRegions(text: string, comments: readonly CommentHit[]): ProtectedRange[] {
@@ -304,7 +304,7 @@ function collectRegions(text: string, comments: readonly CommentHit[]): Protecte
  * "prettier-ignore" comment (NOT a region start/end) protects the line(s) of the
  * node that immediately follows. The heuristic is deliberately coarse and
  * conservative: it protects from the marker comment's line through the end of the
- * NEXT non-blank line. The downstream guard makes this safe — if the coarse span
+ * NEXT non-blank line. The downstream guard makes this safe : if the coarse span
  * ever produced a non-equivalent splice, the guard rejects and the file is left
  * intact, so erring toward protecting more can never corrupt.
  */

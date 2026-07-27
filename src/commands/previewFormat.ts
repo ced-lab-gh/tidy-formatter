@@ -8,7 +8,7 @@
 // SAFETY / ANTI-HIJACK (NON-NEGOTIABLE):
 //   - The diff is the SAME pipeline the providers use: dispatchFormat + the
 //     semantic guard. If the guard rejects the output (it would have broken the
-//     syntax), NO diff is shown and the file is left intact — we surface a
+//     syntax), NO diff is shown and the file is left intact : we surface a
 //     non-blocking message instead. Corruption is therefore impossible here too.
 //   - The preview side is served by a read-only TextDocumentContentProvider
 //     (scheme 'tidy-preview'); the user can never edit it, and nothing is written
@@ -18,7 +18,7 @@
 //     auto-apply, no defaultFormatter write.
 //
 // Split of concerns (so the decision logic is unit-testable without an Electron
-// host): this module's TOP LEVEL imports NO 'vscode' — neither directly nor
+// host): this module's TOP LEVEL imports NO 'vscode' : neither directly nor
 // transitively. The pure planner `buildPreviewPlan` takes plain data (input,
 // formatted, a GuardVerdict) and is covered by a plain mocha+tsx test. The VS
 // Code surface ('vscode', dispatcher, guard, vscodeConfig) is required lazily
@@ -49,16 +49,16 @@ export const GUARD_REJECTED_REASON =
  * Surfaced verbatim when formatting would change nothing: the document is
  * already tidy, so there is nothing to preview or apply.
  */
-export const NO_CHANGE_REASON = 'le document est deja formate — aucun changement';
+export const NO_CHANGE_REASON = 'le document est deja formate : aucun changement';
 
 /* -------------------------------------------------------------------------- */
-/* Pure planner (no 'vscode' — unit-testable under mocha + tsx)                 */
+/* Pure planner (no 'vscode' : unit-testable under mocha + tsx)                 */
 /* -------------------------------------------------------------------------- */
 
 /**
  * The decision produced by {@link buildPreviewPlan}: whether the formatted
  * output may be previewed/applied, and (when it may not) the user-facing reason.
- * PURE data — no 'vscode' types leak here.
+ * PURE data : no 'vscode' types leak here.
  */
 export interface PreviewPlan {
   /** True only when there is a real, guard-approved change to show + apply. */
@@ -78,7 +78,7 @@ export interface PreviewPlan {
  *   1. The guard is authoritative. If it did NOT find the output equivalent to
  *      the input, the output would change the file's meaning / break its syntax,
  *      so we refuse: `canApply:false` with the guard's own reason (or a stable
- *      fallback). This is the exact gate the providers use — the preview can
+ *      fallback). This is the exact gate the providers use : the preview can
  *      never apply something the normal format path would reject.
  *   2. A guard-approved output that is byte-identical to the input is a no-op:
  *      there is nothing to preview, so `canApply:false` with NO_CHANGE_REASON.
@@ -190,7 +190,7 @@ function ensurePreviewProvider(vscode: any): PreviewContentProvider {
 
   // The disposable is owned by VS Code for the session; we never unregister
   // mid-session (one provider serves every preview). This adds no save/change
-  // hook — a content provider only answers reads for its own scheme.
+  // hook : a content provider only answers reads for its own scheme.
   vscode.workspace.registerTextDocumentContentProvider(PREVIEW_SCHEME, provider);
   provider.registered = true;
   previewProvider = provider;
@@ -253,7 +253,7 @@ async function showDiffAndOfferApply(
   );
 
   if (picked !== APPLY_BUTTON_LABEL) {
-    return; // dismissed — nothing written, file intact.
+    return; // dismissed : nothing written, file intact.
   }
 
   let applied = false;

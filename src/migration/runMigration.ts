@@ -1,12 +1,12 @@
 // Migration flow: import a legacy lonefy `.jsbeautifyrc` into Tidy settings, and
-// optionally make Tidy the default formatter — ONLY after explicit confirmation
+// optionally make Tidy the default formatter : ONLY after explicit confirmation
 // (Axe 1 / 1.T4).
 //
-// ANTI-HIJACK (ARCH-01/02, SPEC §5/§10/§12) — NON-NEGOTIABLE:
+// ANTI-HIJACK (ARCH-01/02, SPEC §5/§10/§12) : NON-NEGOTIABLE:
 //   - NOTHING is written before the user confirms a recap of exactly what will
 //     change. Cancelling at any step writes zero settings.
 //   - We write the mapped `tidy.*` settings and (if the user opts in) Tidy's
-//     per-language `editor.defaultFormatter` via the shared core — and NOTHING
+//     per-language `editor.defaultFormatter` via the shared core : and NOTHING
 //     ELSE. We NEVER write `editor.formatOnSave`.
 //   - `.jsbeautifyrc` is read best-effort and ONLY when the workspace is trusted
 //     (Workspace Trust gate, mirroring vscodeConfig.shouldReadEditorConfig). In
@@ -160,7 +160,7 @@ async function readJsbeautifyrc(vscode: any): Promise<string | undefined> {
       const bytes = await vscode.workspace.fs.readFile(uri);
       return Buffer.from(bytes).toString('utf8');
     } catch {
-      // Not present in this folder (or unreadable) — try the next one.
+      // Not present in this folder (or unreadable) : try the next one.
       continue;
     }
   }
@@ -169,7 +169,7 @@ async function readJsbeautifyrc(vscode: any): Promise<string | undefined> {
 
 /**
  * Reveal the abandoned incumbent in the Extensions view so the user can disable
- * or uninstall it themselves. We GUIDE only — VS Code has no API to disable
+ * or uninstall it themselves. We GUIDE only : VS Code has no API to disable
  * another extension and Tidy never pretends it did.
  */
 function openLonefyInExtensionsView(vscode: any): void {
@@ -201,7 +201,7 @@ async function writeMappedSettings(
 
 /**
  * Offer to make Tidy the default formatter as part of migration, reusing the
- * SAME command the standalone "Use Tidy as my formatter" runs — so there is one
+ * SAME command the standalone "Use Tidy as my formatter" runs : so there is one
  * confirmed, anti-hijack-safe code path for that write. Returns nothing; the
  * command itself drives its own QuickPick + confirmation.
  */
@@ -226,7 +226,7 @@ async function offerUseAsFormatter(vscode: any): Promise<void> {
  * Flow (every write user-confirmed; any cancel = zero writes):
  *   1. best-effort read `.jsbeautifyrc` (Workspace Trust gated);
  *   2. map it via the pure mapper and build a recap;
- *   3. show the recap with an explicit confirm/cancel — NOTHING written yet;
+ *   3. show the recap with an explicit confirm/cancel : NOTHING written yet;
  *   4. on confirm: write the mapped `tidy.*` settings at Workspace scope;
  *   5. offer (separately, opt-in) to set Tidy as the default formatter, which
  *      delegates to the existing confirmed command;
@@ -279,7 +279,7 @@ export async function runMigration(): Promise<void> {
         'Tidy imported your legacy settings at workspace scope.'
       );
     } else if (choice !== ACTION_SKIP_IMPORT) {
-      return; // dismissed/cancelled the modal — write nothing, stop.
+      return; // dismissed/cancelled the modal : write nothing, stop.
     }
   } else {
     // Nothing to import (no file, or no mappable options): tell the user, no
@@ -308,7 +308,7 @@ export async function runMigration(): Promise<void> {
  * globalState. Offers: run the migration now, do it later (the command stays in
  * the palette), or "Don't ask again" (records the dedup flag so it never repeats).
  *
- * Writes NOTHING itself — the actual migration writes happen only inside
+ * Writes NOTHING itself : the actual migration writes happen only inside
  * runMigration after its own confirmation. Returns true when the caller should
  * persist the "prompted" flag (i.e. the prompt was shown and the user engaged,
  * or chose "Don't ask again"): we always set it after showing, so the nag is
@@ -331,7 +331,7 @@ export async function showMigrationNotification(
 
   const choice = await vscode.window.showInformationMessage(
     'JS-CSS-HTML Formatter is installed. Tidy is a safer, maintained ' +
-      'replacement — migrate your settings and switch over?',
+      'replacement : migrate your settings and switch over?',
     runNow,
     dontAsk
   );

@@ -8,7 +8,7 @@
 //       out = dispatchFormat(req); guard.check(lang, input, out).equivalent === true
 //       A failure means EITHER a guard false-positive (it rejects a correct
 //       output, the "safe but does nothing" frustration) OR a real engine
-//       corruption (it changed meaning) — both are reportable bugs. This is the
+//       corruption (it changed meaning) : both are reportable bugs. This is the
 //       invariant that would have caught the `< Foo bar = {x} />` JSX class.
 //
 //   I2  Idempotence (SAFE-03): dispatchFormat(out) === out, byte-for-byte. Catches
@@ -45,7 +45,7 @@ const VARIANTS = 4;
 
 /**
  * Independent re-parse of formatted output using the guard's reference parsers.
- * Throws if the output does not parse — this is the substance of I3 and is fully
+ * Throws if the output does not parse : this is the substance of I3 and is fully
  * independent of the (lenient) js-beautify pass that produced the output.
  */
 function reparse(lang: LangId, code: string): void {
@@ -94,7 +94,7 @@ function reparse(lang: LangId, code: string): void {
   }
 }
 
-describe('property — corpus coverage', () => {
+describe('property : corpus coverage', () => {
   it('covers every one of the 10 supported languageIds', () => {
     const present = new Set(corpus.map((s) => s.lang));
     for (const lang of ALL_LANGS) {
@@ -112,14 +112,14 @@ describe('property — corpus coverage', () => {
   });
 });
 
-describe('property — invariants over corpus x deterministic perturbations', () => {
+describe('property : invariants over corpus x deterministic perturbations', () => {
   corpus.forEach((snippet: CorpusSnippet, snippetIndex: number) => {
     for (let v = 0; v < VARIANTS; v += 1) {
       // The variant index folds in the snippet index so the perturbation stream
       // differs across snippets while remaining fully deterministic.
       const variantSeed = snippetIndex + v;
       const input = perturb(snippet.code, variantSeed);
-      const label = `${snippet.id} v${v} [${snippet.lang}] — ${snippet.note}`;
+      const label = `${snippet.id} v${v} [${snippet.lang}] : ${snippet.note}`;
 
       describe(label, () => {
         let output: string;
@@ -138,7 +138,7 @@ describe('property — invariants over corpus x deterministic perturbations', ()
           });
         });
 
-        // I1 — the safety guard must accept the formatter's own output.
+        // I1 : the safety guard must accept the formatter's own output.
         it('I1: guard.check(lang, input, output).equivalent === true', () => {
           const verdict = guard.check(snippet.lang, input, output);
           assert.equal(
@@ -148,12 +148,12 @@ describe('property — invariants over corpus x deterministic perturbations', ()
           );
         });
 
-        // I2 — idempotence: the second pass is a byte-for-byte no-op.
+        // I2 : idempotence: the second pass is a byte-for-byte no-op.
         it('I2: dispatchFormat(output) === output (idempotent)', () => {
           assert.equal(secondPass, output, 'second pass drifted (non-idempotent)');
         });
 
-        // I3 — the output re-parses under the strict reference parsers.
+        // I3 : the output re-parses under the strict reference parsers.
         it('I3: formatted output re-parses without error', () => {
           assert.doesNotThrow(
             () => reparse(snippet.lang, output),
@@ -169,7 +169,7 @@ describe('property — invariants over corpus x deterministic perturbations', ()
 // Real bugs discovered by this harness, now FIXED in the Fix phase. Each is a
 // TIGHT reproduction that is asserted to pass after the corresponding src/ fix.
 // ---------------------------------------------------------------------------
-describe('property — previously-quarantined bugs (now fixed)', () => {
+describe('property : previously-quarantined bugs (now fixed)', () => {
   // FIXED (guard false-positive I1): postcss-less parses a COMPACT LESS variable
   // declaration `@c:red` as an atrule named "c:red" with no params, but the
   // SPACED form `@c: red` (which js-beautify emits) as a variable atrule named

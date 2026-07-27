@@ -88,7 +88,7 @@ const ENTRY_BY_BARE_KEY: ReadonlyMap<string, OptionEntry> = (() => {
  * The canonical engineOptions key the resolver/engines expect for an entry:
  *  - prettier options are namespaced under engineOptions.prettier, so the file
  *    value is mapped onto the bare prettier key here and re-nested by vscodeConfig
- *    — but for the pure layer we forward the prettier key prefixed so the resolver
+ *    : but for the pure layer we forward the prettier key prefixed so the resolver
  *    keeps it in engineOptions and vscodeConfig nesting is unnecessary. To keep
  *    this module pure AND consistent with the VS Code path, we emit prettier keys
  *    as `prettier.<engineKey>` so the consumer can lift them into the object.
@@ -298,7 +298,7 @@ export function parseSoukformatrc(
     }
   }
 
-  // Glob overrides (layer 5) — appended after the language section so they win.
+  // Glob overrides (layer 5) : appended after the language section so they win.
   layers.push(...mapOverrides(root.overrides, lang, relativePosixPath, warnings));
 
   return { layers, warnings };

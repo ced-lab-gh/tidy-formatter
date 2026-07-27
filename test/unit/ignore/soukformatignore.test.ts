@@ -17,7 +17,7 @@ import {
   SOUKFORMATIGNORE_FILENAME
 } from '../../../src/ignore/soukformatignore';
 
-describe('ignore/soukformatignore — parseIgnorePatterns + isIgnoredFile (pure)', () => {
+describe('ignore/soukformatignore : parseIgnorePatterns + isIgnoredFile (pure)', () => {
   it('ignores a minified file matched by *.min.css', () => {
     const patterns = parseIgnorePatterns('*.min.css\n');
     assert.equal(isIgnoredFile('vendor/lib.min.css', patterns), true);
@@ -76,7 +76,7 @@ describe('ignore/soukformatignore — parseIgnorePatterns + isIgnoredFile (pure)
   });
 });
 
-describe('ignore/soukformatignore — on-disk discovery (node:fs)', () => {
+describe('ignore/soukformatignore : on-disk discovery (node:fs)', () => {
   let root: string;
 
   beforeEach(() => {

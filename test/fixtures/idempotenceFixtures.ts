@@ -1,5 +1,5 @@
 // Idempotence corpus (SPEC SAFE-03): format(format(x)) === format(x).
-// Cadrée comme protection "drift uniquement" — the "code creeps right on every
+// Cadrée comme protection "drift uniquement" : the "code creeps right on every
 // save" review cluster ("my code moves to right", "adds 4 tabs instead of 2").
 // Each entry is a representative input per language; the test formats it once,
 // then formats the result again and asserts the second pass is a byte no-op.

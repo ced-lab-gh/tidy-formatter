@@ -6,7 +6,7 @@
 //   1. the two formatted outputs DIFFER (the option really has an effect), and
 //   2. guard.check(input, output) === equivalent:true for BOTH outputs, and
 //   3. guard.check(outputA, outputB) === equivalent:true (the two stylistic
-//      variants are mutually equivalent — same AST modulo whitespace/style).
+//      variants are mutually equivalent : same AST modulo whitespace/style).
 //
 // This proves the equivalence guard accepts every stylistic toggle, so exposing
 // these options can never make Tidy a silent no-op nor let it corrupt a file.
@@ -90,7 +90,7 @@ const CASES: readonly Case[] = [
   }
 ];
 
-describe('safety/guard — Prettier stylistic options are AST-invariant', () => {
+describe('safety/guard : Prettier stylistic options are AST-invariant', () => {
   for (const c of CASES) {
     it(`${c.name}: changes output yet stays guard-equivalent`, async () => {
       const outA = await fmt(c.input, c.a, c.lang);

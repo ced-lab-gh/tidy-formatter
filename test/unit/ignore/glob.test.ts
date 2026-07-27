@@ -1,4 +1,4 @@
-// Unit tests for the pure gitignore-style glob matcher (Axe 4 — extends the
+// Unit tests for the pure gitignore-style glob matcher (Axe 4 : extends the
 // minimal glob of config/soukformatrc.ts without a new npm dependency).
 import assert from 'node:assert/strict';
 import {
@@ -13,7 +13,7 @@ function match(line: string, path: string): boolean {
   return patternMatches(pattern as IgnorePattern, path);
 }
 
-describe('ignore/glob — compileIgnorePattern + patternMatches', () => {
+describe('ignore/glob : compileIgnorePattern + patternMatches', () => {
   it('a name-only pattern matches that file at any depth', () => {
     assert.equal(match('*.min.css', 'a.min.css'), true);
     assert.equal(match('*.min.css', 'src/styles/a.min.css'), true);

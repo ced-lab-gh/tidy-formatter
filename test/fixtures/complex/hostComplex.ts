@@ -1,8 +1,8 @@
 // Large, real-world COMPLEX fixtures for the end-to-end integration suite
 // (test/integration/complex.test.ts). Unlike the unit-level complex fixtures,
-// these are deliberately *big* — a full .tsx component, a real .scss stylesheet,
+// these are deliberately *big* : a full .tsx component, a real .scss stylesheet,
 // an .html page with embedded <script>/<style>/template islands, and a deeply
-// nested .json — so the assertion that "Tidy actually ran in the real host AND
+// nested .json : so the assertion that "Tidy actually ran in the real host AND
 // stayed safe" exercises the whole format -> guard -> edit pipeline on inputs
 // that mirror what a user would actually format.
 //

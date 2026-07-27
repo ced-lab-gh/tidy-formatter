@@ -25,7 +25,7 @@ import { FORMATTER_PRETTIER, FORMATTER_BIOME, FORMATTER_DPRINT } from '../../../
 
 const PRETTIER_ONLY = [FORMATTER_PRETTIER];
 
-describe('deference/decide — constants', () => {
+describe('deference/decide : constants', () => {
   it('defaults to notify (surface, never silently disable)', () => {
     assert.equal(DEFAULT_DEFERENCE_SETTING, 'notify');
   });
@@ -36,7 +36,7 @@ describe('deference/decide — constants', () => {
   });
 });
 
-describe('deference/decide — no competitor', () => {
+describe('deference/decide : no competitor', () => {
   it('returns none for an empty list, for every setting', () => {
     const settings: DeferenceSetting[] = ['notify', 'silent-defer', 'off'];
     for (const setting of settings) {
@@ -53,7 +53,7 @@ describe('deference/decide — no competitor', () => {
   });
 });
 
-describe('deference/decide — notify (one-shot)', () => {
+describe('deference/decide : notify (one-shot)', () => {
   it('notifies with a message when a competitor is present and not yet prompted', () => {
     const decision = decide(PRETTIER_ONLY, 'notify', false);
     assert.equal(decision.action, 'notify');
@@ -65,7 +65,7 @@ describe('deference/decide — notify (one-shot)', () => {
   });
 });
 
-describe('deference/decide — silent-defer (never notifies, never writes)', () => {
+describe('deference/decide : silent-defer (never notifies, never writes)', () => {
   it('returns defer when a competitor is present', () => {
     assert.deepEqual(decide(PRETTIER_ONLY, 'silent-defer', false), { action: 'defer' });
   });
@@ -79,13 +79,13 @@ describe('deference/decide — silent-defer (never notifies, never writes)', () 
   });
 });
 
-describe('deference/decide — off (detection ignored entirely)', () => {
+describe('deference/decide : off (detection ignored entirely)', () => {
   it('returns none even with competitors present, unprompted', () => {
     assert.deepEqual(decide([FORMATTER_BIOME], 'off', false), { action: 'none' });
   });
 });
 
-describe('deference/decide — full truth table', () => {
+describe('deference/decide : full truth table', () => {
   it('matches the documented matrix', () => {
     const table: Array<[boolean, DeferenceSetting, boolean, 'notify' | 'defer' | 'none']> = [
       // hasCompetitor, setting, alreadyPrompted, expectedAction
@@ -109,7 +109,7 @@ describe('deference/decide — full truth table', () => {
   });
 });
 
-describe('deference/decide — formatDeferenceMessage', () => {
+describe('deference/decide : formatDeferenceMessage', () => {
   it('names a single formatter and promises the default formatter is unchanged', () => {
     const message = formatDeferenceMessage(PRETTIER_ONLY);
     assert.ok(message.includes('Prettier'));
@@ -134,14 +134,14 @@ describe('deference/decide — formatDeferenceMessage', () => {
   it('never instructs disabling another extension or formatOnSave', () => {
     const message = formatDeferenceMessage(PRETTIER_ONLY).toLowerCase();
     // Anti-hijack: deference never touches defaultFormatter / formatOnSave, and
-    // never claims to disable the competitor — it only offers stepping Tidy back.
+    // never claims to disable the competitor : it only offers stepping Tidy back.
     assert.ok(!message.includes('formatonsave'));
     assert.ok(!message.includes('defaultformatter'));
     assert.ok(!message.includes('uninstall'));
   });
 });
 
-describe('deference/decide — normalizeSetting', () => {
+describe('deference/decide : normalizeSetting', () => {
   it('passes through the three known values', () => {
     assert.equal(normalizeSetting('notify'), 'notify');
     assert.equal(normalizeSetting('silent-defer'), 'silent-defer');

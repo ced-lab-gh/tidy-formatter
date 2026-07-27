@@ -54,7 +54,7 @@ function readManifest(): Manifest {
   return JSON.parse(raw) as Manifest;
 }
 
-describe('manifest — onboarding commands (1.T6)', () => {
+describe('manifest : onboarding commands (1.T6)', () => {
   const manifest = readManifest();
   const commands = manifest.contributes.commands;
 
@@ -82,7 +82,7 @@ describe('manifest — onboarding commands (1.T6)', () => {
   });
 });
 
-describe('manifest — walkthrough (1.T3)', () => {
+describe('manifest : walkthrough (1.T3)', () => {
   const manifest = readManifest();
   const walkthroughs = manifest.contributes.walkthroughs;
 
@@ -134,7 +134,7 @@ describe('manifest — walkthrough (1.T3)', () => {
   });
 });
 
-describe('manifest — anti-hijack invariants (ARCH-01/03, DPB-03)', () => {
+describe('manifest : anti-hijack invariants (ARCH-01/03, DPB-03)', () => {
   const manifest = readManifest();
 
   it('has no wildcard or onStartupFinished activation event', () => {

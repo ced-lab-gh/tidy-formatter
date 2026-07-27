@@ -1,7 +1,7 @@
 // Detect competing/concurrent formatters configured in the workspace so Tidy can
 // SURFACE (never silently disable) a deference notification (Axe 4 / 4.T4 + 4.T5).
 //
-// ANTI-HIJACK (ARCH-01/02, SPEC §5/§10/§12) — NON-NEGOTIABLE:
+// ANTI-HIJACK (ARCH-01/02, SPEC §5/§10/§12) : NON-NEGOTIABLE:
 //   - This module only DETECTS that another formatter is configured. It writes no
 //     setting, changes no `editor.defaultFormatter`, and triggers no formatting.
 //     The decision of what to do with the detection lives in `decide.ts`; surfacing

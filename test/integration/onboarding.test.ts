@@ -1,4 +1,4 @@
-// Headless onboarding / migration integration tests — ROADMAP Axe 1 (1.T2/1.T3/
+// Headless onboarding / migration integration tests : ROADMAP Axe 1 (1.T2/1.T3/
 // 1.T4). These run inside a real VS Code Electron host (via @vscode/test-cli),
 // so they can prove the consent-first onboarding contract end-to-end the way no
 // pure unit test can.
@@ -7,7 +7,7 @@
 //   (a) opting Tidy in as the formatter writes editor.defaultFormatter
 //       (overrideInLanguage) for the chosen language(s) at Workspace scope, and
 //       resolves to 'ced-lab.tidy-formatter';
-//   (b) CRITICAL — editor.formatOnSave is NEVER touched by that opt-in (inspect
+//   (b) CRITICAL : editor.formatOnSave is NEVER touched by that opt-in (inspect
 //       before == inspect after). The #1 complaint about the incumbent was that
 //       it hijacked save; Tidy must not, even while making itself the formatter;
 //   (c) the migration prompt decision (shouldPromptMigration) is one-shot:
@@ -16,7 +16,7 @@
 //   (d) the packaged VSIX ships media/walkthrough/* (the getting-started
 //       walkthrough assets), verified via vsce's programmatic listFiles;
 //   (e) once Tidy is the resolved default formatter, a real Format Document
-//       through that default actually produces edits (it is not a silent no-op —
+//       through that default actually produces edits (it is not a silent no-op , 
 //       the "safe but does nothing" failure mode Axe 1 exists to kill).
 //
 // Design notes:
@@ -89,7 +89,7 @@ async function clearLanguageDefaultFormatter(languageId: string): Promise<void> 
     );
 }
 
-describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', function () {
+describe('Tidy onboarding & migration (Axe 1) : consent-first guarantees', function () {
   // First run downloads/opens the Electron host; give each case headroom.
   // CI-aware: shared/slow CI runners (cold VS Code download + Electron boot +
   // readiness poll) get a generous ceiling; local stays strict to keep the bar high.
@@ -154,7 +154,7 @@ describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', fun
       );
     }
 
-    // A language NOT chosen must remain untouched — the write surface is exactly
+    // A language NOT chosen must remain untouched : the write surface is exactly
     // the requested languages, never wider (anti-hijack: no incidental writes).
     assert.equal(
       inspectDefaultFormatter('html'),
@@ -178,7 +178,7 @@ describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', fun
     const afterLang = inspectFormatOnSave(lang);
 
     // Sanity: the opt-in actually did its (only) job, so "formatOnSave unchanged"
-    // is a real guarantee about a flow that wrote something — not a no-op test.
+    // is a real guarantee about a flow that wrote something : not a no-op test.
     assert.equal(
       inspectDefaultFormatter(lang),
       EXTENSION_ID,
@@ -213,7 +213,7 @@ describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', fun
 
     // The activation flow records the dedup flag the moment the prompt is shown
     // (showMigrationNotification calls markPrompted() before awaiting the user),
-    // so any subsequent decision must be false — the nag never repeats.
+    // so any subsequent decision must be false : the nag never repeats.
     alreadyPrompted = true;
     assert.equal(
       shouldPromptMigration(lonefyPresent, alreadyPrompted),
@@ -222,7 +222,7 @@ describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', fun
     );
 
     // And it must also be false when the incumbent is simply absent, regardless
-    // of the flag — nothing to migrate from.
+    // of the flag : nothing to migrate from.
     assert.equal(
       shouldPromptMigration(false, false),
       false,
@@ -233,7 +233,7 @@ describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', fun
   // (d) The packaged VSIX ships the walkthrough assets (media/walkthrough/*).
   it('(d) the VSIX includes media/walkthrough/* (getting-started walkthrough)', async () => {
     // vsce's programmatic listFiles honours .vscodeignore and yields exactly the
-    // files that would be packed into the VSIX — proving the walkthrough markdown
+    // files that would be packed into the VSIX : proving the walkthrough markdown
     // + images ship, without building the .vsix or spawning a child process.
     const files = await listFiles({ cwd: extensionRoot() });
     const walkthrough = files.filter((f) =>
@@ -286,7 +286,7 @@ describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', fun
     await vscode.window.showTextDocument(document);
 
     // computeFormatEdits asks VS Code core to compute the edits Tidy's provider
-    // would apply — non-empty proves the opt-in produced a WORKING formatter, not
+    // would apply : non-empty proves the opt-in produced a WORKING formatter, not
     // a silent no-op. Cold-host races are absorbed by a short readiness poll.
     let edits = await computeFormatEdits(document);
     const deadline = Date.now() + 10000;
@@ -305,7 +305,7 @@ describe('Tidy onboarding & migration (Axe 1) — consent-first guarantees', fun
  * The extension's own root (where package.json / .vscodeignore live), which is
  * what vsce.listFiles must run against. The integration host opens a *fixture*
  * workspace folder (test/integration/workspace), so workspaceRoot() points there
- * — not at the extension. We derive the extension root from the activated
+ * : not at the extension. We derive the extension root from the activated
  * extension's URI instead.
  */
 function extensionRoot(): string {

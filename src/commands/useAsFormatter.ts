@@ -1,18 +1,18 @@
 // Command: "Tidy: Use Tidy as my formatter" (Axe 1 / 1.T2).
 //
-// ANTI-HIJACK (ARCH-02, SPEC §5/§12) — NON-NEGOTIABLE:
+// ANTI-HIJACK (ARCH-02, SPEC §5/§12) : NON-NEGOTIABLE:
 //   - We ONLY write a setting in response to an explicit user action (the user
 //     ticks languages in a QuickPick and confirms a scope). Cancelling at any
 //     step writes NOTHING.
 //   - We write `editor.defaultFormatter` (overrideInLanguage) per chosen
 //     language and NOTHING ELSE. We NEVER write `editor.formatOnSave`; the user
 //     is merely offered a button that OPENS that setting so they decide.
-//   - There is no auto-set at boot, no save/change/watcher hook — this command
+//   - There is no auto-set at boot, no save/change/watcher hook : this command
 //     is invoked only from the Command Palette.
 //
 // Split of concerns (so the decision logic is unit-testable without an Electron
-// host): this module's TOP LEVEL imports NO 'vscode' — neither directly nor
-// transitively — so `planUseAsFormatter` can be imported by a pure mocha+tsx
+// host): this module's TOP LEVEL imports NO 'vscode' : neither directly nor
+// transitively : so `planUseAsFormatter` can be imported by a pure mocha+tsx
 // test. The VS Code surface (`vscode`, and the provider's SUPPORTED_LANGUAGES)
 // is required lazily INSIDE the handler functions, which only ever run inside the
 // extension host. This keeps the codebase rule intact: commands/* are the layer
@@ -36,7 +36,7 @@ export { EXTENSION_ID, type WriteTarget } from './setDefaultFormatter';
  * `SUPPORTED_LANGUAGES` from providers/formattingProvider.ts; the integration
  * suite asserts the two lists are identical so they can never drift. It is
  * duplicated here (rather than imported) only because importing the provider at
- * module top level would pull in 'vscode' and break the pure unit test — the
+ * module top level would pull in 'vscode' and break the pure unit test : the
  * provider's list remains the single runtime source the QuickPick is built from.
  */
 const SUPPORTED_LANGUAGES: readonly LangId[] = [
@@ -56,7 +56,7 @@ const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set(SUPPORTED_LANGUAGES)
 
 /**
  * The plan produced by {@link planUseAsFormatter}: the concrete writes the
- * handler should perform. PURE data — no 'vscode' types leak here.
+ * handler should perform. PURE data : no 'vscode' types leak here.
  */
 export interface UseAsFormatterPlan {
   /** Scope the override is written at. */
@@ -255,18 +255,18 @@ export async function useAsFormatter(): Promise<void> {
 
   const picked = await pickLanguages(vscode, activeLanguageId);
   if (picked === undefined) {
-    return; // cancelled — no write
+    return; // cancelled : no write
   }
   if (picked.length === 0) {
     void vscode.window.showInformationMessage(
-      'Tidy: aucun langage selectionne — aucun changement effectue.'
+      'Tidy: aucun langage selectionne : aucun changement effectue.'
     );
     return;
   }
 
   const requestedTarget = await pickScope(vscode);
   if (requestedTarget === undefined) {
-    return; // cancelled — no write
+    return; // cancelled : no write
   }
 
   const hasWorkspace =
@@ -277,7 +277,7 @@ export async function useAsFormatter(): Promise<void> {
   // there is nothing to write.
   if (plan.langs.length === 0) {
     void vscode.window.showInformationMessage(
-      'Tidy: aucun langage pris en charge selectionne — aucun changement effectue.'
+      'Tidy: aucun langage pris en charge selectionne : aucun changement effectue.'
     );
     return;
   }

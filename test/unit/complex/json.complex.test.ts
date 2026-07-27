@@ -15,14 +15,14 @@
 // hiding inside the same complex shapes.
 //
 // Conventions: mocha BDD + node:assert/strict. Pretty-printed "formatter output"
-// is produced with JSON.stringify(value, null, n) — a real, deterministic
-// reformat — so equivalence is tested against genuine whitespace-only changes.
+// is produced with JSON.stringify(value, null, n) : a real, deterministic
+// reformat : so equivalence is tested against genuine whitespace-only changes.
 import assert from 'node:assert/strict';
 import { jsonEqual, idempotence } from '../../../src/safety/guard';
 import type { LangId } from '../../../src/types';
 
 // Reformat a JSON document the way a formatter would: parse then re-serialize
-// with the given indent. Throws if the input is not valid JSON (intentional —
+// with the given indent. Throws if the input is not valid JSON (intentional , 
 // the fixtures below are all valid JSON, JSONC handled separately).
 function reflow(json: string, indent: number): string {
   return JSON.stringify(JSON.parse(json), null, indent);
@@ -42,7 +42,7 @@ function assertRejected(label: string, input: string, output: string): void {
 const JSON_LANG: LangId = 'json';
 const JSONC_LANG: LangId = 'jsonc';
 
-describe('complex JSON — deep nesting', () => {
+describe('complex JSON : deep nesting', () => {
   const deep = JSON.stringify({
     level1: {
       level2: {
@@ -86,7 +86,7 @@ describe('complex JSON — deep nesting', () => {
   });
 });
 
-describe('complex JSON — unicode & escape sequences', () => {
+describe('complex JSON : unicode & escape sequences', () => {
   // Cover: BMP escape, astral surrogate pair, control chars, escaped quote,
   // escaped backslash, escaped solidus, and a raw multi-byte literal.
   const unicode =
@@ -97,7 +97,7 @@ describe('complex JSON — unicode & escape sequences', () => {
     '"quote":"she said \\"hi\\"",' +
     '"backslash":"a\\\\b",' +
     '"solidus":"http:\\/\\/x",' +
-    '"rawMultibyte":"naïve — Ω"' +
+    '"rawMultibyte":"naïve : Ω"' +
     '}';
 
   it('pretty-printing preserves every escape/unicode value', () => {
@@ -131,7 +131,7 @@ describe('complex JSON — unicode & escape sequences', () => {
   });
 });
 
-describe('complex JSON — large & extreme numbers', () => {
+describe('complex JSON : large & extreme numbers', () => {
   const numbers =
     '{' +
     '"max":1e308,' +
@@ -172,7 +172,7 @@ describe('complex JSON — large & extreme numbers', () => {
   });
 });
 
-describe('complex JSONC — comments + trailing commas', () => {
+describe('complex JSONC : comments + trailing commas', () => {
   const jsonc = `{
   // top-level line comment
   "name": "tidy-formatter",
@@ -236,7 +236,7 @@ describe('complex JSONC — comments + trailing commas', () => {
   });
 });
 
-describe('complex JSON — mixed-type arrays', () => {
+describe('complex JSON : mixed-type arrays', () => {
   // Every JSON type in one array, plus nested mixed arrays/objects.
   const mixed =
     '{"items":[' +

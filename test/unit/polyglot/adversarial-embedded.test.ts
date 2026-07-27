@@ -1,4 +1,4 @@
-// Adversarial POLYGLOT (embedded-language) suite — the deepest test of the HTML
+// Adversarial POLYGLOT (embedded-language) suite : the deepest test of the HTML
 // safety guard, attacked from the seam where HTML hosts OTHER languages.
 //
 // An HTML file is rarely just HTML: it embeds CSS (<style>), JavaScript
@@ -9,15 +9,15 @@
 // notes on canonicalizeEmbeddedCode / cssShape / canonicalizeJsonForEmbed).
 //
 // Every fixture here keeps the surrounding HTML structurally identical and
-// corrupts ONLY the embedded payload — a CSS value, a JS instruction, a JSON
+// corrupts ONLY the embedded payload : a CSS value, a JS instruction, a JSON
 // key/value, verbatim text, or an inline handler. Each MUST be rejected
 // (`equivalent === false`) with a non-empty reason.
 //
 // Why this proves the guard's worth (the parse-only trap, two layers deep):
-//   1. INDEPENDENT HTML ORACLE — every corrupted output is a well-formed HTML
+//   1. INDEPENDENT HTML ORACLE : every corrupted output is a well-formed HTML
 //      document (parse5 throws nothing). A guard that only re-parsed the HTML
 //      would ship the corruption.
-//   2. INDEPENDENT EMBEDDED ORACLE — for the css/js/json cases the corrupted
+//   2. INDEPENDENT EMBEDDED ORACLE : for the css/js/json cases the corrupted
 //      PAYLOAD is itself well-formed in its own language (postcss / @babel/parser
 //      / JSON.parse succeed). So even a guard that re-parsed the embedded snippet
 //      in isolation would ship it. Only the deep, per-language *value/tree* diff
@@ -49,7 +49,7 @@ function htmlParses(html: string): boolean {
 // ---------------------------------------------------------------------------
 // Independent oracle #2: is the corrupted EMBEDDED payload well-formed in its
 // own language? If yes, a guard that re-parsed only the embedded snippet would
-// ALSO have accepted the corruption — the deep value diff is the real defense.
+// ALSO have accepted the corruption : the deep value diff is the real defense.
 // ---------------------------------------------------------------------------
 function embeddedPayloadWellFormed(f: PolyglotFixture): boolean {
   if (f.corruptedPayload === undefined) {
@@ -78,7 +78,7 @@ function embeddedPayloadWellFormed(f: PolyglotFixture): boolean {
   }
 }
 
-describe('adversarial polyglot — embedded-language corruption MUST be rejected', () => {
+describe('adversarial polyglot : embedded-language corruption MUST be rejected', () => {
   it(`covers >= 18 polyglot cases (actual: ${polyglotFixtures.length})`, () => {
     assert.ok(
       polyglotFixtures.length >= 18,
@@ -110,11 +110,11 @@ describe('adversarial polyglot — embedded-language corruption MUST be rejected
 
       // 1) The embedded corruption MUST be rejected. A false negative here means
       //    Tidy would ship an HTML file whose embedded code/data/text silently
-      //    changed meaning — the exact lonefy "breaks your files" failure.
+      //    changed meaning : the exact lonefy "breaks your files" failure.
       assert.equal(
         verdict.equivalent,
         false,
-        `guard ACCEPTED an embedded corruption (${f.id}); false negative — meaning changed silently`
+        `guard ACCEPTED an embedded corruption (${f.id}); false negative : meaning changed silently`
       );
 
       // 2) A rejection MUST carry a non-empty reason for the OutputChannel.
@@ -141,7 +141,7 @@ describe('adversarial polyglot — embedded-language corruption MUST be rejected
 
       // 5) INDEPENDENT EMBEDDED ORACLE (css/js/json only): the corrupted payload is
       //    also well-formed in its own language, so even a snippet-level re-parse
-      //    guard would accept it — only the deep value diff catches the change.
+      //    guard would accept it : only the deep value diff catches the change.
       if (f.embeddedWellFormed !== undefined) {
         assert.equal(
           embeddedPayloadWellFormed(f),
@@ -154,7 +154,7 @@ describe('adversarial polyglot — embedded-language corruption MUST be rejected
   }
 });
 
-describe('adversarial polyglot — the two-layer parse-only trap (SPEC §5)', () => {
+describe('adversarial polyglot : the two-layer parse-only trap (SPEC §5)', () => {
   // Prove the trap class is large: many embedded corruptions re-parse cleanly at
   // BOTH the HTML level and the embedded-snippet level, yet all must be rejected.
   const deepTrap = polyglotFixtures.filter(
@@ -178,7 +178,7 @@ describe('adversarial polyglot — the two-layer parse-only trap (SPEC §5)', ()
   }
 });
 
-describe('adversarial polyglot — false-positive guardrail (do NOT over-reject)', () => {
+describe('adversarial polyglot : false-positive guardrail (do NOT over-reject)', () => {
   // The embedded guard must stay sharp without becoming paranoid: a pure reindent
   // of the SAME embedded code/data must be ACCEPTED. If these fail, the guard has
   // collapsed into a blanket-rejector and the must-reject results above would be
@@ -221,7 +221,7 @@ describe('adversarial polyglot — false-positive guardrail (do NOT over-reject)
   });
 });
 
-describe('adversarial polyglot — direct htmlTreeEqual spot-checks (one per surface)', () => {
+describe('adversarial polyglot : direct htmlTreeEqual spot-checks (one per surface)', () => {
   // Hit the exported htmlTreeEqual directly (not via guard.check) so the embedded
   // path is exercised even if guard.check ever gains a short-circuit.
   it('(a) <style> value change rejected', () => {

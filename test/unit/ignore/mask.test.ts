@@ -19,7 +19,7 @@ function maskFromMarkers(input: string, lang: Parameters<typeof scanMarkers>[1])
   return { scan, mask: applyMask(input, scan.protectedRanges) };
 }
 
-describe('ignore/mask — applyMask + restoreMask (pure round-trip)', () => {
+describe('ignore/mask : applyMask + restoreMask (pure round-trip)', () => {
   it('round-trips a protected CSS region byte-identically when nothing reflows', () => {
     const input =
       '.a{color:red}\n' +
@@ -63,7 +63,7 @@ describe('ignore/mask — applyMask + restoreMask (pure round-trip)', () => {
 
   it('refuses to mask when a placeholder token already exists in the input (collision)', () => {
     // Craft an input whose protected region happens to also contain the token the
-    // masker would use for index 0 — masking must back off rather than risk it.
+    // masker would use for index 0 : masking must back off rather than risk it.
     const input =
       '.a{color:red}\n' +
       '/* tidy-ignore-start */\n' +

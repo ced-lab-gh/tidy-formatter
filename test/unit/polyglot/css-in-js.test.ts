@@ -10,17 +10,17 @@
 // the JS/TS wrapper but leaves the embedded template body byte-identical, and to
 // the JS AST a template quasi is an opaque string. So:
 //
-//   ACCEPT half — for every fixture we drive the REAL dispatcher and assert:
-//     1. ACCEPT      — guard.check(lang, input, output).equivalent === true
-//     2. PRESERVE    — the embedded template body survives VERBATIM (byte-for-byte
+//   ACCEPT half : for every fixture we drive the REAL dispatcher and assert:
+//     1. ACCEPT      : guard.check(lang, input, output).equivalent === true
+//     2. PRESERVE    : the embedded template body survives VERBATIM (byte-for-byte
 //                      substrings pinned per fixture), proving the foreign code is
 //                      not reflowed
-//     3. REFORMATTED — the surrounding JS/TS WAS reformatted (so the test is not a
+//     3. REFORMATTED : the surrounding JS/TS WAS reformatted (so the test is not a
 //                      vacuous no-op pass)
-//     4. RE-PARSE    — re-formatting the output does not throw and stays equivalent
-//     5. IDEMPOTENT  — format(format(x)) === format(x) (SPEC SAFE-03)
+//     4. RE-PARSE    : re-formatting the output does not throw and stays equivalent
+//     5. IDEMPOTENT  : format(format(x)) === format(x) (SPEC SAFE-03)
 //
-//   CORRUPTION half — if a (hypothetical broken) engine changes the JS around the
+//   CORRUPTION half : if a (hypothetical broken) engine changes the JS around the
 //   template OR alters the embedded template body (even whitespace-only), the
 //   guard MUST reject it. Proves the guard does not blindly trust template text.
 //
@@ -42,13 +42,13 @@ async function format(lang: LangId, code: string): Promise<string> {
   return dispatchFormat({ languageId: lang, code, options: OPTS });
 }
 
-describe('polyglot CSS-in-JS — embedded foreign template literals preserved + guarded', () => {
+describe('polyglot CSS-in-JS : embedded foreign template literals preserved + guarded', () => {
   for (const f of cssInJsAcceptFixtures) {
     describe(`${f.id}: ${f.desc} [${f.ref}]`, () => {
       it('formats it, the guard accepts, and the embedded template body is verbatim', async () => {
         const out = await format(f.lang, f.input);
 
-        // 2. PRESERVE — the embedded foreign-language body must survive verbatim.
+        // 2. PRESERVE : the embedded foreign-language body must survive verbatim.
         // Prettier (no CSS-in-JS plugin) never reflows the template content.
         for (const span of f.verbatim) {
           assert.ok(
@@ -57,7 +57,7 @@ describe('polyglot CSS-in-JS — embedded foreign template literals preserved + 
           );
         }
 
-        // 3. REFORMATTED — the JS/TS wrapper WAS reformatted (non-vacuous).
+        // 3. REFORMATTED : the JS/TS wrapper WAS reformatted (non-vacuous).
         for (const needle of f.jsReformatted) {
           assert.ok(
             out.includes(needle),
@@ -65,7 +65,7 @@ describe('polyglot CSS-in-JS — embedded foreign template literals preserved + 
           );
         }
 
-        // 1. ACCEPT — a correct format must NOT be rejected by the guard.
+        // 1. ACCEPT : a correct format must NOT be rejected by the guard.
         const verdict = guard.check(f.lang, f.input, out);
         assert.equal(
           verdict.equivalent,
@@ -98,14 +98,14 @@ describe('polyglot CSS-in-JS — embedded foreign template literals preserved + 
   }
 });
 
-describe('polyglot CSS-in-JS — corruption is rejected by the guard', () => {
+describe('polyglot CSS-in-JS : corruption is rejected by the guard', () => {
   for (const f of cssInJsCorruptionFixtures) {
-    it(`${f.id}: ${f.desc} [${f.ref}] — guard rejects the corrupted output`, () => {
+    it(`${f.id}: ${f.desc} [${f.ref}] : guard rejects the corrupted output`, () => {
       const verdict = guard.check(f.lang, f.input, f.corrupted);
       assert.equal(
         verdict.equivalent,
         false,
-        `guard ACCEPTED a meaning-changing CSS-in-JS output (${f.id}) — false negative`
+        `guard ACCEPTED a meaning-changing CSS-in-JS output (${f.id}) : false negative`
       );
       assert.ok(
         typeof verdict.reason === 'string' && verdict.reason.length > 0,
@@ -115,7 +115,7 @@ describe('polyglot CSS-in-JS — corruption is rejected by the guard', () => {
   }
 });
 
-describe('polyglot CSS-in-JS — corpus sanity', () => {
+describe('polyglot CSS-in-JS : corpus sanity', () => {
   it('has >=15 accept fixtures', () => {
     assert.ok(
       cssInJsAcceptFixtures.length >= 15,

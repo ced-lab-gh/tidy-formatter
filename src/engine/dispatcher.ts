@@ -25,7 +25,7 @@ const PRETTIER_LANGS: ReadonlySet<LangId> = new Set<LangId>([
 ]);
 
 // @babel/parser plugins covering modern JS that may appear in a .js file. 'jsx'
-// is what lets us tell real JSX apart from comparison operators / TS generics —
+// is what lets us tell real JSX apart from comparison operators / TS generics , 
 // the exact distinction that defeats js-beautify (SPEC §4, ENG-02).
 const JS_PARSER_PLUGINS: readonly ParserPlugin[] = [
   'jsx',
@@ -38,7 +38,7 @@ const JS_PARSER_PLUGINS: readonly ParserPlugin[] = [
 // Cheap pre-filter: only worth a full parse if the source contains something that
 // could be a JSX opening tag. Matches `<Identifier`, `<namespace:`, `<member.`,
 // or a JSX fragment `<>`. This is intentionally permissive (false positives are
-// fine — they only trigger the confirming parse below; false negatives are what
+// fine : they only trigger the confirming parse below; false negatives are what
 // we must avoid, and a real JSX element always begins with one of these forms).
 const JSX_HINT = /<(?:[A-Za-z][\w.:-]*|>)/;
 
@@ -67,16 +67,16 @@ export function pickEngine(lang: LangId): Engine {
  *
  * Conservative on uncertainty: if the source cannot be parsed at all, we do NOT
  * claim JSX. The default js-beautify route still applies and the downstream
- * semantic Guard remains the ultimate safety net — re-routing is an optimization
+ * semantic Guard remains the ultimate safety net : re-routing is an optimization
  * to produce a *correct* result, never a correctness guarantee on its own.
  */
 function containsJsx(code: string): boolean {
-  // Stage 1 — cheap gate. No JSX-looking token => certainly no JSX.
+  // Stage 1 : cheap gate. No JSX-looking token => certainly no JSX.
   if (!JSX_HINT.test(code)) {
     return false;
   }
 
-  // Stage 2 — confirm with a real parse. We scan for an actual JSX AST node
+  // Stage 2 : confirm with a real parse. We scan for an actual JSX AST node
   // rather than trusting the regex, so `x < y > z` or `Array<Foo>` do not
   // mis-route plain JS to the prettier engine. parse() returns a File node,
   // which is itself a @babel/types Node accepted by traverseFast.

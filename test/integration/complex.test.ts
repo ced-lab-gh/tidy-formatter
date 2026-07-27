@@ -1,8 +1,8 @@
-// COMPLEX end-to-end safety suite — runs INSIDE a real VS Code Electron host.
+// COMPLEX end-to-end safety suite : runs INSIDE a real VS Code Electron host.
 //
 // The product's whole moat is SAFETY: the guard must never let a meaning-changing
 // output through, and must never reject a correct one (which would make Tidy a
-// silent no-op — the "safe but does nothing" failure the SPEC forbids, §12). The
+// silent no-op : the "safe but does nothing" failure the SPEC forbids, §12). The
 // unit suites prove this on the *pure* engine + guard. This suite proves the same
 // promise survives the full packaged path through VS Code: the registered
 // DocumentFormatting provider, the resolved editor config, the per-language
@@ -19,8 +19,8 @@
 //   (c) NO LOSS -> every meaning-bearing token survives verbatim, and for JSON
 //       the parsed value is deep-equal to the input (host-level semantic
 //       equivalence via a stable comparison, SAFE-01/02). Note the applied edit
-//       was ALREADY gated by the provider's guard — VS Code only received a
-//       TextEdit because guard.check() passed — so anything that lands is
+//       was ALREADY gated by the provider's guard : VS Code only received a
+//       TextEdit because guard.check() passed : so anything that lands is
 //       equivalent by construction; these assertions independently confirm it.
 //
 // Per-language defaultFormatter is set EXACTLY the way a user does it via
@@ -60,7 +60,7 @@ async function formatFixtureInHost(
   return { document, formatted: document.getText() };
 }
 
-describe('COMPLEX integration — Tidy is safe end-to-end in a real VS Code host', function () {
+describe('COMPLEX integration : Tidy is safe end-to-end in a real VS Code host', function () {
   // First run downloads/opens the Electron host; large fixtures + prettier are
   // heavier than the lifecycle cases, so give generous headroom.
   // CI-aware: slow/shared CI runners get a much larger ceiling; local stays strict.
@@ -90,9 +90,9 @@ describe('COMPLEX integration — Tidy is safe end-to-end in a real VS Code host
   });
 
   for (const f of hostComplexFixtures) {
-    describe(`${f.id} — ${f.desc}`, () => {
+    describe(`${f.id} : ${f.desc}`, () => {
       // (a) Tidy actually RAN: the packaged extension reformatted the document.
-      // A no-op here would reproduce the "prettier bug" class — a file that
+      // A no-op here would reproduce the "prettier bug" class : a file that
       // passes unit tests but does nothing in the real host.
       it('(a) reformats the document in the host (not a silent no-op)', async () => {
         const { formatted } = await formatFixtureInHost(
@@ -103,14 +103,14 @@ describe('COMPLEX integration — Tidy is safe end-to-end in a real VS Code host
         assert.notEqual(
           formatted,
           f.input,
-          `${f.id}: Format Document produced no change in the real host — the ` +
+          `${f.id}: Format Document produced no change in the real host : the ` +
             `packaged extension is a no-op for this language (engine load / ` +
             `dispatch failure, like the prettier bundling bug)`
         );
       });
 
       // (b) The formatted output is STABLE: a second Format Document changes
-      // nothing. Host-level idempotence (SAFE-03) — and a practical proof the
+      // nothing. Host-level idempotence (SAFE-03) : and a practical proof the
       // output re-parses cleanly, since an unstable/invalid output would either
       // keep drifting or be re-touched on the second pass.
       it('(b) a second Format Document is a no-op (host-level idempotence / re-parse)', async () => {
@@ -127,7 +127,7 @@ describe('COMPLEX integration — Tidy is safe end-to-end in a real VS Code host
         assert.equal(
           secondPass,
           formatted,
-          `${f.id}: second Format Document drifted — output is not idempotent ` +
+          `${f.id}: second Format Document drifted : output is not idempotent ` +
             `in the host (SAFE-03)`
         );
       });
@@ -156,7 +156,7 @@ describe('COMPLEX integration — Tidy is safe end-to-end in a real VS Code host
 
   // Stronger semantic equivalence cross-check for JSON: parse the formatted
   // output and the original input and assert deep value-equality. This is the
-  // host-level analogue of the jsonEqual guard — proving the pretty-print was a
+  // host-level analogue of the jsonEqual guard : proving the pretty-print was a
   // pure whitespace change with zero value loss, computed without importing any
   // src/* guard (we use the host's own JSON.parse + node:assert deepStrictEqual).
   describe('JSON deep-equality cross-check (semantic equivalence in the host)', () => {
@@ -210,7 +210,7 @@ describe('COMPLEX integration — Tidy is safe end-to-end in a real VS Code host
         scss.input,
         'precondition: the SCSS doc was actually reformatted'
       );
-      // The untouched TSX document must be byte-identical to before — Tidy never
+      // The untouched TSX document must be byte-identical to before : Tidy never
       // edits a document that is not the active format target.
       assert.equal(
         tsxDoc.getText(),

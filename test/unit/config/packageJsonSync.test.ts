@@ -25,7 +25,7 @@ const pkg = JSON.parse(
 
 const props = pkg.contributes.configuration.properties;
 
-describe('config/packageJsonSync — catalogue ⇄ package.json', () => {
+describe('config/packageJsonSync : catalogue ⇄ package.json', () => {
   it('every catalogue option is declared in package.json', () => {
     for (const entry of OPTION_CATALOG) {
       assert.ok(props[entry.settingKey], `package.json is missing ${entry.settingKey}`);

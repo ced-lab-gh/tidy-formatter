@@ -1,12 +1,12 @@
 // .soukformatignore reader (Axe 4.T3): a project-level file, in .gitignore
 // syntax, listing paths Tidy must NOT reformat. When a document's path matches
 // the (last winning) pattern the provider returns no edits and the file is left
-// byte-identical — never a corruption risk, simply "do nothing here".
+// byte-identical : never a corruption risk, simply "do nothing here".
 //
 // PURE matcher: the pattern parsing and `isIgnoredFile` matcher import neither
 // 'vscode' nor 'node:fs' and operate on already-normalised POSIX relative paths,
 // so they are fully unit-testable. (The thin on-disk discovery helper below uses
-// only node:fs — no workspace APIs — and is the one impure seam, kept tiny.)
+// only node:fs : no workspace APIs : and is the one impure seam, kept tiny.)
 //
 // Glob handling reuses/extends the minimal dependency-free matcher in ./glob
 // (which itself extends config/soukformatrc.ts's `globToRegExp`); NO new npm
@@ -34,7 +34,7 @@ export const SOURCE_SOUKFORMATIGNORE = '.soukformatignore';
  *   - trailing spaces are trimmed unless escaped with "\ ".
  *
  * Order is preserved: later patterns win (a later "!keep.css" can re-include a
- * file an earlier "*.css" excluded — and vice-versa), matching git's semantics.
+ * file an earlier "*.css" excluded : and vice-versa), matching git's semantics.
  */
 export function parseIgnorePatterns(text: string): IgnorePattern[] {
   if (typeof text !== 'string' || text === '') {
@@ -105,7 +105,7 @@ function stripTrailingUnescapedSpaces(rawLine: string): string {
  * gitignore precedence: the LAST matching pattern wins. A path is ignored when
  * the last pattern that matches it is a normal (non-negated) pattern; a trailing
  * "!negation" can re-include it. With no matching pattern, the path is NOT
- * ignored (so formatting proceeds — the safe default). PURE: no I/O.
+ * ignored (so formatting proceeds : the safe default). PURE: no I/O.
  */
 export function isIgnoredFile(relPath: string, patterns: readonly IgnorePattern[]): boolean {
   if (typeof relPath !== 'string' || relPath === '' || patterns.length === 0) {
@@ -168,7 +168,7 @@ export interface IgnoreLookup {
 
 /**
  * Resolve whether an on-disk file is excluded by the nearest .soukformatignore.
- * Never throws: any I/O failure is fail-SAFE here — we treat an unreadable
+ * Never throws: any I/O failure is fail-SAFE here : we treat an unreadable
  * ignore file as "no ignore" so formatting still proceeds (CFG-06 / Axe 4.T3:
  * "lecture echoue -> fail-safe (on formate)").
  *

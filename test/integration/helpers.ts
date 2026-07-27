@@ -2,8 +2,8 @@
 //
 // These run INSIDE a real VS Code Electron host (via @vscode/test-cli /
 // @vscode/test-electron), so unlike the pure unit tests they may import
-// 'vscode'. They drive the public extension surface only — the registered
-// DocumentFormatting providers, the editor config, and the save lifecycle —
+// 'vscode'. They drive the public extension surface only : the registered
+// DocumentFormatting providers, the editor config, and the save lifecycle , 
 // because that is exactly the contract QA-04 must prove end-to-end.
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -79,7 +79,7 @@ export async function openFixture(
  * Update a setting at Workspace scope and resolve only once the extension host
  * has actually observed the change via onDidChangeConfiguration. `config.update`
  * resolves when the value is written, but the providers read config lazily and
- * the change event can land a tick later — waiting for it removes the race that
+ * the change event can land a tick later : waiting for it removes the race that
  * makes "I just disabled it but it still ran" flaky. Falls back to a short flush
  * if no event arrives (e.g. setting the same value).
  */
@@ -198,7 +198,7 @@ const READINESS_PROBE: Partial<Record<string, { ext: string; code: string }>> = 
  * ally wait until it is actually RESOLVABLE before any test formats a real fixture.
  *
  * Why this exists: setting editor.defaultFormatter (overrideInLanguage) and then
- * formatting immediately is racy on a COLD Electron host — the config change and
+ * formatting immediately is racy on a COLD Electron host : the config change and
  * the provider registration have not propagated yet, so the very first
  * Format Document resolves to no formatter and is a silent no-op. That made the
  * first run of the host suites fail with "produced no change" while warm reruns
@@ -215,7 +215,7 @@ export async function ensureTidyDefaultFormatter(
   // propagation + lazy engine load: prettier dynamic import, TS compiler). 10s is
   // plenty on a fast local machine but flakes under CI load, so the poll gets a
   // far larger ceiling there. The poll still fails loudly if edits never appear,
-  // so a genuine engine-load failure is not masked — only slowness is tolerated.
+  // so a genuine engine-load failure is not masked : only slowness is tolerated.
   timeoutMs = process.env.CI ? 90000 : 10000
 ): Promise<() => Promise<void>> {
   for (const lang of langs) {
@@ -252,7 +252,7 @@ export async function ensureTidyDefaultFormatter(
     assert.ok(
       edits.length > 0,
       `Tidy did not become the resolved formatter for '${lang}' within ` +
-        `${timeoutMs}ms — the packaged extension provides no edits for a ` +
+        `${timeoutMs}ms : the packaged extension provides no edits for a ` +
         `trivially reformattable ${lang} document (engine load / registration ` +
         `failure, the prettier-bundling-bug class).`
     );

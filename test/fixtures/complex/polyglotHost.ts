@@ -183,21 +183,21 @@ export const polyglotHostFixtures: PolyglotHostFixture[] = [
       '--brand: #3366ff',
       'calc(var(--gap) / 2)',
       'repeat(3, 1fr)',
-      // Embedded data scripts — values preserved, importmap stays opaque-inline.
+      // Embedded data scripts : values preserved, importmap stays opaque-inline.
       '"unicode": "caf\\u00e9 \\u2764"',
       '<script type="importmap">{"imports":{"app":"/app.js","lib":"/lib.js"}}</script>',
       '"@context": "https://schema.org"',
-      // Template islands in text + attributes — preserved literally.
+      // Template islands in text + attributes : preserved literally.
       'data-count="{{count}}"',
       '{{ user.name }}',
       '{% for badge in user.badges %}',
       '<% if (showBanner) { %>',
       '<%= bannerText %>',
-      // Opaque x-template body — kept byte-identical (single line).
+      // Opaque x-template body : kept byte-identical (single line).
       '<script type="text/x-template" id="tpl"><li class="row" data-id="{{ id }}">{{ label }}</li></script>',
-      // <pre> body — every space/newline is significant and must be verbatim.
+      // <pre> body : every space/newline is significant and must be verbatim.
       '<pre>  line one\n    line two (indented)\n  line three</pre>',
-      // <textarea> — the literal tab survives.
+      // <textarea> : the literal tab survives.
       '\ttab-kept',
       // Namespaced SVG attribute + a url() reference.
       'xlink:href="#g1"',
@@ -224,7 +224,7 @@ export const polyglotHostFixtures: PolyglotHostFixture[] = [
       '`\n  body { margin: 0;   padding:0; }\n`',
       '`\n  color: red;\n  padding:   8px;\n   margin: 0;\n`',
       '`\n  border: none;\n  cursor:   pointer;\n`',
-      // GraphQL template body — verbatim, including the messy indentation/spacing.
+      // GraphQL template body : verbatim, including the messy indentation/spacing.
       '`\n  query GetUser($id: ID!) {\n      user(id: $id) {   name email }\n  }\n`',
       // Generics / TS type syntax not split or mangled.
       'function DataTable<T>',

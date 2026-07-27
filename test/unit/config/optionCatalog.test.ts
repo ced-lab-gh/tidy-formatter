@@ -1,4 +1,4 @@
-// Unit tests for the pure option catalogue (Axe 3.T1) — the SINGLE SOURCE OF
+// Unit tests for the pure option catalogue (Axe 3.T1) : the SINGLE SOURCE OF
 // TRUTH for every configurable Tidy formatting option.
 //
 // Covers: structural invariants (unique keys, tidy.* prefix, valid scope/type,
@@ -19,7 +19,7 @@ import {
 const SCOPES = new Set(['window', 'resource', 'language-overridable']);
 const TYPES = new Set(['boolean', 'integer', 'string']);
 
-describe('config/optionCatalog — structural invariants', () => {
+describe('config/optionCatalog : structural invariants', () => {
   it('is non-empty and curated (>= 25 entries)', () => {
     assert.ok(OPTION_CATALOG.length >= 25, `expected a full set, got ${OPTION_CATALOG.length}`);
   });
@@ -118,7 +118,7 @@ describe('config/optionCatalog — structural invariants', () => {
   });
 });
 
-describe('config/optionCatalog — validateValue (never propagate invalid)', () => {
+describe('config/optionCatalog : validateValue (never propagate invalid)', () => {
   const boolEntry = findBySettingKey('tidy.prettier.semi') as OptionEntry;
   const intEntry = findBySettingKey('tidy.indent') as OptionEntry;
   const enumEntry = findBySettingKey('tidy.brace_style') as OptionEntry;
@@ -149,7 +149,7 @@ describe('config/optionCatalog — validateValue (never propagate invalid)', () 
   });
 });
 
-describe('config/optionCatalog — language applicability', () => {
+describe('config/optionCatalog : language applicability', () => {
   it('an "all" option applies to every supported language', () => {
     const indent = findBySettingKey('tidy.indent') as OptionEntry;
     assert.ok(appliesToLanguage(indent, 'css'));
@@ -173,7 +173,7 @@ describe('config/optionCatalog — language applicability', () => {
   });
 });
 
-describe('config/optionCatalog — anti-drift: no dead catalogue option', () => {
+describe('config/optionCatalog : anti-drift: no dead catalogue option', () => {
   it('every js-beautify/core engineKey is consumed by the engine adapter', () => {
     const adapterSrc = readFileSync(
       join(__dirname, '..', '..', '..', 'src', 'engine', 'jsbeautify.ts'),

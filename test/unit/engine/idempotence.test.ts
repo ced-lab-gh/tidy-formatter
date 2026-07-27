@@ -7,7 +7,7 @@ import { dispatchFormat } from '../../../src/engine/dispatcher';
 import { idempotenceFixtures } from '../../fixtures/idempotenceFixtures';
 import { resolved } from '../../helpers/options';
 
-describe('engine — idempotence (SPEC SAFE-03, drift protection)', () => {
+describe('engine : idempotence (SPEC SAFE-03, drift protection)', () => {
   for (const f of idempotenceFixtures) {
     it(`${f.id}: format(format(x)) == format(x) for ${f.lang} [${f.ref}]`, async () => {
       const opts = resolved();

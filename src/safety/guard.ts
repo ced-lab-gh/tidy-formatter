@@ -30,7 +30,7 @@ function rejected(reason: string): GuardVerdict {
  */
 function describeError(error: unknown): string {
   if (error instanceof Error) {
-    // Parser errors often embed a code frame after the first line — drop it.
+    // Parser errors often embed a code frame after the first line : drop it.
     return error.message.split('\n')[0];
   }
   return 'unexpected error';
@@ -64,7 +64,7 @@ const BABEL_PLUGINS_NO_JSX: BabelPlugins = [...BASE_BABEL_PLUGINS];
 // Only plain `typescript` parses WITHOUT the jsx plugin. In a `.ts` file the
 // angle-bracket cast `<T>expr` is valid TS but, with jsx enabled, is mis-read as
 // a JSX element and fails to parse. Every other JS-family languageId may legally
-// contain JSX (a React `.js`/`.jsx`, or `.tsx`), so jsx stays enabled there —
+// contain JSX (a React `.js`/`.jsx`, or `.tsx`), so jsx stays enabled there , 
 // `.tsx` cannot use angle casts anyway, so there is no ambiguity to resolve.
 const NO_JSX_LANGS: ReadonlySet<LangId> = new Set<LangId>(['typescript']);
 
@@ -117,7 +117,7 @@ function parseJsAst(code: string, plugins: BabelPlugins): unknown {
  * Without this, legitimate multi-line JSX reflow (e.g. Prettier turning
  * `<div><h1/><span/></div>` into an indented block) inserts whitespace-only
  * JSXText nodes the input did not have, and a raw structural diff would reject
- * the (correct) output — the "safe but does nothing" false positive on TSX.
+ * the (correct) output : the "safe but does nothing" false positive on TSX.
  */
 function cleanJsxText(value: string): string {
   const lines = value.split(/\r\n|\n|\r/);
@@ -213,7 +213,7 @@ function canonicalizeAst(node: unknown): unknown {
  *   element is 100% intact and semantically identical. An earlier version also
  *   fingerprinted the `>` adjacency (`close:glued|split`) and therefore
  *   FALSE-POSITIVE-REJECTED this routine multi-line reflow, turning Tidy into a
- *   silent no-op on any real-world .tsx component with wrapped attributes — the
+ *   silent no-op on any real-world .tsx component with wrapped attributes : the
  *   "safe but does nothing" failure the SPEC forbids (§12 "faux positif de la
  *   garde"). The closing `>` carries no boundary-integrity signal a formatter is
  *   not allowed to touch, so it is excluded. Every genuine boundary corruption
@@ -288,7 +288,7 @@ export function astEqualJs(input: string, output: string, lang?: LangId): GuardV
     return rejected('AST structure changed after formatting');
   }
 
-  // ASTs match — now defend against the whitespace-insignificant JSX corruption
+  // ASTs match : now defend against the whitespace-insignificant JSX corruption
   // class that a structural diff alone cannot see. Only meaningful when the
   // grammar actually contains JSX; for plain TS/JS there are no JSX tags.
   if (jsxEnabled) {
@@ -329,7 +329,7 @@ function cssParserFor(lang: LangId): CssParser {
  * string literal (`"..."` / `'...'`, honouring `\` escapes) or unquoted text.
  * Quoted spans must be preserved VERBATIM: whitespace inside a CSS string is
  * literal and meaning-bearing (content rendering, `[attr="..."]` matching, a
- * quoted font-family name), so collapsing it would change the file's meaning —
+ * quoted font-family name), so collapsing it would change the file's meaning , 
  * the guard false-negative this guards against (SPEC §12 "faux négatif").
  * An unterminated quote (malformed input) keeps the rest as a quoted span so we
  * never accidentally normalise inside it.
@@ -360,7 +360,7 @@ function splitCssQuotedSpans(value: string): CssSpan[] {
     } else {
       buffer += ch;
       if (ch === '\\' && i + 1 < value.length) {
-        // Escaped char inside the string — consume the next char verbatim.
+        // Escaped char inside the string : consume the next char verbatim.
         buffer += value[i + 1];
         i += 1;
       } else if (ch === quote) {
@@ -395,14 +395,14 @@ function normalizeOutsideStrings(value: string, normalizeSpan: (s: string) => st
  *    `Arial , sans-serif` === `Arial,sans-serif`),
  *  - whitespace around a combinator at the SELECTOR level (`>`, `~` and the
  *    adjacent-sibling `+`) is removed, because `#a > #b` and `#a>#b` are the
- *    SAME selector — CSS treats that whitespace as insignificant. Without this
+ *    SAME selector : CSS treats that whitespace as insignificant. Without this
  *    the guard false-positive-rejects js-beautify's own valid output (it emits
  *    `#a>#b`), turning the formatter into a no-op on nearly every real
  *    stylesheet (SPEC §12 "faux positif de la garde", issue #67).
  *
  * Whitespace INSIDE a quoted string literal is never touched (see
  * `splitCssQuotedSpans`): `content:"a  b"` must NOT be equated with
- * `content:"a b"` — that is a real meaning change the guard must catch.
+ * `content:"a b"` : that is a real meaning change the guard must catch.
  *
  * Crucially, whitespace BETWEEN two value tokens with NO combinator is
  * preserved, so:
@@ -468,7 +468,7 @@ interface CssShape {
  * params, but `@c: red` as name `"c"`, params `"red"` (plus a `value`/`variable`
  * field). Left as-is, the two shapes differ and cssTreeEqual rejects the
  * semantically-identical formatted output, no-op'ing every `@var:value` written
- * without a space — a very common LESS style (SPEC §12 "faux positif de la
+ * without a space : a very common LESS style (SPEC §12 "faux positif de la
  * garde"). This splits a `name` that still contains the `name:value` artifact
  * into a separate name + params so both forms converge.
  *
@@ -731,7 +731,7 @@ function htmlShape(
   }
 
   if (Array.isArray(node.attrs)) {
-    // Attribute order is not semantically meaningful in HTML — sort by name so a
+    // Attribute order is not semantically meaningful in HTML : sort by name so a
     // reorder does not register as a change.
     shape.attrs = node.attrs
       .map((attr): [string, string] => [attr.name, attr.value])
@@ -829,8 +829,8 @@ function parseJsoncValue(code: string): unknown {
 // Above this size the token-level lightweight guard path is worth attempting:
 // native JSON.parse is ~2x faster than the lenient jsonc-parser, which matters on
 // multi-megabyte documents (SPEC §9 "garde token-level allégée pour très gros
-// fichiers"). The fast path is value-IDENTICAL — native JSON.parse yields exactly
-// the same JS value as jsonc-parser for any strict-JSON document — so it can NEVER
+// fichiers"). The fast path is value-IDENTICAL : native JSON.parse yields exactly
+// the same JS value as jsonc-parser for any strict-JSON document : so it can NEVER
 // accept a value change the full path would reject (verified by the corrupted-5MB
 // test). On any native-parse failure (comments / trailing commas / genuinely
 // invalid input) we fall back to the authoritative jsonc-parser, so JSONC and
@@ -841,7 +841,7 @@ const JSON_FAST_PATH_MIN_BYTES = 256 * 1024;
  * Parse a JSON/JSONC document to its value, preferring a fast native JSON.parse on
  * large strict-JSON documents and falling back to the lenient jsonc-parser
  * otherwise. The returned value is identical regardless of which parser ran, so
- * downstream equality is unchanged — only the cost differs.
+ * downstream equality is unchanged : only the cost differs.
  *
  * Throws (via jsonc-parser) when the text is not valid JSON/JSONC, exactly as
  * before, so the guard still rejects unparsable output.
@@ -849,7 +849,7 @@ const JSON_FAST_PATH_MIN_BYTES = 256 * 1024;
 function parseJsonValue(code: string): unknown {
   if (code.length >= JSON_FAST_PATH_MIN_BYTES) {
     try {
-      // Strict JSON only — native parser rejects comments/trailing commas, in
+      // Strict JSON only : native parser rejects comments/trailing commas, in
       // which case we transparently fall through to the lenient path below.
       return JSON.parse(code);
     } catch {

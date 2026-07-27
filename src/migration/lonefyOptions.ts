@@ -8,7 +8,7 @@
 // before the user confirms.
 //
 // PURE: this module MUST NOT import 'vscode' (modelled on src/config/editorconfig.ts).
-// It performs no I/O and never throws — every external value is validated and any
+// It performs no I/O and never throws : every external value is validated and any
 // failure becomes data in the returned result (warnings / unmapped), never an
 // exception. Immutable: the input is treated as read-only and a fresh result is
 // produced. This is the contract the anti-hijack rule depends on: nothing is ever

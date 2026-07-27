@@ -9,7 +9,7 @@ import { guard } from '../../../src/safety/guard';
 import { preserveFixtures, routingFixtures } from '../../fixtures/engineFixtures';
 import { resolved } from '../../helpers/options';
 
-describe('engine/dispatcher — static routing (SPEC §4 matrix)', () => {
+describe('engine/dispatcher : static routing (SPEC §4 matrix)', () => {
   for (const f of routingFixtures) {
     it(`${f.note}`, () => {
       const engine = pickEngine(f.lang);
@@ -19,7 +19,7 @@ describe('engine/dispatcher — static routing (SPEC §4 matrix)', () => {
   }
 });
 
-describe('engine/dispatcher — JSX re-routing for plain .js (SPEC §4 note)', () => {
+describe('engine/dispatcher : JSX re-routing for plain .js (SPEC §4 note)', () => {
   it('routes plain JS to js-beautify', async () => {
     const out = await dispatchFormat({
       languageId: 'javascript',
@@ -52,7 +52,7 @@ describe('engine/dispatcher — JSX re-routing for plain .js (SPEC §4 note)', (
   });
 });
 
-describe('engine/dispatcher — modern-syntax preservation + guard round-trip', () => {
+describe('engine/dispatcher : modern-syntax preservation + guard round-trip', () => {
   for (const f of preserveFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, async () => {
       const out = await dispatchFormat({
@@ -77,7 +77,7 @@ describe('engine/dispatcher — modern-syntax preservation + guard round-trip', 
   }
 });
 
-describe('engine/dispatcher — defensive errors', () => {
+describe('engine/dispatcher : defensive errors', () => {
   it('propagates an engine error rather than swallowing it', async () => {
     await assert.rejects(
       dispatchFormat({

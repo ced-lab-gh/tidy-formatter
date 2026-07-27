@@ -5,14 +5,14 @@
 // `format()` computes the same kind of whitespace edits in ~150 ms because it is a
 // scanner-based, edit-producing formatter rather than a full re-print, AND it
 // PRESERVES COMMENTS (so JSONC keeps its `//` and block comments) and trailing
-// commas — exactly what the SPEC requires for the json/jsonc cluster (#134).
+// commas : exactly what the SPEC requires for the json/jsonc cluster (#134).
 //
 // jsonc-parser ships `applyEdits`, but it splices edits one at a time with string
 // slicing, which is O(n²) and itself hangs on a 5 MB document. We instead apply
-// all edits in a single left-to-right pass with one array join — O(n) — which is
+// all edits in a single left-to-right pass with one array join : O(n) : which is
 // what makes the whole format step fast.
 //
-// IMPORTANT — safety is unaffected: this module only changes WHITESPACE/indent and
+// IMPORTANT : safety is unaffected: this module only changes WHITESPACE/indent and
 // re-uses jsonc-parser's own scanner, so the produced text always parses back to
 // the same JSON value. The semantic guard (src/safety/guard.ts `jsonEqual`) still
 // runs on the output afterwards and is the authority on equivalence; this module
@@ -71,7 +71,7 @@ function mapJsonFormattingOptions(resolved: ResolvedOptions): FormattingOptions 
   return {
     tabSize: useTabs ? 1 : tabSize,
     insertSpaces: !useTabs,
-    // keepLines:false (default) is what makes the output idempotent — a stable
+    // keepLines:false (default) is what makes the output idempotent : a stable
     // canonical layout that a second pass reproduces byte-for-byte (SAFE-03).
     keepLines: false
   };
@@ -80,7 +80,7 @@ function mapJsonFormattingOptions(resolved: ResolvedOptions): FormattingOptions 
 /**
  * Pretty-print a JSON / JSONC document, preserving comments and trailing commas.
  *
- * Returns the formatted text WITHOUT applying EOL / final-newline / trim policy —
+ * Returns the formatted text WITHOUT applying EOL / final-newline / trim policy , 
  * that is the caller's shared post-processing responsibility, identical to the
  * js-beautify path, so the two engines stay behaviourally aligned on those knobs.
  *

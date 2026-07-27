@@ -7,7 +7,7 @@
 //
 // This is the inverse of the guard's anti-corruption corpus: there we prove the
 // guard REJECTS mangled output; here we prove it does NOT false-positive on the
-// hard, real-world syntax the incumbent (lonefy) corrupted — generics, nested
+// hard, real-world syntax the incumbent (lonefy) corrupted : generics, nested
 // JSX + fragments, conditional rendering, spread props, JSX expressions/comments,
 // template literals (tagged + nested), legacy decorators, enums/namespaces,
 // function overloads, type-only imports, `satisfies`, optional-chaining +
@@ -15,7 +15,7 @@
 // fields, async generators, and class accessors.
 //
 // SPEC refs: ENG-01/ENG-02 (modern syntax not corrupted), SAFE-01 (AST
-// equivalence guard, no false positives — §12 "faux positif de la garde"),
+// equivalence guard, no false positives : §12 "faux positif de la garde"),
 // SAFE-03 (idempotence). Issue clusters: #64,#76,#80,#128,#136,#141,#146,#150.
 import type { LangId } from '../../../src/types';
 

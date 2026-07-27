@@ -1,8 +1,8 @@
 // Unit tests for the PURE part of the "Show Effective Configuration" command
-// (Axe 3.T9 — Show Config surfaces every effective option + its source).
+// (Axe 3.T9 : Show Config surfaces every effective option + its source).
 //
-// These tests import ONLY the pure report builder + helpers — never the VS Code
-// handler — so they run under plain mocha+tsx with no Electron host. The module
+// These tests import ONLY the pure report builder + helpers : never the VS Code
+// handler : so they run under plain mocha+tsx with no Electron host. The module
 // is written with NO top-level 'vscode' import (it requires 'vscode' lazily inside
 // the handler), so importing it here does not pull in 'vscode'. A regression that
 // re-introduces a top-level 'vscode' import would make this very file fail to load
@@ -11,7 +11,7 @@
 // What we prove:
 //   - the header carries the document path, language, and the .soukformatrc path;
 //   - EVERY catalogue option that applies to the active language is listed (set or
-//     defaulted) — the direct fix for "not enough options" being invisible;
+//     defaulted) : the direct fix for "not enough options" being invisible;
 //   - the SOURCE of each key is surfaced, including the .soukformatrc and the glob
 //     override layers (resolved through the real pure resolver);
 //   - options that don't apply to a language are omitted from that language's view;
@@ -54,16 +54,16 @@ function resolveFor(languageId: LangId, layers: ConfigLayer[]): ResolvedOptions 
   return resolveOptions({ languageId, layers });
 }
 
-describe('commands/showConfig — constants', () => {
+describe('commands/showConfig : constants', () => {
   it('exposes the stable command id', () => {
     assert.equal(SHOW_CONFIG_COMMAND_ID, 'tidy.showEffectiveConfiguration');
   });
 });
 
-describe('commands/showConfig — header', () => {
+describe('commands/showConfig : header', () => {
   it('shows the document path, language, fixed timestamp and (none found) soukformatrc', () => {
     const report = reportFor('css', resolved({ tabSize: 2 }));
-    assert.match(report, /^Tidy Formatter — Effective Configuration$/m);
+    assert.match(report, /^Tidy Formatter : Effective Configuration$/m);
     assert.match(report, /^Document : \/proj\/src\/file$/m);
     assert.match(report, /^Language : css$/m);
     assert.match(report, new RegExp(`^Resolved : ${FIXED_NOW}$`, 'm'));
@@ -78,7 +78,7 @@ describe('commands/showConfig — header', () => {
   });
 });
 
-describe('commands/showConfig — indentation block', () => {
+describe('commands/showConfig : indentation block', () => {
   it('renders tabSize / insertSpaces with their attributed source', () => {
     const options = resolveFor('css', [
       { source: 'FormattingOptions (live, per call)', values: { tabSize: 2, insertSpaces: true } }
@@ -104,7 +104,7 @@ describe('commands/showConfig — indentation block', () => {
   });
 });
 
-describe('commands/showConfig — full option surface (catalogue-driven)', () => {
+describe('commands/showConfig : full option surface (catalogue-driven)', () => {
   it('lists EVERY js-beautify + core + prettier option that applies to the language', () => {
     // javascript is in all three families (js-beautify js, core, prettier).
     const lang: LangId = 'javascript';
@@ -157,7 +157,7 @@ describe('commands/showConfig — full option surface (catalogue-driven)', () =>
   });
 });
 
-describe('commands/showConfig — source attribution per layer', () => {
+describe('commands/showConfig : source attribution per layer', () => {
   it('attributes a global tidy.* value to the VS Code global layer', () => {
     const options = resolveFor('javascript', [
       { source: 'VS Code settings (tidy.*)', values: { brace_style: 'expand' } }
@@ -227,7 +227,7 @@ describe('commands/showConfig — source attribution per layer', () => {
   });
 });
 
-describe('commands/showConfig — prettier bag reading', () => {
+describe('commands/showConfig : prettier bag reading', () => {
   it('reads a nested prettier value by engineKey, not as a flat key', () => {
     const entry = OPTION_CATALOG.find(
       (e) => e.settingKey === 'tidy.prettier.semi'
@@ -255,7 +255,7 @@ describe('commands/showConfig — prettier bag reading', () => {
   });
 });
 
-describe('commands/showConfig — other attributed sources', () => {
+describe('commands/showConfig : other attributed sources', () => {
   it('surfaces an attributed source not covered by the catalogue sections', () => {
     const options = resolved({
       engineOptions: { legacy_unknown_opt: 1 },
@@ -272,7 +272,7 @@ describe('commands/showConfig — other attributed sources', () => {
   });
 });
 
-describe('commands/showConfig — warnings', () => {
+describe('commands/showConfig : warnings', () => {
   it('surfaces non-fatal .soukformatrc warnings', () => {
     const report = reportFor('css', resolved(), {
       warnings: ['.soukformatrc[css]: unknown option "bogus" ignored.']
@@ -287,7 +287,7 @@ describe('commands/showConfig — warnings', () => {
   });
 });
 
-describe('commands/showConfig — ignore & coexistence (Axe 4.T8)', () => {
+describe('commands/showConfig : ignore & coexistence (Axe 4.T8)', () => {
   const baseStatus: IgnoreStatus = {
     fileIgnoredByList: false,
     fileIgnoredByMarker: false,
@@ -351,7 +351,7 @@ describe('commands/showConfig — ignore & coexistence (Axe 4.T8)', () => {
   });
 });
 
-describe('commands/showConfig — renderLine + purity', () => {
+describe('commands/showConfig : renderLine + purity', () => {
   it('renderLine aligns the source column and stringifies the value', () => {
     const line = renderLine('k', 4, '(default)');
     assert.match(line, /^ {2}k = 4 +← \(default\)$/);

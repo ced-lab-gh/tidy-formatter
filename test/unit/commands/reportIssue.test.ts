@@ -1,11 +1,11 @@
 // Unit tests for the PURE part of the "Report an Issue" command.
 //
-// These import ONLY the pure URL builder + helpers — never the VS Code handler —
+// These import ONLY the pure URL builder + helpers : never the VS Code handler , 
 // so they run under plain mocha+tsx with no Electron host. The module is written
 // with NO top-level 'vscode' import (it requires 'vscode' lazily inside the
 // handler), so importing it here does not pull in 'vscode'. A regression that
 // re-introduces a top-level 'vscode' import would make this very file fail to
-// load — which is the point.
+// load : which is the point.
 import assert from 'node:assert/strict';
 import {
   REPORT_ISSUE_COMMAND_ID,
@@ -21,7 +21,7 @@ const FULL_ENV: IssueEnv = {
   languageId: 'typescriptreact'
 };
 
-describe('commands/reportIssue — pure URL builder', () => {
+describe('commands/reportIssue : pure URL builder', () => {
   it('exposes the stable command id', () => {
     assert.equal(REPORT_ISSUE_COMMAND_ID, 'tidy.reportIssue');
   });
@@ -78,7 +78,7 @@ describe('commands/reportIssue — pure URL builder', () => {
   });
 });
 
-describe('commands/reportIssue — platformLabel', () => {
+describe('commands/reportIssue : platformLabel', () => {
   it('maps the three known platforms', () => {
     assert.equal(platformLabel('win32'), 'Windows');
     assert.equal(platformLabel('darwin'), 'macOS');

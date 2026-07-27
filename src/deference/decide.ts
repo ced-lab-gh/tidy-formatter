@@ -1,9 +1,9 @@
 // PURE decision logic for surfacing deference to a competing formatter
 // (Axe 4 / 4.T5). Given the detected competitors, the user's preference, and the
-// one-shot dedup flag, decide whether to NOTIFY, silently DEFER, or do NOTHING —
+// one-shot dedup flag, decide whether to NOTIFY, silently DEFER, or do NOTHING , 
 // and, when notifying, the exact message to show.
 //
-// ANTI-HIJACK (ARCH-02, SPEC §5/§10/§12) — NON-NEGOTIABLE:
+// ANTI-HIJACK (ARCH-02, SPEC §5/§10/§12) : NON-NEGOTIABLE:
 //   - This module DECIDES; it never writes a setting nor touches
 //     `editor.defaultFormatter`. The host turns 'notify' into a one-shot, surfaced
 //     notification (offering the user an explicit, consented "disable Tidy here"
@@ -93,13 +93,13 @@ function listFormatters(detected: readonly string[]): string {
 /**
  * Compose the one-shot deference notification message. PURE. States that a
  * competitor is configured, that Tidy is NOT taking over, and that the user can
- * step Tidy back per language — making the anti-hijack contract explicit.
+ * step Tidy back per language : making the anti-hijack contract explicit.
  */
 export function formatDeferenceMessage(detected: readonly string[]): string {
   const names = listFormatters(detected);
   return (
     `This workspace already configures ${names}. ` +
-    'Tidy will not take over — your default formatter is unchanged. ' +
+    'Tidy will not take over : your default formatter is unchanged. ' +
     'You can disable Tidy per language for this workspace if you prefer to ' +
     `let ${names} handle formatting.`
   );

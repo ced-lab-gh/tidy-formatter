@@ -127,7 +127,7 @@ function readLanguageExplicit<T>(
  * user actually set (at a non-language scope) AND that apply to this language are
  * included; package.json defaults are intentionally not injected so the resolver's
  * built-in defaults remain the lowest layer. Every value is validated against the
- * catalogue (type/enum) before it is forwarded — an invalid value is dropped, not
+ * catalogue (type/enum) before it is forwarded : an invalid value is dropped, not
  * propagated.
  */
 function buildTidyGlobalLayer(
@@ -252,7 +252,7 @@ function buildFormattingOptionsLayer(
  *
  * Three gates, all must pass (SPEC §6 / CFG-03 / Workspace Trust):
  *   1. opt-out `tidy.editorconfig` (default true) is not disabled;
- *   2. the workspace is trusted — in Restricted Mode we must not read configs
+ *   2. the workspace is trusted : in Restricted Mode we must not read configs
  *      defined by the workspace (a .editorconfig is workspace-authored content);
  *   3. the document has a real on-disk path (scheme 'file'); untitled/virtual
  *      documents have no cascade to walk.
@@ -344,9 +344,9 @@ function buildSoukformatrcLayers(
  *   2. tidy.* [lang] overrides               │ VS Code settings
  *   3. [lang] editor settings (eol/newline)  │
  *   4. live FormattingOptions (per call)     ┘ + FormattingOptions
- *   5. .editorconfig cascade        (layer 3) — team config wins over VS Code
+ *   5. .editorconfig cascade        (layer 3) : team config wins over VS Code
  *   6. .soukformatrc language section (layer 4)
- *   7. .soukformatrc glob overrides  (layer 5) — most specific, win last
+ *   7. .soukformatrc glob overrides  (layer 5) : most specific, win last
  *
  * Both project-config families (.editorconfig, .soukformatrc) are gated by their
  * opt-out setting, Workspace Trust, and an on-disk URI; when gated off (or empty)

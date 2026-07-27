@@ -18,7 +18,7 @@ import {
   nonObjectInputs
 } from '../../fixtures/migrationFixtures';
 
-describe('migration/lonefyOptions — mapLonefyOptions corpus', () => {
+describe('migration/lonefyOptions : mapLonefyOptions corpus', () => {
   for (const f of migrationFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, () => {
       const result = mapLonefyOptions(f.raw);
@@ -44,7 +44,7 @@ describe('migration/lonefyOptions — mapLonefyOptions corpus', () => {
   }
 });
 
-describe('migration/lonefyOptions — non-object input is fail-soft', () => {
+describe('migration/lonefyOptions : non-object input is fail-soft', () => {
   for (const { id, raw } of nonObjectInputs) {
     it(`${id}: yields an empty mapping + one warning, never throws`, () => {
       let result;
@@ -58,7 +58,7 @@ describe('migration/lonefyOptions — non-object input is fail-soft', () => {
   }
 });
 
-describe('migration/lonefyOptions — only real tidy.* keys are ever produced', () => {
+describe('migration/lonefyOptions : only real tidy.* keys are ever produced', () => {
   const ALLOWED = new Set([
     'tidy.indent',
     'tidy.brace_style',
@@ -77,7 +77,7 @@ describe('migration/lonefyOptions — only real tidy.* keys are ever produced', 
   });
 });
 
-describe('migration/lonefyOptions — immutability & isolation', () => {
+describe('migration/lonefyOptions : immutability & isolation', () => {
   it('does not mutate the input object', () => {
     const raw = { indent_size: 2, brace_style: 'expand', foo: 1 };
     const snapshot = JSON.parse(JSON.stringify(raw));
@@ -95,7 +95,7 @@ describe('migration/lonefyOptions — immutability & isolation', () => {
   });
 });
 
-describe('migration/lonefyOptions — out-of-domain values are reported, not written', () => {
+describe('migration/lonefyOptions : out-of-domain values are reported, not written', () => {
   it('a recognised key with a bad value never reaches settings', () => {
     const result = mapLonefyOptions({
       indent_size: -1,
@@ -110,7 +110,7 @@ describe('migration/lonefyOptions — out-of-domain values are reported, not wri
   });
 });
 
-describe('migration/lonefyOptions — mapLonefyRcText (JSONC entry point)', () => {
+describe('migration/lonefyOptions : mapLonefyRcText (JSONC entry point)', () => {
   it('parses plain JSON and maps it', () => {
     const result = mapLonefyRcText('{ "indent_size": 2, "brace_style": "expand" }');
     assert.deepEqual(result.settings, {

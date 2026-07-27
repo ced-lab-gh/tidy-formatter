@@ -151,7 +151,7 @@ export const guardFixtures: GuardFixture[] = [
     // attribute list is exploded by Prettier so the bare closing `>` lands on its
     // OWN line. The earlier jsxBoundaryFingerprint fingerprinted the `>`
     // adjacency too, so it reported close:glued (input) vs close:split (output)
-    // and FALSE-POSITIVE-REJECTED this correct reflow — making Tidy a silent
+    // and FALSE-POSITIVE-REJECTED this correct reflow : making Tidy a silent
     // no-op on essentially every real .tsx component with wrapped attributes
     // (caught end-to-end by test/integration/complex.test.ts HX-TSX-BIG-COMPONENT).
     // The fingerprint now tracks only the OPENING `<` adjacency, so this is

@@ -1,5 +1,5 @@
 // Generates the 4 walkthrough step placeholder images as VALID PNG files
-// (not SVG renamed to .png — the Marketplace rejects those).
+// (not SVG renamed to .png : the Marketplace rejects those).
 //
 // These are intentionally plain placeholders for AXE 1; the final art lands in
 // AXE 2. Each is a solid-background 600x300 PNG with a thin accent band and a

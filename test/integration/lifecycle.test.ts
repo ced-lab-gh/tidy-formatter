@@ -1,7 +1,7 @@
-// Headless lifecycle integration tests — SPEC QA-04 (P0).
+// Headless lifecycle integration tests : SPEC QA-04 (P0).
 //
 // These run inside a real VS Code Electron host. They prove the five
-// NON-NEGOTIABLE anti-hijack guarantees end-to-end — the only tier of tests
+// NON-NEGOTIABLE anti-hijack guarantees end-to-end : the only tier of tests
 // that can. The product's whole moat is "never hijack / never corrupt", and
 // the incumbent's 1.69/5 came from violating exactly these:
 //
@@ -34,7 +34,7 @@ import {
   setTidyConfig
 } from './helpers';
 
-describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
+describe('Tidy lifecycle (QA-04) : anti-hijack guarantees', function () {
   // Opening the Electron host + downloading VS Code on first run is slow; give
   // each case headroom beyond the engine work itself.
   // CI-aware: slow/shared CI runners get a generous ceiling; local stays strict.
@@ -91,7 +91,7 @@ describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
       beforeSave,
       'save must not reformat the document when formatOnSave=false'
     );
-    // The compact rule must still be compact — proof no formatter touched it.
+    // The compact rule must still be compact : proof no formatter touched it.
     assert.ok(
       document.getText().includes('a{color:red}'),
       'the original compact CSS rule must survive an unformatted save'
@@ -113,8 +113,8 @@ describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
   // We set editor.defaultFormatter to a non-Tidy id. With two candidate
   // providers and the named default not resolving to Tidy, VS Code must NOT let
   // Tidy silently clobber the file (this is exactly incumbent #92 "formats even
-  // when another formatter is the default"). Whatever VS Code does — leave the
-  // file alone or run the sentinel — the one forbidden outcome is Tidy
+  // when another formatter is the default"). Whatever VS Code does : leave the
+  // file alone or run the sentinel : the one forbidden outcome is Tidy
   // reformatting. Tidy's signature here is expanding `a{color:red}` onto
   // multiple indented lines, so the compact rule surviving proves Tidy deferred.
   it('(b) when another extension is the default formatter, Tidy does not run on save', async () => {
@@ -178,7 +178,7 @@ describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
       'Tidy must not reformat on save when another extension is the default formatter (#92)'
     );
 
-    // Cross-check identity: if any formatter ran, it must be the sentinel — and
+    // Cross-check identity: if any formatter ran, it must be the sentinel : and
     // Tidy's multi-line expansion must be absent regardless.
     if (sentinelInvoked) {
       assert.ok(
@@ -226,7 +226,7 @@ describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
     assert.ok(
       !editor.selection.active.isEqual(eofPosition),
       `cursor jumped to EOF (${editor.selection.active.line}:` +
-        `${editor.selection.active.character}) — regression of incumbent #83`
+        `${editor.selection.active.character}) : regression of incumbent #83`
     );
     // Stronger: the cursor stayed at (or very near) where the user left it.
     assert.equal(
@@ -272,7 +272,7 @@ describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
       1,
       `expected exactly one save, got ${saveCount} (incumbent #28 double-save)`
     );
-    // The doc must not be dirty afterwards — proves the single save committed.
+    // The doc must not be dirty afterwards : proves the single save committed.
     assert.equal(document.isDirty, false, 'document should be clean after save');
   });
 
@@ -303,7 +303,7 @@ describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
     // The authoritative, user-facing contract: a real Format Document must
     // leave the document untouched, because Tidy (the only CSS provider here)
     // now contributes nothing. This is what "Tidy disappears from Format
-    // Document With…" means observably — there is no Tidy edit to apply, so the
+    // Document With…" means observably : there is no Tidy edit to apply, so the
     // file is byte-identical after a format run.
     //
     // (We deliberately assert via the real `editor.action.formatDocument` path
@@ -323,7 +323,7 @@ describe('Tidy lifecycle (QA-04) — anti-hijack guarantees', function () {
       'the compact CSS rule must survive untouched while Tidy is disabled'
     );
 
-    // Re-enabling restores formatting — proving the disable was the cause of the
+    // Re-enabling restores formatting : proving the disable was the cause of the
     // no-op above, not some unrelated reason (closes the loop on the gate).
     await restoreEnable();
     await flushEventLoop();

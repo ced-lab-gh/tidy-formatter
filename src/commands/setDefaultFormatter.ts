@@ -2,9 +2,9 @@
 //
 // Factored out of commands/useAsFormatter.ts (Axe 1 / 1.T2) so the migration
 // flow (Axe 1 / 1.T4, src/migration/runMigration.ts) can perform the EXACT same
-// write through one code path — no duplicated `update('defaultFormatter', …)`.
+// write through one code path : no duplicated `update('defaultFormatter', …)`.
 //
-// ANTI-HIJACK (ARCH-02, SPEC §5/§12) — NON-NEGOTIABLE:
+// ANTI-HIJACK (ARCH-02, SPEC §5/§12) : NON-NEGOTIABLE:
 //   - This helper writes ONLY `editor.defaultFormatter` (overrideInLanguage) for
 //     the explicit languages a caller passes. It NEVER writes
 //     `editor.formatOnSave` and NEVER writes anything for a language the caller
@@ -42,7 +42,7 @@ export function toConfigurationTarget(vscode: any, target: WriteTarget): unknown
 /**
  * Write Tidy as the per-language `editor.defaultFormatter` for each given
  * language at the resolved scope, using overrideInLanguage (the language-scoped
- * form). Sets ONLY defaultFormatter — never formatOnSave.
+ * form). Sets ONLY defaultFormatter : never formatOnSave.
  *
  * The caller is responsible for having obtained explicit user consent and for
  * passing a validated, de-duplicated language list. An empty list is a no-op.

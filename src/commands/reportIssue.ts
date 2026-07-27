@@ -1,7 +1,7 @@
 // Command: "Tidy: Report an Issue".
 // Opens a prefilled GitHub "new issue" page for this repo with the environment
 // details a good bug report needs (extension + VS Code version, OS, and the
-// active document's languageId) already filled in — the actionable counterpart
+// active document's languageId) already filled in : the actionable counterpart
 // to the README's "a reproducible input is worth a thousand stars". It only ever
 // READS host state and opens an external URL: it writes no file and changes no
 // setting, so it carries none of the anti-hijack risk of the onboarding commands.
@@ -11,7 +11,7 @@
 // by a plain mocha+tsx test; the thin 'vscode' surface (active editor, version,
 // env.openExternal) is required lazily INSIDE the handler, which only ever runs
 // inside the extension host. A regression that re-introduces a top-level 'vscode'
-// import would make the pure test fail to load — which is the point.
+// import would make the pure test fail to load : which is the point.
 
 export const REPORT_ISSUE_COMMAND_ID = 'tidy.reportIssue';
 
@@ -90,7 +90,7 @@ export function buildIssueUrl(env: IssueEnv): string {
  * Command handler. Gathers the environment from the extension host and opens the
  * prefilled issue page in the user's browser. Read-only with respect to the
  * workspace: it opens an external URL and does nothing else. Never throws in a way
- * that reaches the user — any failure is reported as a non-blocking message.
+ * that reaches the user : any failure is reported as a non-blocking message.
  */
 /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */
 export async function reportIssue(): Promise<void> {

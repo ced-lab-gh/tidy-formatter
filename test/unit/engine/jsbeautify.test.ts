@@ -9,7 +9,7 @@ import type { LangId } from '../../../src/types';
 
 const engine = new JsBeautifyEngine();
 
-describe('engine/jsbeautify — supported languages', () => {
+describe('engine/jsbeautify : supported languages', () => {
   it('supports css/scss/less/html/json/jsonc/javascript', () => {
     for (const lang of ['css', 'scss', 'less', 'html', 'json', 'jsonc', 'javascript'] as const) {
       assert.ok(engine.supports(lang), `must support ${lang}`);
@@ -22,7 +22,7 @@ describe('engine/jsbeautify — supported languages', () => {
   });
 });
 
-describe('engine/jsbeautify — indentation mapping (CFG-01)', () => {
+describe('engine/jsbeautify : indentation mapping (CFG-01)', () => {
   it('tabSize=2 + insertSpaces=true => 2 spaces', async () => {
     const out = await engine.format({
       languageId: 'css',
@@ -52,7 +52,7 @@ describe('engine/jsbeautify — indentation mapping (CFG-01)', () => {
   });
 });
 
-describe('engine/jsbeautify — final newline & EOL policy (CFG-03, #62/#82/#88)', () => {
+describe('engine/jsbeautify : final newline & EOL policy (CFG-03, #62/#82/#88)', () => {
   it('insertFinalNewline=true adds exactly one trailing newline', async () => {
     const out = await engine.format({
       languageId: 'json',
@@ -92,7 +92,7 @@ describe('engine/jsbeautify — final newline & EOL policy (CFG-03, #62/#82/#88)
   });
 });
 
-describe('engine/jsbeautify — range formatting splices back the surroundings', () => {
+describe('engine/jsbeautify : range formatting splices back the surroundings', () => {
   it('formats only the selected slice, preserving bytes outside the range', async () => {
     const code = 'HEADER\n.a{color:red}\nFOOTER';
     const start = code.indexOf('.a');
@@ -120,13 +120,13 @@ describe('engine/jsbeautify — range formatting splices back the surroundings',
   });
 });
 
-// --- engineOptions effect proof (Axe 3.T2 — "not enough options") -----------
+// --- engineOptions effect proof (Axe 3.T2 : "not enough options") -----------
 //
 // For EVERY new js-beautify key threaded through engineOptions we PROVE two
 // things at once, mirroring the Prettier stylistic-guard contract:
-//   1. EFFECT  — formatting with the option set produces a DIFFERENT result from
+//   1. EFFECT  : formatting with the option set produces a DIFFERENT result from
 //      the engine default (the option is really consumed, not silently dropped),
-//   2. SAFETY  — guard.check(input, tuned) stays equivalent:true, i.e. the option
+//   2. SAFETY  : guard.check(input, tuned) stays equivalent:true, i.e. the option
 //      only rewrites whitespace/style and never changes the AST/CSS/HTML tree.
 // Together these guarantee a newly-exposed option can never be a no-op and can
 // never let the formatter corrupt a file (the two SPEC §12 failure modes).
@@ -374,7 +374,7 @@ const ALL_EFFECT_CASES: readonly EffectCase[] = [
   ...HTML_EFFECT_CASES
 ];
 
-describe('engine/jsbeautify — engineOptions effect + guard equivalence (Axe 3.T2)', () => {
+describe('engine/jsbeautify : engineOptions effect + guard equivalence (Axe 3.T2)', () => {
   for (const testCase of ALL_EFFECT_CASES) {
     it(`${testCase.key} changes the output AND the guard accepts it`, async () => {
       await proveEffect(testCase);

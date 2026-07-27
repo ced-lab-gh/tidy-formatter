@@ -2,12 +2,12 @@
 // Surfaces EVERY effective formatting option together with the SOURCE of each key
 // (the direct antidote to lonefy review #2 "not enough options" + the "spent N
 // hours debugging why 4 spaces" pain): the report lists every catalogue option
-// that applies to the active language — whether the user set it or it fell back to
-// a default — and where the winning value came from (VS Code global / per-language
+// that applies to the active language : whether the user set it or it fell back to
+// a default : and where the winning value came from (VS Code global / per-language
 // `tidy.<lang>` / .editorconfig / .soukformatrc / .soukformatrc glob override).
 //
 // Split of concerns (so the report builder is unit-testable without an Electron
-// host): this module's TOP LEVEL imports NO 'vscode' — neither directly nor
+// host): this module's TOP LEVEL imports NO 'vscode' : neither directly nor
 // transitively. The pure report functions take plain data (a ReportInput), import
 // only the pure optionCatalog + types, and are covered by a plain mocha+tsx test.
 // The VS Code surface ('vscode', vscodeConfig) is required lazily INSIDE the
@@ -24,7 +24,7 @@ import {
 
 export const SHOW_CONFIG_COMMAND_ID = 'tidy.showEffectiveConfiguration';
 
-const OUTPUT_CHANNEL_NAME = 'Tidy Formatter — Effective Configuration';
+const OUTPUT_CHANNEL_NAME = 'Tidy Formatter : Effective Configuration';
 
 /**
  * The languageIds Tidy can resolve options for. Mirrors the provider list; kept
@@ -47,7 +47,7 @@ const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set<LangId>([
 const DEFAULT_SOURCE = '(default)';
 
 /* -------------------------------------------------------------------------- */
-/* Pure report builder (no 'vscode' — unit-testable under mocha + tsx)         */
+/* Pure report builder (no 'vscode' : unit-testable under mocha + tsx)         */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -69,7 +69,7 @@ export interface ReportInput {
    * Ignore + coexistence (deference) status for the ACTIVE document (Axe 4.T8).
    * Optional so the pure builder stays usable by callers that do not resolve it;
    * when present, a dedicated section surfaces whether Tidy would skip this file
-   * and how it reacts to a competing formatter — all read-only, never a write.
+   * and how it reacts to a competing formatter : all read-only, never a write.
    */
   readonly ignoreStatus?: IgnoreStatus;
   /** Injected only by tests for a deterministic header timestamp. */
@@ -110,7 +110,7 @@ function sourceKeyFor(entry: OptionEntry): string {
 
 /**
  * Look up the recorded source for a key, defaulting to a clear placeholder when
- * the resolver did not attribute it (so the user always sees an origin — a value
+ * the resolver did not attribute it (so the user always sees an origin : a value
  * with no attributed layer is, by definition, the built-in catalogue default).
  */
 function sourceOf(options: ResolvedOptions, key: string): string {
@@ -215,13 +215,13 @@ function printedSourceKeys(languageId: LangId): Set<string> {
 
 /**
  * Build the human-readable report of every effective option and its source.
- * PURE: no 'vscode', no I/O — fully unit-testable.
+ * PURE: no 'vscode', no I/O : fully unit-testable.
  */
 export function buildEffectiveConfigReport(input: ReportInput): string {
   const { options, languageId } = input;
   const lines: string[] = [];
 
-  lines.push('Tidy Formatter — Effective Configuration');
+  lines.push('Tidy Formatter : Effective Configuration');
   lines.push('========================================');
   lines.push(`Document : ${input.documentPath}`);
   lines.push(`Language : ${languageId}`);
@@ -258,7 +258,7 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
   }
 
   // Catalogue options, grouped by family. Every option that APPLIES to the active
-  // language is shown — set or defaulted — so the user sees the full surface.
+  // language is shown : set or defaulted : so the user sees the full surface.
   lines.push('');
   lines.push('js-beautify options (this language)');
   lines.push('-----------------------------------');
@@ -270,7 +270,7 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
   lines.push(...renderFamily(options, languageId, 'core'));
 
   lines.push('');
-  lines.push('Prettier options (TS/JSX, stylistic — AST-invariant)');
+  lines.push('Prettier options (TS/JSX, stylistic : AST-invariant)');
   lines.push('----------------------------------------------------');
   lines.push(...renderFamily(options, languageId, 'prettier'));
 
@@ -309,7 +309,7 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
 
 /**
  * Render the read-only "Ignore & coexistence" section (Axe 4.T8). PURE: it only
- * describes what Tidy WOULD do for the active document — every line is a fact, no
+ * describes what Tidy WOULD do for the active document : every line is a fact, no
  * action is offered and nothing is written. Surfaces the .soukformatignore /
  * in-source ignore state and the deference posture toward a competing formatter.
  */
@@ -324,7 +324,7 @@ function renderIgnoreStatus(status: IgnoreStatus): string[] {
     const why = status.fileIgnoredByList
       ? '.soukformatignore'
       : 'in-source file-ignore marker';
-    lines.push(`  Tidy SKIPS this file (left byte-identical) — via ${why}.`);
+    lines.push(`  Tidy SKIPS this file (left byte-identical) : via ${why}.`);
   } else {
     lines.push('  Tidy formats this file (not ignored).');
   }

@@ -37,6 +37,19 @@ PUBLISHING.md
 _internal/**
 STRUCTURE.md
 
+# ── Secrets & personal data ──
+# MIRROR of .gitignore. This block is NOT redundant: vsce packages from the
+# working directory, NOT from git, and it never reads .gitignore. Without these
+# patterns an untracked local .env holding VSCE_PAT / OVSX_PAT would be baked
+# into a published VSIX (verified: `vsce ls` lists such a file while git ignores it).
+**/*.env
+**/.env*
+**/*.pat
+**/*.pem
+**/*.key
+**/*.p12
+**/*secret*.json
+
 # ── Misc ──
 **/*.map
 **/*.ts

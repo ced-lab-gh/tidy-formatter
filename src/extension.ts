@@ -8,7 +8,7 @@
 // settings Tidy ever writes happen inside the onboarding/migration commands and
 // ONLY after explicit user confirmation. At activation we may show a single,
 // non-modal, deduplicated migration notification when the abandoned incumbent is
-// installed — it writes nothing on its own. VS Code core owns the save /
+// installed : it writes nothing on its own. VS Code core owns the save /
 // format-on-save / cursor lifecycle.
 import * as vscode from 'vscode';
 import {
@@ -101,7 +101,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // Report an Issue: opens a prefilled GitHub issue with environment details.
-  // Read-only — it opens an external URL and writes nothing (no setting, no file).
+  // Read-only : it opens an external URL and writes nothing (no setting, no file).
   context.subscriptions.push(
     vscode.commands.registerCommand(REPORT_ISSUE_COMMAND_ID, reportIssue)
   );
@@ -124,7 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // One-shot, deduplicated deference notification (Axe 4.T5). Fire-and-forget so
   // it never blocks activation. It only ever SURFACES that another formatter is
-  // configured — it never disables Tidy, never touches editor.defaultFormatter,
+  // configured : it never disables Tidy, never touches editor.defaultFormatter,
   // and writes no setting on its own (anti-hijack). Uses a globalState key
   // DISTINCT from the migration prompt so the two never collide.
   void maybeSurfaceDeference(context);
@@ -133,7 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
 /**
  * Decide and (at most once) show the migration notification. Pure decision via
  * `shouldPromptMigration`; the persisted flag lives in globalState so the nag is
- * never repeated. Never throws — any failure must not break activation.
+ * never repeated. Never throws : any failure must not break activation.
  */
 async function maybePromptMigration(
   context: vscode.ExtensionContext
@@ -161,7 +161,7 @@ async function maybePromptMigration(
  * Pure decision via `decide` over the detected competing formatters, the user's
  * `tidy.deferToOtherFormatters` preference (default 'notify'), and a one-shot
  * dedup flag in globalState. The host ONLY shows a non-modal, informational
- * notification — it NEVER disables Tidy, NEVER writes any setting, and NEVER
+ * notification : it NEVER disables Tidy, NEVER writes any setting, and NEVER
  * touches editor.defaultFormatter (ARCH-02). Detection is Workspace-Trust gated
  * inside detectCompetingFormatters (Restricted Mode => no reads => nothing shown).
  *

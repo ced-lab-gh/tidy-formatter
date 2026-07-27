@@ -1,6 +1,6 @@
 // Unit tests for the PURE planner of the "Preview format" command
 // (Axe 4 / 4.T6). These tests import ONLY the pure decision function and its
-// constants — never the VS Code handler — so they run under plain mocha+tsx with
+// constants : never the VS Code handler : so they run under plain mocha+tsx with
 // no Electron host. The module is written with no top-level 'vscode' import, so
 // this import does not pull in 'vscode'; a regression that re-introduces a
 // top-level 'vscode' import would make this very file fail to load (which is the
@@ -31,7 +31,7 @@ function rejected(reason?: string): GuardVerdict {
   return { equivalent: false, reason };
 }
 
-describe('commands/previewFormat — constants', () => {
+describe('commands/previewFormat : constants', () => {
   it('exposes the stable command id', () => {
     assert.equal(PREVIEW_FORMAT_COMMAND_ID, 'tidy.previewFormat');
   });
@@ -45,7 +45,7 @@ describe('commands/previewFormat — constants', () => {
   });
 });
 
-describe('commands/previewFormat — buildPreviewPlan guard rejection', () => {
+describe('commands/previewFormat : buildPreviewPlan guard rejection', () => {
   it('non-equivalent verdict => canApply:false with the broken-syntax message', () => {
     const plan = buildPreviewPlan('a', 'b', rejected('AST structure changed after formatting'));
     assert.equal(plan.canApply, false);
@@ -85,7 +85,7 @@ describe('commands/previewFormat — buildPreviewPlan guard rejection', () => {
   });
 });
 
-describe('commands/previewFormat — buildPreviewPlan no-change', () => {
+describe('commands/previewFormat : buildPreviewPlan no-change', () => {
   it('equivalent verdict but byte-identical output => canApply:false, already-formatted', () => {
     const text = 'div { color: red; }\n';
     const plan = buildPreviewPlan(text, text, EQUIVALENT);
@@ -100,7 +100,7 @@ describe('commands/previewFormat — buildPreviewPlan no-change', () => {
   });
 });
 
-describe('commands/previewFormat — buildPreviewPlan applicable', () => {
+describe('commands/previewFormat : buildPreviewPlan applicable', () => {
   it('equivalent verdict AND a real change => canApply:true, no reason', () => {
     const plan = buildPreviewPlan('div{color:red}', 'div {\n  color: red;\n}\n', EQUIVALENT);
     assert.equal(plan.canApply, true);
@@ -114,7 +114,7 @@ describe('commands/previewFormat — buildPreviewPlan applicable', () => {
   });
 });
 
-describe('commands/previewFormat — buildPreviewPlan is pure', () => {
+describe('commands/previewFormat : buildPreviewPlan is pure', () => {
   it('is deterministic for the same inputs', () => {
     const a = buildPreviewPlan('a', 'b', EQUIVALENT);
     const b = buildPreviewPlan('a', 'b', EQUIVALENT);

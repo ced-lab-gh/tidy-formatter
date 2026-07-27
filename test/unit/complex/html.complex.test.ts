@@ -1,4 +1,4 @@
-// Complex HTML corpus — adversarial / real-world acceptance tests for the
+// Complex HTML corpus : adversarial / real-world acceptance tests for the
 // format -> guard -> idempotence pipeline on the `html` languageId.
 //
 // HTML always routes to JsBeautifyEngine (SPEC §4 matrix); the safety guard for
@@ -61,7 +61,7 @@ async function assertSafeAndIdempotent(code: string): Promise<string> {
   return out;
 }
 
-describe('complex HTML corpus — format + guard + idempotence', () => {
+describe('complex HTML corpus : format + guard + idempotence', () => {
   describe('whole documents & structure', () => {
     it('formats a complete HTML5 document (doctype, head, body, nav)', async () => {
       const out = await assertSafeAndIdempotent(loadFixture('full-document.html'));
@@ -112,7 +112,7 @@ describe('complex HTML corpus — format + guard + idempotence', () => {
     });
 
     it('keeps tight inline whitespace meaning (<b>/<i> spacing)', async () => {
-      // "Hello <b>bold</b> and" — the single spaces around inline elements carry
+      // "Hello <b>bold</b> and" : the single spaces around inline elements carry
       // rendered meaning; the guard must accept a format that keeps them.
       await assertSafeAndIdempotent('<p>Hello <b>bold</b> and <i>italic</i> text.</p>');
     });

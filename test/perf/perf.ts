@@ -8,7 +8,7 @@
 //
 // On the event-loop budget specifically: a single synchronous format of a heavy
 // 2000-line file is CPU-bound and legitimately occupies the JS thread for as long
-// as it runs — that per-operation latency is exactly what the P95 < 200 ms budget
+// as it runs : that per-operation latency is exactly what the P95 < 200 ms budget
 // already bounds, and in VS Code it runs on the extension host without freezing
 // the renderer (SPEC ENG-03). Counting that same duration again as an "event-loop
 // block" would be double-counting an unavoidable single-thread cost. So the 50 ms
@@ -23,7 +23,7 @@
 // SPEC §9) is reported as an observation alongside the hard budgets.
 //
 // PURE driver: imports only the pure engine/safety modules (never 'vscode'), so it
-// runs under `tsx` outside the Electron host — exactly the path the provider uses.
+// runs under `tsx` outside the Electron host : exactly the path the provider uses.
 import { performance } from 'node:perf_hooks';
 import { dispatchFormat } from '../../src/engine/dispatcher';
 import { guard } from '../../src/safety/guard';
@@ -38,7 +38,7 @@ import type { LangId, ResolvedOptions } from '../../src/types';
 // budgets by this factor; LOCAL budgets stay strict so `npm run perf` keeps the
 // bar high on the developer machine. Structural budgets (the small-file LINE
 // ceiling, which is a setup-correctness check, and the guard SHARE ratio, which is
-// hardware-independent) are NOT multiplied — they must hold identically everywhere.
+// hardware-independent) are NOT multiplied : they must hold identically everywhere.
 const CI_BUDGET_MULTIPLIER = 3;
 const PERF_TIME_MULTIPLIER = process.env.CI ? CI_BUDGET_MULTIPLIER : 1;
 
@@ -182,8 +182,8 @@ function makeTypescript(lines: number): string {
 // JSX/TSX note: prettier breaks any JSX element that does not fit on one line
 // onto multiple lines, which introduces whitespace JSXText nodes the semantic
 // guard treats as a structural change (a legitimate guard behaviour, see
-// safety/guard.ts canonicalizeAst). To keep the perf input guard-clean — i.e.
-// representative of code the formatter actually applies — each component returns
+// safety/guard.ts canonicalizeAst). To keep the perf input guard-clean : i.e.
+// representative of code the formatter actually applies : each component returns
 // a SHORT, single-element JSX expression (text/expression children only) that
 // stays on one line after formatting. The work being timed is the surrounding
 // TS/JS parse+print, which dominates anyway.
@@ -259,7 +259,7 @@ interface Timing {
 /**
  * Run one real format+guard cycle exactly as the provider does: dispatch the
  * engine, then run the safety guard on (input, output). Returns the split
- * timings. Throws are intentionally NOT swallowed — a perf run that hides an
+ * timings. Throws are intentionally NOT swallowed : a perf run that hides an
  * engine failure would report meaningless numbers.
  */
 async function measureOnce(
@@ -339,7 +339,7 @@ interface FormatWindow {
  * amount by which a fire is late is loop blocking. We subtract the portion of
  * that lateness explained by a synchronous format that was in-flight during the
  * interval (already bounded by the P95 latency budget), leaving only the
- * *background* jank the formatter introduces outside its own awaited operation —
+ * *background* jank the formatter introduces outside its own awaited operation , 
  * which is what the < 50 ms budget governs (see file header).
  */
 class LoopHeartbeat {
@@ -424,7 +424,7 @@ async function runSmallCase(
 
   // Warm up once so lazy engine/parser loading (prettier dynamic import, the TS
   // compiler module, JIT) is not charged to the first measured sample. The warm-up
-  // IS an awaited format, so its window is fed to the heartbeat too — its
+  // IS an awaited format, so its window is fed to the heartbeat too : its
   // synchronous block must be subtracted like any other format, not mistaken for
   // background jank.
   await measureOnce(testCase.lang, code, options, heartbeat);
@@ -597,7 +597,7 @@ function collectViolations(
 
 async function main(): Promise<number> {
   // eslint-disable-next-line no-console
-  console.log('Tidy Formatter — perf budgets (format + guard end-to-end)\n');
+  console.log('Tidy Formatter : perf budgets (format + guard end-to-end)\n');
   if (PERF_TIME_MULTIPLIER !== 1) {
     // eslint-disable-next-line no-console
     console.log(
@@ -667,12 +667,12 @@ async function main(): Promise<number> {
   console.log('');
   if (violations.length === 0) {
     // eslint-disable-next-line no-console
-    console.log('PASS — all perf budgets met.');
+    console.log('PASS : all perf budgets met.');
     return 0;
   }
 
   // eslint-disable-next-line no-console
-  console.log(`FAIL — ${violations.length} perf budget(s) exceeded:`);
+  console.log(`FAIL : ${violations.length} perf budget(s) exceeded:`);
   for (const v of violations) {
     // eslint-disable-next-line no-console
     console.log(`  - [${v.budget}] ${v.detail}`);

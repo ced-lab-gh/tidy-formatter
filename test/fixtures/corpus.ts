@@ -4,9 +4,9 @@
 // snippet:
 //   I1 (the load-bearing one): guard.check(lang, input, dispatchFormat(req)) is
 //      equivalent === true. A failure means either a guard false-positive OR a
-//      real engine corruption — both are reportable bugs. This is the invariant
+//      real engine corruption : both are reportable bugs. This is the invariant
 //      that would have caught the JSX `< Foo bar = {x} />` class.
-//   I2: idempotence — dispatchFormat(dispatchFormat(x)) === dispatchFormat(x).
+//   I2: idempotence : dispatchFormat(dispatchFormat(x)) === dispatchFormat(x).
 //   I3: the formatted output re-parses (no parse error) via the guard's parsers.
 //
 // Deterministic variation: snippets are seeded by index (no Math.random), and
@@ -148,7 +148,7 @@ const lessSnippets: CorpusSnippet[] = [
     lang: 'less',
     // NOTE: a SPACE after the colon is required here. The compact form
     // `@c:red` triggers a postcss-less tokenisation quirk that makes the guard
-    // reject js-beautify's (correct) output — captured as a dedicated BUG test
+    // reject js-beautify's (correct) output : captured as a dedicated BUG test
     // in invariants.test.ts (see BUG-LESS-VAR).
     code: `@c: red;.a{color:@c}`,
     note: 'variable + use'
@@ -408,7 +408,7 @@ const typescriptSnippets: CorpusSnippet[] = [
     id: 'TS-03',
     lang: 'typescript',
     code: `function id<T>(x:T):T{return x}const n=id<number>(1);`,
-    note: 'generics (js-beautify would break this — ENG-02)'
+    note: 'generics (js-beautify would break this : ENG-02)'
   },
   {
     id: 'TS-04',
@@ -478,7 +478,7 @@ const typescriptreactSnippets: CorpusSnippet[] = [
     id: 'TSX-03',
     lang: 'typescriptreact',
     code: `function C(){return <><h1>t</h1><ul>{[1,2].map(i=><li key={i}>{i}</li>)}</ul></>;}`,
-    note: 'fragment + map (the `< Foo bar={x} />` class — I1 critical)'
+    note: 'fragment + map (the `< Foo bar={x} />` class : I1 critical)'
   },
   {
     id: 'TSX-04',

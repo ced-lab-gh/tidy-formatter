@@ -6,13 +6,13 @@
 //
 // For every fixture we drive the REAL dispatcher (prettier for ts/tsx/jsx,
 // js-beautify for plain js) and assert four properties:
-//   1. ACCEPT     — guard.check(lang, input, output).equivalent === true
-//   2. PRESERVE   — the load-bearing tokens survive verbatim (e.g. `<T extends`,
+//   1. ACCEPT     : guard.check(lang, input, output).equivalent === true
+//   2. PRESERVE   : the load-bearing tokens survive verbatim (e.g. `<T extends`,
 //                   `?.`, `1_000`, `10n`, `#x`, `{...p}`)
-//   3. RE-PARSE   — the formatted output parses again as the same language
+//   3. RE-PARSE   : the formatted output parses again as the same language
 //                   (guard.check(lang, output, output) is trivially equivalent,
 //                   and a re-format does not throw)
-//   4. IDEMPOTENT — format(format(x)) === format(x) (SPEC SAFE-03)
+//   4. IDEMPOTENT : format(format(x)) === format(x) (SPEC SAFE-03)
 //
 // SPEC refs: ENG-01/ENG-02 (modern syntax), SAFE-01/§12 (no guard false
 // positive), SAFE-03 (idempotence).
@@ -32,13 +32,13 @@ async function format(lang: LangId, code: string): Promise<string> {
   return dispatchFormat({ languageId: lang, code, options: OPTS });
 }
 
-describe('complex JS/TS/JSX/TSX — accept + preserve + re-parse + idempotence', () => {
+describe('complex JS/TS/JSX/TSX : accept + preserve + re-parse + idempotence', () => {
   for (const f of complexAcceptFixtures) {
     describe(`${f.id}: ${f.desc} [${f.ref}]`, () => {
       it('formats, the guard accepts it, and the tokens survive', async () => {
         const out = await format(f.lang, f.input);
 
-        // 2. PRESERVE — the exact tokens lonefy corrupted must survive verbatim.
+        // 2. PRESERVE : the exact tokens lonefy corrupted must survive verbatim.
         for (const needle of f.mustContain) {
           assert.ok(
             out.includes(needle),
@@ -46,7 +46,7 @@ describe('complex JS/TS/JSX/TSX — accept + preserve + re-parse + idempotence',
           );
         }
 
-        // 1. ACCEPT — a correct format must NOT be rejected by the guard.
+        // 1. ACCEPT : a correct format must NOT be rejected by the guard.
         const verdict = guard.check(f.lang, f.input, out);
         assert.equal(
           verdict.equivalent,
@@ -60,7 +60,7 @@ describe('complex JS/TS/JSX/TSX — accept + preserve + re-parse + idempotence',
         // Output must be valid in its own right: re-running the engine on it must
         // not throw (a parse failure on the formatter's own output is a bug).
         const reformatted = await format(f.lang, out);
-        // And the output compared against itself is trivially equivalent — this
+        // And the output compared against itself is trivially equivalent : this
         // exercises the guard parse path on the FORMATTED text (re-parse check).
         const selfVerdict = guard.check(f.lang, out, out);
         assert.equal(selfVerdict.equivalent, true, selfVerdict.reason ?? '');
@@ -82,7 +82,7 @@ describe('complex JS/TS/JSX/TSX — accept + preserve + re-parse + idempotence',
   }
 });
 
-describe('complex JS/TS/JSX/TSX — load-bearing guard sanity', () => {
+describe('complex JS/TS/JSX/TSX : load-bearing guard sanity', () => {
   it('the corpus is large (>=25 distinct accept fixtures)', () => {
     assert.ok(
       complexAcceptFixtures.length >= 25,
@@ -113,9 +113,9 @@ describe('complex JS/TS/JSX/TSX — load-bearing guard sanity', () => {
 // @babel/parser plugin set was incomplete. Fixed by adding 'decoratorAutoAccessors'
 // to the guard's plugins (src/safety/guard.ts), so the auto-accessor input now
 // parses and a correct format is accepted instead of being silently no-op'd.
-describe('complex JS/TS/JSX/TSX — modern syntax the guard now accepts (was a false positive)', () => {
+describe('complex JS/TS/JSX/TSX : modern syntax the guard now accepts (was a false positive)', () => {
   for (const f of complexKnownBugFixtures) {
-    it(`${f.id}: ${f.desc} [${f.ref}] — guard accepts valid syntax`, async () => {
+    it(`${f.id}: ${f.desc} [${f.ref}] : guard accepts valid syntax`, async () => {
       const out = await format(f.lang, f.input);
       for (const needle of f.mustContain) {
         assert.ok(out.includes(needle), `expected "${needle}" in:\n${out}`);

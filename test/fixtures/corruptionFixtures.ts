@@ -4,7 +4,7 @@
 // every pair below is a (clean input, semantically CORRUPTED output) that a
 // formatter must NEVER apply. `guard.check(lang, input, output)` MUST return
 // `equivalent: false` with a non-empty reason for ALL of them. A single false
-// negative here means Tidy would ship a file whose meaning silently changed —
+// negative here means Tidy would ship a file whose meaning silently changed , 
 // exactly the lonefy failure mode (1.69/5, "breaks your files").
 //
 // Distinct from guardFixtures.ts (the baseline regression set): these are
@@ -41,7 +41,7 @@ export interface CorruptionFixture {
   output: string;
   /**
    * Whether the corrupted `output` is itself syntactically valid in its language.
-   * `true` marks the dangerous class a parse-only guard would WRONGLY accept —
+   * `true` marks the dangerous class a parse-only guard would WRONGLY accept , 
    * the whole reason the guard compares structure/values, not just parseability.
    * `false` means the corruption also breaks parsing (still must be rejected,
    * but for the easier reason "output did not parse").
@@ -51,11 +51,11 @@ export interface CorruptionFixture {
 
 export const corruptionFixtures: CorruptionFixture[] = [
   // ======================================================================
-  // JS — statement/operator/literal corruptions
+  // JS : statement/operator/literal corruptions
   // ======================================================================
   {
     id: 'CORR-JS-STMT-DROPPED',
-    desc: 'a whole statement silently deleted (b() lost) — output still parses, must be rejected',
+    desc: 'a whole statement silently deleted (b() lost) : output still parses, must be rejected',
     category: 'js',
     lang: 'javascript',
     input: 'function run() {\n  a();\n  b();\n  c();\n}',
@@ -64,7 +64,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JS-DIV-TO-SUB',
-    desc: 'arithmetic operator changed a / b -> a - b (different result) — still valid JS, must be rejected',
+    desc: 'arithmetic operator changed a / b -> a - b (different result) : still valid JS, must be rejected',
     category: 'js',
     lang: 'javascript',
     input: 'const ratio = total / count;',
@@ -73,7 +73,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JS-STRICT-EQ-LOOSENED',
-    desc: '=== loosened to == changes coercion semantics — still valid JS, must be rejected',
+    desc: '=== loosened to == changes coercion semantics : still valid JS, must be rejected',
     category: 'js',
     lang: 'javascript',
     input: 'if (a === b) run();',
@@ -82,7 +82,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JS-OPTCHAIN-SPLIT',
-    desc: 'optional chaining ?. split to ? . — produces invalid JS, must be rejected',
+    desc: 'optional chaining ?. split to ? . : produces invalid JS, must be rejected',
     category: 'js',
     lang: 'javascript',
     input: 'const name = user?.profile?.name;',
@@ -91,7 +91,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JS-BIGINT-SPLIT',
-    desc: 'BigInt literal 1n split to 1 n — invalid JS, must be rejected',
+    desc: 'BigInt literal 1n split to 1 n : invalid JS, must be rejected',
     category: 'js',
     lang: 'javascript',
     input: 'const total = 9007199254740993n * 2n;',
@@ -100,7 +100,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JS-COMPOUND-ASSIGN-SPLIT',
-    desc: 'compound assignment += split to + = — invalid JS, must be rejected',
+    desc: 'compound assignment += split to + = : invalid JS, must be rejected',
     category: 'js',
     lang: 'javascript',
     input: 'let acc = 0;\nacc += step;',
@@ -109,7 +109,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JS-NEGATION-DROPPED',
-    desc: 'logical negation dropped (!ready -> ready) inverts the branch — still valid JS, must be rejected',
+    desc: 'logical negation dropped (!ready -> ready) inverts the branch : still valid JS, must be rejected',
     category: 'js',
     lang: 'javascript',
     input: 'if (!ready) abort();',
@@ -118,7 +118,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JS-AWAIT-DROPPED',
-    desc: 'await keyword dropped changes async semantics — still valid JS, must be rejected',
+    desc: 'await keyword dropped changes async semantics : still valid JS, must be rejected',
     category: 'js',
     lang: 'javascript',
     input: 'async function f() {\n  const r = await fetchData();\n  return r;\n}',
@@ -127,11 +127,11 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // JSX — boundary/structure corruptions (whitespace-insignificant to babel)
+  // JSX : boundary/structure corruptions (whitespace-insignificant to babel)
   // ======================================================================
   {
     id: 'CORR-JSX-SELFCLOSE-MANGLED',
-    desc: '<Foo/> mangled to < Foo / > — re-parses as valid JSX but tag boundary corrupt, must be rejected',
+    desc: '<Foo/> mangled to < Foo / > : re-parses as valid JSX but tag boundary corrupt, must be rejected',
     category: 'jsx',
     lang: 'javascriptreact',
     input: 'const el = <Foo/>;',
@@ -140,7 +140,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JSX-OPEN-SPLIT',
-    desc: '<Foo> open tag split to < Foo> — boundary corrupt, must be rejected',
+    desc: '<Foo> open tag split to < Foo> : boundary corrupt, must be rejected',
     category: 'jsx',
     lang: 'javascriptreact',
     input: 'const el = <Foo>x</Foo>;',
@@ -167,7 +167,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
   {
     id: 'CORR-JSX-CLOSE-SPLIT',
-    desc: 'closing tag </Foo> split to < /Foo> — boundary corrupt, must be rejected',
+    desc: 'closing tag </Foo> split to < /Foo> : boundary corrupt, must be rejected',
     category: 'jsx',
     lang: 'javascriptreact',
     input: 'const el = <Foo>x</Foo>;',
@@ -176,7 +176,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // TS — type-level corruptions
+  // TS : type-level corruptions
   // ======================================================================
   {
     id: 'CORR-TS-ANNOTATION-CHANGED',
@@ -225,7 +225,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // TSX — JSX + TS combined
+  // TSX : JSX + TS combined
   // ======================================================================
   {
     id: 'CORR-TSX-MANDATORY-ACCEPTANCE',
@@ -256,7 +256,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // CSS — value/selector/combinator corruptions
+  // CSS : value/selector/combinator corruptions
   // ======================================================================
   {
     id: 'CORR-CSS-CALC-SIGN-FLIPPED',
@@ -314,7 +314,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // SCSS — nesting/extend/interpolation corruptions
+  // SCSS : nesting/extend/interpolation corruptions
   // ======================================================================
   {
     id: 'CORR-SCSS-EXTEND-MANGLED',
@@ -336,7 +336,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // LESS — variable/operation corruptions
+  // LESS : variable/operation corruptions
   // ======================================================================
   {
     id: 'CORR-LESS-VAR-RENAMED',
@@ -349,7 +349,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // HTML — attribute/tag/verbatim-text corruptions
+  // HTML : attribute/tag/verbatim-text corruptions
   // ======================================================================
   {
     id: 'CORR-HTML-ATTR-VALUE-CHANGED',
@@ -398,7 +398,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // JSON — value/key/number corruptions
+  // JSON : value/key/number corruptions
   // ======================================================================
   {
     id: 'CORR-JSON-VALUE-CHANGED',
@@ -438,7 +438,7 @@ export const corruptionFixtures: CorruptionFixture[] = [
   },
 
   // ======================================================================
-  // JSONC — value corruption under comments/trailing commas
+  // JSONC : value corruption under comments/trailing commas
   // ======================================================================
   {
     id: 'CORR-JSONC-VALUE-CHANGED-UNDER-COMMENTS',

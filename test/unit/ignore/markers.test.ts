@@ -17,7 +17,7 @@ function slices(text: string, ranges: readonly ProtectedRange[]): string[] {
   return ranges.map((range) => text.slice(range.start, range.end));
 }
 
-describe('ignore/markers — detectFileIgnore (whole-file)', () => {
+describe('ignore/markers : detectFileIgnore (whole-file)', () => {
   it('honours a leading // tidy-ignore-file in JS', () => {
     assert.equal(detectFileIgnore('// tidy-ignore-file\nconst a=1\n', 'javascript'), true);
   });
@@ -59,7 +59,7 @@ describe('ignore/markers — detectFileIgnore (whole-file)', () => {
   });
 });
 
-describe('ignore/markers — protected regions (multi-language)', () => {
+describe('ignore/markers : protected regions (multi-language)', () => {
   it('protects a region between // tidy-ignore-start and // tidy-ignore-end (JS)', () => {
     const text = [
       'const before = 1;',
@@ -141,7 +141,7 @@ describe('ignore/markers — protected regions (multi-language)', () => {
   });
 });
 
-describe('ignore/markers — best-effort node markers', () => {
+describe('ignore/markers : best-effort node markers', () => {
   it('protects the node line following a lone // tidy-ignore (JS)', () => {
     const text = ['const a = 1;', '// tidy-ignore', 'const   b   =   2;', 'const c = 3;'].join('\n');
     const scan = scanMarkers(text, 'javascript');
@@ -191,7 +191,7 @@ describe('ignore/markers — best-effort node markers', () => {
   });
 });
 
-describe('ignore/markers — no markers / edge cases', () => {
+describe('ignore/markers : no markers / edge cases', () => {
   it('returns no ranges and no file-ignore for plain code', () => {
     const scan = scanMarkers('const a = 1;\nconst b = 2;\n', 'javascript');
     assert.equal(scan.ignoreFile, false);

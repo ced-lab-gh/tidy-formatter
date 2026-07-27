@@ -1,4 +1,4 @@
-// Adversarial CORRUPTION suite — the product's core safety promise, attacked.
+// Adversarial CORRUPTION suite : the product's core safety promise, attacked.
 //
 // For EVERY language in the matrix (JS, JSX, TS, TSX, CSS, SCSS, LESS, HTML,
 // JSON, JSONC) we feed the guard a clean input and a semantically CORRUPTED
@@ -69,7 +69,7 @@ function corruptedOutputParses(f: CorruptionFixture): boolean {
   }
 }
 
-describe('adversarial corruption — every corrupted output MUST be rejected', () => {
+describe('adversarial corruption : every corrupted output MUST be rejected', () => {
   it(`covers >= 24 corruption cases (actual: ${corruptionFixtures.length})`, () => {
     assert.ok(
       corruptionFixtures.length >= 24,
@@ -108,7 +108,7 @@ describe('adversarial corruption — every corrupted output MUST be rejected', (
       assert.equal(
         verdict.equivalent,
         false,
-        `guard ACCEPTED a corruption (${f.id}); this is a false negative — the file's ` +
+        `guard ACCEPTED a corruption (${f.id}); this is a false negative : the file's ` +
           `meaning would change silently`
       );
 
@@ -138,7 +138,7 @@ describe('adversarial corruption — every corrupted output MUST be rejected', (
   }
 });
 
-describe('adversarial corruption — the parse-only-guard trap (SPEC §5)', () => {
+describe('adversarial corruption : the parse-only-guard trap (SPEC §5)', () => {
   // The whole reason the guard is structural: a meaningful subset of corruptions
   // re-parse cleanly. If a guard only re-parsed, it would ship them. Prove that
   // this trap class is non-empty and large, and that the guard still rejects all.
@@ -160,7 +160,7 @@ describe('adversarial corruption — the parse-only-guard trap (SPEC §5)', () =
   }
 });
 
-describe('adversarial corruption — the mandatory acceptance test (SPEC §5, verbatim)', () => {
+describe('adversarial corruption : the mandatory acceptance test (SPEC §5, verbatim)', () => {
   it('rejects < Foo bar = {x} /> even though it re-parses as valid TSX', () => {
     const input = 'const el = <Foo bar={x} />;';
     const mangled = 'const el = < Foo bar = {x} />;';
@@ -179,7 +179,7 @@ describe('adversarial corruption — the mandatory acceptance test (SPEC §5, ve
   });
 });
 
-describe('adversarial corruption — false-positive guardrail (do NOT over-reject)', () => {
+describe('adversarial corruption : false-positive guardrail (do NOT over-reject)', () => {
   // The corruption guard must stay sharp without becoming paranoid: a pure
   // whitespace reformat that preserves meaning must be ACCEPTED. If these start
   // failing, the guard has been tightened into a "safe but does nothing" no-op

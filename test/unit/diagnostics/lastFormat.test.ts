@@ -21,7 +21,7 @@ function rec(over: Partial<LastFormatRecord> = {}): LastFormatRecord {
   };
 }
 
-describe('diagnostics/lastFormat — store', () => {
+describe('diagnostics/lastFormat : store', () => {
   it('starts empty after clear, then records and returns the last record', () => {
     clearLastFormat();
     assert.equal(getLastFormat(), undefined);
@@ -43,7 +43,7 @@ describe('diagnostics/lastFormat — store', () => {
   });
 });
 
-describe('diagnostics/lastFormat — sanitizeDetail (privacy: no source leaks)', () => {
+describe('diagnostics/lastFormat : sanitizeDetail (privacy: no source leaks)', () => {
   it('keeps only the first line, dropping any embedded code frame', () => {
     // Shape of a Prettier parser error: summary on line 1, then the user's SOURCE.
     const leaky =
@@ -73,7 +73,7 @@ describe('diagnostics/lastFormat — sanitizeDetail (privacy: no source leaks)',
   });
 });
 
-describe('diagnostics/lastFormat — formatChannelLine', () => {
+describe('diagnostics/lastFormat : formatChannelLine', () => {
   it('is concise, includes file/lang/engine/status, and never uses an em dash', () => {
     const line = formatChannelLine(rec({ engineId: 'js-beautify', status: 'applied' }));
     assert.ok(line.includes('a.css'), line);

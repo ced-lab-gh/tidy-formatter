@@ -1,5 +1,5 @@
 // Option catalogue: the SINGLE SOURCE OF TRUTH for every configurable Tidy
-// formatting option (Axe 3 — "not enough options").
+// formatting option (Axe 3 : "not enough options").
 //
 // PURE: this module MUST NOT import 'vscode' so it stays unit-testable under
 // mocha + tsx outside the Electron host. Every consumer derives from this list:
@@ -460,7 +460,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
   }
   // NOTE: Prettier's `quoteProps` is intentionally NOT exposed. Changing an
   // object key from `a` to `"a"` switches its babel AST node from Identifier to
-  // StringLiteral — a STRUCTURAL change the equivalence guard (correctly) rejects.
+  // StringLiteral : a STRUCTURAL change the equivalence guard (correctly) rejects.
   // It is therefore not AST-invariant under our guard and would either no-op the
   // formatter or require relaxing the guard, which the safety contract forbids.
   // Re-evaluate only if/when the guard learns to treat Identifier⇔StringLiteral
@@ -492,7 +492,7 @@ export function appliesToLanguage(entry: OptionEntry, lang: CatalogLang): boolea
 /**
  * Validate and coerce a raw setting value against an entry's declared type/enum.
  * Returns the validated value, or undefined when the value is missing or invalid
- * (so an invalid setting is never propagated to an engine — contract §3).
+ * (so an invalid setting is never propagated to an engine : contract §3).
  *
  * PURE: no side effects, no I/O. Numbers must be finite; integers must be whole.
  * Strings constrained by `enum` must be one of the allowed values.

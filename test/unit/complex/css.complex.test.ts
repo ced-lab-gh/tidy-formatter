@@ -2,14 +2,14 @@
 // SAFE-03 idempotence, ENG-05 "CSS/SCSS/LESS compile-safe").
 //
 // The product's moat is SAFETY: the guard must (a) NEVER reject a correct,
-// complex stylesheet — otherwise the formatter is a useless no-op on real code
-// ("safe but does nothing"), and (b) NEVER accept a meaning-changing output —
+// complex stylesheet : otherwise the formatter is a useless no-op on real code
+// ("safe but does nothing"), and (b) NEVER accept a meaning-changing output , 
 // otherwise it corrupts the file like the incumbent.
 //
 // Three blocks:
-//   1. ACCEPT — every advanced-CSS fixture, formatted through the REAL engine,
+//   1. ACCEPT : every advanced-CSS fixture, formatted through the REAL engine,
 //      must be guard-equivalent to its input AND idempotent on a second pass.
-//   2. REJECT — every adversarial corruption must be caught by cssTreeEqual.
+//   2. REJECT : every adversarial corruption must be caught by cssTreeEqual.
 //   3. Historical lonefy edge cases (#78 comma-values, #77 pseudo/extend spacing,
 //      #74 calc, #67 combinator, #17 :not/:nth-child) pinned explicitly, plus a
 //      previously-documented guard FALSE-NEGATIVE (quoted-string whitespace),
@@ -23,7 +23,7 @@ import {
   cssRejectFixtures
 } from '../../fixtures/cssComplexFixtures';
 
-describe('complex CSS/SCSS/LESS — ACCEPT (engine output is guard-equivalent, SPEC SAFE-02)', () => {
+describe('complex CSS/SCSS/LESS : ACCEPT (engine output is guard-equivalent, SPEC SAFE-02)', () => {
   for (const f of cssAcceptFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, async () => {
       const opts = resolved();
@@ -34,7 +34,7 @@ describe('complex CSS/SCSS/LESS — ACCEPT (engine output is guard-equivalent, S
       });
 
       // The real engine actually changed the source (otherwise the fixture is
-      // not exercising the tree comparison at all — it would hit the identity
+      // not exercising the tree comparison at all : it would hit the identity
       // fast path). A few inputs are already canonical; only assert "did work"
       // when it visibly reformatted.
       const verdict = guard.check(f.lang, f.input, formatted);
@@ -48,7 +48,7 @@ describe('complex CSS/SCSS/LESS — ACCEPT (engine output is guard-equivalent, S
   }
 });
 
-describe('complex CSS/SCSS/LESS — idempotence (SPEC SAFE-03, no right-drift)', () => {
+describe('complex CSS/SCSS/LESS : idempotence (SPEC SAFE-03, no right-drift)', () => {
   for (const f of cssAcceptFixtures) {
     it(`${f.id}: format(format(x)) == format(x) [${f.lang}]`, async () => {
       const opts = resolved();
@@ -71,7 +71,7 @@ describe('complex CSS/SCSS/LESS — idempotence (SPEC SAFE-03, no right-drift)',
   }
 });
 
-describe('complex CSS/SCSS/LESS — REJECT corruptions (security core, SPEC SAFE-02)', () => {
+describe('complex CSS/SCSS/LESS : REJECT corruptions (security core, SPEC SAFE-02)', () => {
   for (const f of cssRejectFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, () => {
       const verdict = cssTreeEqual(f.lang, f.input, f.output);
@@ -104,7 +104,7 @@ describe('complex CSS/SCSS/LESS — REJECT corruptions (security core, SPEC SAFE
   });
 });
 
-describe('complex CSS/SCSS/LESS — pinned historical lonefy edge cases', () => {
+describe('complex CSS/SCSS/LESS : pinned historical lonefy edge cases', () => {
   // #78: comma-separated value corruption. js-beautify keeps the list intact;
   // the guard accepts the (whitespace-only) reformat but rejects a dropped item.
   it('#78: comma font-family stack survives formatting and rejects a swapped face', async () => {
@@ -155,7 +155,7 @@ describe('complex CSS/SCSS/LESS — pinned historical lonefy edge cases', () => 
     );
   });
 
-  // #67: combinator whitespace is insignificant — `#a > #b` and `#a>#b` are the
+  // #67: combinator whitespace is insignificant : `#a > #b` and `#a>#b` are the
   // SAME selector, so the guard must accept js-beautify's tightened output, but
   // descendant (space) must stay distinct from child (>).
   it('#67: `#a > #b` == `#a>#b` (accept) but `.a .b` != `.a>.b` (reject)', () => {
@@ -172,7 +172,7 @@ describe('complex CSS/SCSS/LESS — pinned historical lonefy edge cases', () => 
   });
 });
 
-describe('complex CSS/SCSS/LESS — quoted-string whitespace is significant (was a guard gap, now fixed)', () => {
+describe('complex CSS/SCSS/LESS : quoted-string whitespace is significant (was a guard gap, now fixed)', () => {
   // FIXED (was a guard FALSE NEGATIVE): normalizeCssText used to collapse EVERY
   // run of whitespace inside value/params/selector strings, INCLUDING whitespace
   // inside a quoted string. For a CSS quoted value the interior whitespace is

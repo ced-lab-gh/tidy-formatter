@@ -2,16 +2,16 @@
 //
 // This EXTENDS the minimal glob used by config/soukformatrc.ts (the
 // `globToRegExp` it carries for its `overrides[].files`) with the extra
-// semantics a .gitignore needs — anchoring with a leading "/", directory-only
+// semantics a .gitignore needs : anchoring with a leading "/", directory-only
 // patterns with a trailing "/", a bare name that matches at any depth, and the
-// "**" segment wildcard — WITHOUT adding any npm dependency (the `ignore`
+// "**" segment wildcard : WITHOUT adding any npm dependency (the `ignore`
 // package is intentionally NOT pulled in this pass, per Axe 4 constraints).
 //
 // PURE: this module MUST NOT import 'vscode' and performs no I/O. It operates on
 // already-normalised POSIX relative paths so it is fully unit-testable.
 //
 // Path convention: callers pass forward-slash relative paths (e.g. "src/a.css"),
-// never absolute paths and never backslashes — normalisation is the I/O layer's
+// never absolute paths and never backslashes : normalisation is the I/O layer's
 // job, kept out of this pure core.
 
 /**

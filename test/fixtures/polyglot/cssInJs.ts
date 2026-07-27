@@ -83,7 +83,7 @@ export const cssInJsAcceptFixtures: CssInJsAcceptFixture[] = [
   },
   {
     id: 'PG-STYLED-ATTRS',
-    desc: 'styled.button.attrs({...})`` — attrs object reformatted, css body preserved',
+    desc: 'styled.button.attrs({...})`` : attrs object reformatted, css body preserved',
     ref: 'styled-components attrs',
     lang: 'typescript',
     input: 'const B=styled.button.attrs({type:"button"})`\n  border: none;\n  cursor:   pointer;\n`;',
@@ -269,7 +269,7 @@ export const cssInJsAcceptFixtures: CssInJsAcceptFixture[] = [
 // what a BROKEN engine might emit. The guard MUST reject every one: either the
 // JS/TS around the template changed meaning, or the foreign template BODY was
 // altered (which the JS AST sees as a different quasi string). This is the
-// adversarial half — proving the guard does not blindly trust template content.
+// adversarial half : proving the guard does not blindly trust template content.
 export interface CssInJsCorruptionFixture {
   id: string;
   desc: string;
@@ -299,7 +299,7 @@ export const cssInJsCorruptionFixtures: CssInJsCorruptionFixture[] = [
   },
   {
     id: 'PG-COR-TAG-RENAME',
-    desc: 'tag function renamed (css -> sql) — different call target',
+    desc: 'tag function renamed (css -> sql) : different call target',
     ref: 'SAFE-01 tag corruption',
     lang: 'typescript',
     input: 'const q = css`a:1;`;',
@@ -315,7 +315,7 @@ export const cssInJsCorruptionFixtures: CssInJsCorruptionFixture[] = [
   },
   {
     id: 'PG-COR-TPL-WHITESPACE',
-    desc: 'whitespace-only edit INSIDE the styled body — meaning-bearing for the JS string, must reject',
+    desc: 'whitespace-only edit INSIDE the styled body : meaning-bearing for the JS string, must reject',
     ref: 'SAFE-01 §12 faux négatif (template is opaque text)',
     lang: 'typescript',
     input: 'const B = styled.div`color:   red;`;',
@@ -323,7 +323,7 @@ export const cssInJsCorruptionFixtures: CssInJsCorruptionFixture[] = [
   },
   {
     id: 'PG-COR-TPL-REINDENT',
-    desc: 'embedded GraphQL reindented (engine should NOT do this) — quasi differs, reject',
+    desc: 'embedded GraphQL reindented (engine should NOT do this) : quasi differs, reject',
     ref: 'SAFE-01 template reindent',
     lang: 'typescript',
     input: 'const Q = gql`\n  query {\n    a\n  }\n`;',

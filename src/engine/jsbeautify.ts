@@ -42,7 +42,7 @@ const FAMILY_BY_LANG: Readonly<Record<string, Family>> = {
   less: 'css',
   html: 'html',
   // JSON / JSONC are pretty-printed by the dedicated fast formatter
-  // (src/engine/jsonFormatter.ts) — comment-preserving and ~13x faster than
+  // (src/engine/jsonFormatter.ts) : comment-preserving and ~13x faster than
   // js-beautify on large documents (SPEC QA-03 / §9).
   json: 'json',
   jsonc: 'json',
@@ -304,7 +304,7 @@ const TRAILING_WS_PER_LINE = /[^\S\r\n]+(?=\r\n|\r|\n|$)/g;
 
 /**
  * Normalise line endings, optionally strip per-line trailing whitespace, and
- * apply the final-newline policy. Pure string transform — no mutation of inputs.
+ * apply the final-newline policy. Pure string transform : no mutation of inputs.
  *
  * Ordering matters: trailing-whitespace trimming runs before the final-newline
  * decision so a file ending in spaces still gets exactly one (or zero) newline.

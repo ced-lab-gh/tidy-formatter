@@ -6,8 +6,8 @@
 //
 // The mapper turns a parsed `.jsbeautifyrc` (the legacy js-beautify config the
 // abandoned incumbent read) into the subset of Tidy `tidy.*` settings that have a
-// faithful, in-domain equivalent. Anything unknown or out of range is surfaced —
-// never written — so an opt-in migration can preview exactly what it will apply
+// faithful, in-domain equivalent. Anything unknown or out of range is surfaced , 
+// never written : so an opt-in migration can preview exactly what it will apply
 // before the user confirms (anti-hijack: no setting is ever derived silently).
 
 /**

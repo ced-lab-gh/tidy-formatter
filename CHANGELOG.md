@@ -4,6 +4,17 @@ All notable changes to **Tidy Formatter : JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-07-27
+
+### Fixed
+
+- **Packaging safety: the VSIX now excludes secret files.** `.vscodeignore` gained the secret patterns that `.gitignore` already had (`*.env`, `*.pat`, `*.pem`, `*.key`, `*.p12`, `*secret*.json`). This is not redundant: `vsce` packages from the working directory and **never reads `.gitignore`**, so an untracked local `.env` holding a publishing token would previously have been baked into a published VSIX. Verified empirically: such a file is now excluded while git still ignores it.
+- **Em dash removal completed.** The 0.2.0 entry below claimed the walkthrough was covered; it was not. The four shipped walkthrough pages, the *Effective Configuration* output-channel name, and the preview command's "already formatted" notice still contained the character. All are clean now.
+
+### Changed
+
+- **Removed an obsolete duplicate integration suite** (`powerFeatures.test.ts`). Every guarantee it asserted, including the ARCH-02 check that deference never writes `editor.defaultFormatter`, is covered by the fuller `power-features.test.ts`. Test-only change.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added
@@ -14,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **Marketplace listing and in-editor copy: em dashes removed.** The title, description, README, walkthrough and settings text no longer use the em dash character, per a style preference. Copy only.
+- **Marketplace listing copy: em dashes removed.** The title, description, README and settings text no longer use the em dash character, per a style preference. Copy only. (The walkthrough pages and two notification strings were missed here and are fixed in 0.2.1.)
 
 No change to the formatting engine or to any decision the safety guard makes.
 

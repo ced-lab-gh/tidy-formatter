@@ -12,7 +12,7 @@ import {
 } from '../../../src/config/templates';
 import { templateFixtures } from '../../fixtures/templateFixtures';
 
-describe('config/templates — island preservation across a real HTML format', () => {
+describe('config/templates : island preservation across a real HTML format', () => {
   for (const f of templateFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, () => {
       const { masked, islands } = maskTemplateIslands(f.html);
@@ -39,7 +39,7 @@ describe('config/templates — island preservation across a real HTML format', (
   }
 });
 
-describe('config/templates — protection policy', () => {
+describe('config/templates : protection policy', () => {
   it('supported non-template languages are NOT protected', () => {
     for (const lang of [
       'css',
@@ -58,7 +58,7 @@ describe('config/templates — protection policy', () => {
   });
 });
 
-describe('config/templates — safety on placeholder collision', () => {
+describe('config/templates : safety on placeholder collision', () => {
   it('detects a collision when the source already contains the placeholder prefix', () => {
     const collidingHtml = '<div>tidytplisland0endisland</div>';
     assert.equal(hasPlaceholderCollision(collidingHtml), true);

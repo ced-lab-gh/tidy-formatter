@@ -1,9 +1,9 @@
-// Headless power-features integration tests — ROADMAP Axe 4 (T1–T5 + T6 preview).
+// Headless power-features integration tests : ROADMAP Axe 4 (T1–T5 + T6 preview).
 //
 // These run inside a REAL VS Code Electron host (via @vscode/test-cli) on the
-// public extension surface — the registered formatting providers (file ignore /
+// public extension surface : the registered formatting providers (file ignore /
 // region masking / native prettier-ignore), the registered tidy.previewFormat
-// command, and the PURE deference decision — proving the "strictly better than
+// command, and the PURE deference decision : proving the "strictly better than
 // lonefy" differentiators WITHOUT ever weakening the safety guard or the
 // anti-hijack contract end to end.
 //
@@ -14,17 +14,17 @@
 //   (c) a REGION between tidy-ignore-start/end is preserved VERBATIM while the
 //       rest is reformatted (js-beautify path = CSS; mask/restore + guard);
 //   (d) for a TSX file, // prettier-ignore preserves the FOLLOWING node verbatim
-//       (native Prettier directive — the documented node-level ignore path);
+//       (native Prettier directive : the documented node-level ignore path);
 //   (e) tidy.previewFormat runs READ-ONLY (opening the diff applies no edit), and
 //       applying the planned format (one WorkspaceEdit = one undo entry) DOES
-//       produce the formatted text — and a single undo restores the original;
+//       produce the formatted text : and a single undo restores the original;
 //   (f) the deference decision is ONE-SHOT: decide(...) a first time surfaces the
 //       notification, a second time (alreadyPrompted) returns 'none'.
 //
 // SAFETY / ANTI-HIJACK invariants exercised implicitly throughout:
 //   - the ignore/region paths return the input VERBATIM, so guard.check accepts
 //     and the file can never be corrupted;
-//   - nothing here ever writes editor.defaultFormatter as a Tidy reaction — the
+//   - nothing here ever writes editor.defaultFormatter as a Tidy reaction : the
 //     only defaultFormatter writes are the test harness opting Tidy in (which is
 //     exactly the explicit-user-action contract), cleaned up afterwards.
 import * as assert from 'node:assert/strict';
@@ -49,12 +49,12 @@ import {
 /** Relative dir holding every fixture this suite writes (cleaned in after()). */
 const FIXTURE_DIR = 'power-features';
 
-describe('Tidy power features (Axe 4) — ignore-file / head-marker / region / prettier-ignore / preview / deference', function () {
+describe('Tidy power features (Axe 4) : ignore-file / head-marker / region / prettier-ignore / preview / deference', function () {
   // CI-aware: generous on slow/shared CI runners, strict locally.
   this.timeout(process.env.CI ? 180000 : 30000);
 
   // The "Tidy does nothing" assertions must go through the REAL Format Document
-  // path (editor.action.formatDocument), which honours editor.defaultFormatter —
+  // path (editor.action.formatDocument), which honours editor.defaultFormatter , 
   // executeFormatDocumentProvider can fall through to another provider when Tidy
   // returns no edits, masking the no-op we mean to prove. So we make Tidy the
   // resolved default formatter for css AND typescriptreact, then compare the
@@ -317,7 +317,7 @@ describe('Tidy power features (Axe 4) — ignore-file / head-marker / region / p
   // (f) The deference decision is ONE-SHOT (anti-nag): given a detected competitor
   //     and the default 'notify' preference, the FIRST decide(...) surfaces the
   //     notification; the SECOND (alreadyPrompted=true) returns 'none'. This is
-  //     the pure logic the host wires to globalState — proving the dedup contract
+  //     the pure logic the host wires to globalState : proving the dedup contract
   //     deterministically, without depending on globalState in the host.
   it('(f) the deference decision is one-shot: a second decide(...) returns none', async () => {
     const setting: DeferenceSetting = 'notify';
@@ -341,7 +341,7 @@ describe('Tidy power features (Axe 4) — ignore-file / head-marker / region / p
 
     // And no deference path may ever write editor.defaultFormatter (ARCH-02): the
     // decision carries no write instruction and touching the setting here is a
-    // user-config write only — confirm Tidy left defaultFormatter untouched by it.
+    // user-config write only : confirm Tidy left defaultFormatter untouched by it.
     const before = vscode.workspace
       .getConfiguration('editor')
       .inspect('defaultFormatter');

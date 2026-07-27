@@ -1,7 +1,7 @@
 // Detect the abandoned incumbent (lonefy.vscode-JS-CSS-HTML-formatter) and
 // decide whether to surface the one-shot migration notification (Axe 1 / 1.T4).
 //
-// ANTI-HIJACK (ARCH-01/02, SPEC §5/§10/§12) — NON-NEGOTIABLE:
+// ANTI-HIJACK (ARCH-01/02, SPEC §5/§10/§12) : NON-NEGOTIABLE:
 //   - This module only DECIDES whether to *offer* a migration. It writes no
 //     setting, reads no `.jsbeautifyrc`, and triggers no formatting.
 //   - The notification is ONE-SHOT and deduplicated: once the user has been

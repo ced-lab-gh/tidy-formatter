@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { resolveOptions } from '../../../src/config/resolver';
 import { configFixtures } from '../../fixtures/configFixtures';
 
-describe('config/resolver — resolveOptions corpus', () => {
+describe('config/resolver : resolveOptions corpus', () => {
   for (const f of configFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, () => {
       const result = resolveOptions({ languageId: f.languageId, layers: f.layers });
@@ -45,7 +45,7 @@ describe('config/resolver — resolveOptions corpus', () => {
   }
 });
 
-describe('config/resolver — sources map invariants', () => {
+describe('config/resolver : sources map invariants', () => {
   it('every resolved typed key has a source entry', () => {
     const r = resolveOptions({
       languageId: 'css',

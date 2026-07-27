@@ -9,13 +9,13 @@
 // pure reindent is accepted but a real value/instruction change is not.
 //
 // This corpus attacks exactly that seam: every pair below keeps the surrounding
-// HTML structurally identical and corrupts ONLY the embedded payload — a CSS
+// HTML structurally identical and corrupts ONLY the embedded payload : a CSS
 // value, a JS instruction, a JSON key/value, verbatim <pre>/<textarea> text, or
 // an inline handler/attribute. Each MUST be rejected (`equivalent === false`)
 // with a non-empty reason.
 //
 // The danger these prove: every corrupted `output` is itself a WELL-FORMED HTML
-// document (parse5 parses it without error — `htmlParses: true`), and for the
+// document (parse5 parses it without error : `htmlParses: true`), and for the
 // embedded-code cases the corrupted PAYLOAD is also well-formed in its own
 // language (`embeddedWellFormed: true`). A naive guard that only re-parsed the
 // HTML, or only re-parsed the embedded snippet, would therefore ACCEPT the
@@ -32,7 +32,7 @@ export interface PolyglotFixture {
   desc: string;
   /** The embedded language whose payload was corrupted. */
   embedded: EmbeddedLang;
-  /** Always 'html' — the file as a whole is an HTML document. */
+  /** Always 'html' : the file as a whole is an HTML document. */
   lang: LangId;
   /** Clean, valid HTML input. */
   input: string;
@@ -47,7 +47,7 @@ export interface PolyglotFixture {
   /**
    * For embedded-code cases (css/js/json), whether the corrupted PAYLOAD by itself
    * is well-formed in its own language. `true` means a guard that only checked the
-   * embedded snippet's parseability would ALSO accept the corruption — so the deep
+   * embedded snippet's parseability would ALSO accept the corruption : so the deep
    * value diff is what actually saves the file. `undefined` for verbatim/attr
    * cases (no separable embedded-language body to parse independently).
    */

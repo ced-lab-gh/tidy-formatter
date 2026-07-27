@@ -1,17 +1,17 @@
-// Configurability integration tests — Axe 3 ("not enough options"), real host.
+// Configurability integration tests : Axe 3 ("not enough options"), real host.
 //
 // These run inside a real VS Code Electron host (via @vscode/test-cli) and prove
-// END-TO-END — through the actual provider + config-reading pipeline, not the
-// pure unit path — the two configurability claims the roadmap (AXE 3) makes:
+// END-TO-END : through the actual provider + config-reading pipeline, not the
+// pure unit path : the two configurability claims the roadmap (AXE 3) makes:
 //
 //   (1) A `tidy.*` option set at WORKSPACE scope actually changes Tidy's output
 //       AND the result is idempotent (a second Format Document is a no-op). We
 //       prove it for a Prettier stylistic option (tidy.prettier.singleQuote) and
-//       for a js-beautify option (tidy.preserve_newlines on JavaScript) —
+//       for a js-beautify option (tidy.preserve_newlines on JavaScript) , 
 //       covering both engine families behind a single guard.
 //
 //   (2) A project `.soukformatrc` (JSONC) at the workspace root drives the style
-//       (layer 4) with NO VS Code setting involved, and stays idempotent — the
+//       (layer 4) with NO VS Code setting involved, and stays idempotent : the
 //       "project config file" deliverable lonefy never had.
 //
 // Design notes (mirroring lifecycle.test.ts):
@@ -38,7 +38,7 @@ import {
   workspaceRoot
 } from './helpers';
 
-describe('Tidy configurability (AXE 3) — options drive output end-to-end', function () {
+describe('Tidy configurability (AXE 3) : options drive output end-to-end', function () {
   // Cold Electron host + per-language formatter readiness needs headroom.
   // CI-aware: slow/shared CI runners get a generous ceiling; local stays strict.
   this.timeout(process.env.CI ? 180000 : 30000);
@@ -90,8 +90,8 @@ describe('Tidy configurability (AXE 3) — options drive output end-to-end', fun
 
   /**
    * Deterministically wait for a NEW project config (an on-disk .soukformatrc) to
-   * govern the output before asserting on it. Unlike a VS Code setting — where
-   * setTidyConfig awaits onDidChangeConfiguration — a .soukformatrc is plain disk
+   * govern the output before asserting on it. Unlike a VS Code setting : where
+   * setTidyConfig awaits onDidChangeConfiguration : a .soukformatrc is plain disk
    * content the provider reads at format time; on a cold/slow host the first
    * Format Document of a freshly-opened document can still resolve to a no-op
    * before everything has settled, leaving the document at its unformatted source
@@ -198,11 +198,11 @@ describe('Tidy configurability (AXE 3) — options drive output end-to-end', fun
   });
 
   // (2) A project .soukformatrc (JSONC) at the WORKSPACE ROOT drives the style as
-  //     layer 4 — WITHOUT any VS Code tidy.* setting — and stays idempotent.
+  //     layer 4 : WITHOUT any VS Code tidy.* setting : and stays idempotent.
   //     We use the css section to force a 2-space indent (the default is 4) so the
   //     assertion is unambiguous, and JSONC comments to prove the JSONC parser
   //     path is exercised end-to-end.
-  it('(2) a root .soukformatrc (JSONC) drives CSS indent and is idempotent — no VS Code setting', async () => {
+  it('(2) a root .soukformatrc (JSONC) drives CSS indent and is idempotent : no VS Code setting', async () => {
     const root = workspaceRoot();
     const rcPath = path.join(root, '.soukformatrc');
 

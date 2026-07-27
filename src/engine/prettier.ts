@@ -25,7 +25,7 @@ const SUPPORTED: ReadonlySet<LangId> = new Set<LangId>([
 ]);
 
 // Prettier's built-in parser name per languageId.
-// - 'typescript' parser handles both .ts and .tsx (it accepts JSX) — keeps the
+// - 'typescript' parser handles both .ts and .tsx (it accepts JSX) : keeps the
 //   guard's reference parser (typescript) and the engine aligned (§4).
 // - 'babel' parser is used for JSX/JS so the .js JSX-fallback and .jsx share one path.
 const PARSER_BY_LANG: Readonly<Record<string, 'typescript' | 'babel'>> = {
@@ -64,7 +64,7 @@ const PRETTIER_BOOLEAN_KEYS = [
   'bracketSameLine'
 ] as const;
 
-// NOTE: `quoteProps` is deliberately absent — it changes an object key's AST node
+// NOTE: `quoteProps` is deliberately absent : it changes an object key's AST node
 // type (Identifier ⇔ StringLiteral), which the equivalence guard rejects, so it
 // is not AST-invariant and must not be exposed (see optionCatalog.ts). The
 // allow-list design below means a stray `quoteProps` in the bag is silently

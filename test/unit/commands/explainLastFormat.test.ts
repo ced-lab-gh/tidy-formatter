@@ -45,7 +45,7 @@ const ALL_STATUSES: FormatStatus[] = [
   'cancelled'
 ];
 
-describe('commands/explainLastFormat — buildExplanation', () => {
+describe('commands/explainLastFormat : buildExplanation', () => {
   it('exposes the stable command id', () => {
     assert.equal(EXPLAIN_LAST_FORMAT_COMMAND_ID, 'tidy.explainLastFormat');
   });

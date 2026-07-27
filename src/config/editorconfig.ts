@@ -31,7 +31,7 @@ const ENGINE_KEY_CHARSET = 'charset';
 
 /**
  * EditorConfig spells "this key is explicitly cleared" as the literal string
- * 'unset'. Such a value must never be forwarded — it means "fall back to the
+ * 'unset'. Such a value must never be forwarded : it means "fall back to the
  * lower precedence layer", which the resolver already does when a key is absent.
  */
 function isUnset(value: unknown): boolean {
@@ -43,7 +43,7 @@ function isUnset(value: unknown): boolean {
  * positive integer. EditorConfig may yield a number, a numeric string, or the
  * sentinel 'tab' (when `indent_size = tab`); only real positive integers are
  * accepted, everything else returns undefined so a malformed value never
- * corrupts tabSize (the resolver would also reject it — this is belt-and-braces).
+ * corrupts tabSize (the resolver would also reject it : this is belt-and-braces).
  */
 function coerceIndentNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isInteger(value) && value > 0) {

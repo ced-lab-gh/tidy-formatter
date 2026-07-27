@@ -1,4 +1,4 @@
-// POLYGLOT end-to-end safety suite — runs INSIDE a real VS Code Electron host.
+// POLYGLOT end-to-end safety suite : runs INSIDE a real VS Code Electron host.
 //
 // This is the host-level counterpart of the pure-unit polyglot suites
 // (test/unit/polyglot/*.test.ts). The unit tests prove the engine + guard keep
@@ -18,8 +18,8 @@
 //       and a practical proof the output re-parses cleanly;
 //   (c) every embedded / template-literal / <pre> / <textarea> / template-island
 //       zone survives VERBATIM (no corruption of any sub-language; SAFE-01/02).
-//       The applied edit was ALREADY gated by the provider's guard — VS Code
-//       only received a TextEdit because guard.check() passed — so anything that
+//       The applied edit was ALREADY gated by the provider's guard : VS Code
+//       only received a TextEdit because guard.check() passed : so anything that
 //       lands is semantically equivalent by construction; these verbatim checks
 //       independently confirm the most dangerous fragments were not mangled.
 //
@@ -57,7 +57,7 @@ async function formatFixtureInHost(
   return { document, formatted: document.getText() };
 }
 
-describe('POLYGLOT integration — embedded sub-languages stay intact in a real VS Code host', function () {
+describe('POLYGLOT integration : embedded sub-languages stay intact in a real VS Code host', function () {
   // First run downloads/opens the Electron host; these are the largest fixtures
   // in the suite and prettier (TSX) is heavy, so give generous headroom.
   // CI-aware: slow/shared CI runners get a much larger ceiling; local stays strict.
@@ -87,7 +87,7 @@ describe('POLYGLOT integration — embedded sub-languages stay intact in a real 
   });
 
   for (const f of polyglotHostFixtures) {
-    describe(`${f.id} — ${f.desc}`, () => {
+    describe(`${f.id} : ${f.desc}`, () => {
       // (a) Tidy actually RAN on this polyglot file in the packaged host. A no-op
       // here is the exact "prettier bundling bug" class: a file that passes every
       // unit test but does nothing in the real host because an engine failed to
@@ -98,7 +98,7 @@ describe('POLYGLOT integration — embedded sub-languages stay intact in a real 
         assert.notEqual(
           formatted,
           f.input,
-          `${f.id}: Format Document produced no change in the real host — the ` +
+          `${f.id}: Format Document produced no change in the real host : the ` +
             `packaged extension is a no-op for this polyglot file (engine load / ` +
             `dispatch failure, like the prettier bundling bug). If this same ` +
             `fixture formats in the unit suite, this is a PACKAGED-EXTENSION bug.`
@@ -107,14 +107,14 @@ describe('POLYGLOT integration — embedded sub-languages stay intact in a real 
           assert.ok(
             formatted.includes(marker),
             `${f.id}: the formatter ran but did not produce the expected ` +
-              `reformatting marker ${JSON.stringify(marker)} — the wrapper was ` +
+              `reformatting marker ${JSON.stringify(marker)} : the wrapper was ` +
               `not actually reflowed (possible partial / wrong-engine format).`
           );
         }
       });
 
       // (b) The formatted output is STABLE: a second Format Document changes
-      // nothing. Host-level idempotence (SAFE-03) — and a practical proof every
+      // nothing. Host-level idempotence (SAFE-03) : and a practical proof every
       // embedded body re-parses cleanly, since an unstable/invalid output would
       // either keep drifting or be re-touched on the second pass.
       it('(b) a second Format Document is a no-op (host-level idempotence / re-parse)', async () => {
@@ -130,7 +130,7 @@ describe('POLYGLOT integration — embedded sub-languages stay intact in a real 
         assert.equal(
           secondPass,
           formatted,
-          `${f.id}: second Format Document drifted — output is not idempotent in ` +
+          `${f.id}: second Format Document drifted : output is not idempotent in ` +
             `the host (SAFE-03), which means an embedded zone is being re-touched.`
         );
       });
@@ -193,7 +193,7 @@ describe('POLYGLOT integration — embedded sub-languages stay intact in a real 
 
   // A pinned regression: the opaque <script type="text/x-template"> body and the
   // CSS-in-JS / GraphQL template-literal bodies must be IDENTICAL substrings of
-  // the formatted output — i.e. the host did not reindent a foreign body it is
+  // the formatted output : i.e. the host did not reindent a foreign body it is
   // not allowed to touch. This is the precise corruption class the incumbents hit
   // ("formatted my styled-components / my embedded template"), proven dead in the
   // packaged host.

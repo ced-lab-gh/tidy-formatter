@@ -1,4 +1,4 @@
-// POLYGLOT HTML corpus — fixtures mixing several embedded languages inside ONE
+// POLYGLOT HTML corpus : fixtures mixing several embedded languages inside ONE
 // HTML document, exercising the guard's per-embedded-language canonicalisation:
 //   - several <script> blocks of modern JS,
 //   - a <script type="application/json"> data block,
@@ -73,7 +73,7 @@ const SVG_AND_STYLE = lines(
 );
 
 // --- 4. Template islands {{ }} / {% %} / <% %> in text + attributes ----------
-// NB: islands live in TEXT and ATTRIBUTES only — never inside a default <script>
+// NB: islands live in TEXT and ATTRIBUTES only : never inside a default <script>
 // body, where `{{ }}` is invalid JS that js-beautify reflows and the guard then
 // (correctly) rejects. That conservative reject is exercised separately as a
 // negative control in the test file.
@@ -82,7 +82,7 @@ const TEMPLATE_ISLANDS = lines(
   '<h1>{{ user.name }}</h1>',
   '{% for badge in user.badges %}<span class="badge">{{ badge }}</span>{% endfor %}',
   '<% if (showBanner) { %><div class="banner"><%= bannerText %></div><% } %>',
-  '<footer>{{ year }} — <%= owner %></footer>',
+  '<footer>{{ year }} : <%= owner %></footer>',
   '</article>',
   '<style>.badge{display:inline-block;margin:0 calc(var(--gap,4px) / 2)}</style>',
   '<script>render(document.getElementById("data")?.textContent)</script>'

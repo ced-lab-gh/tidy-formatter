@@ -18,7 +18,7 @@ import {
 } from '../../../src/config/soukformatrc';
 import { resolveOptions } from '../../../src/config/resolver';
 
-describe('config/soukformatrc — parseSoukformatrc (pure text)', () => {
+describe('config/soukformatrc : parseSoukformatrc (pure text)', () => {
   it('maps a language section to a layer 4 ConfigLayer for that language', () => {
     const { layers, warnings } = parseSoukformatrc(
       '{ "css": { "indent": 4 } }',
@@ -110,7 +110,7 @@ describe('config/soukformatrc — parseSoukformatrc (pure text)', () => {
   });
 });
 
-describe('config/soukformatrc — glob overrides (layer 5)', () => {
+describe('config/soukformatrc : glob overrides (layer 5)', () => {
   it('a matching override is appended AFTER the language section (wins)', () => {
     const text = `{
       "css": { "indent": 4 },
@@ -187,7 +187,7 @@ describe('config/soukformatrc — glob overrides (layer 5)', () => {
   });
 });
 
-describe('config/soukformatrc — on-disk discovery (fail-soft)', () => {
+describe('config/soukformatrc : on-disk discovery (fail-soft)', () => {
   let root: string;
 
   beforeEach(() => {

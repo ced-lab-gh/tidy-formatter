@@ -9,10 +9,10 @@
 //
 // SAFETY (NON-NEGOTIABLE): this is best-effort and ALWAYS sits behind the safety
 // guard. Two failure modes are handled explicitly so corruption is impossible:
-//   1. PLACEHOLDER COLLISION — if a chosen token already occurs in the input, we
+//   1. PLACEHOLDER COLLISION : if a chosen token already occurs in the input, we
 //      refuse to mask (return undefined) and the caller formats normally (or, for
 //      the ignore path, returns no edits). We never silently mangle.
-//   2. RESTORE FAILURE — if, after formatting, a placeholder is missing or appears
+//   2. RESTORE FAILURE : if, after formatting, a placeholder is missing or appears
 //      more than once (the engine duplicated/dropped it), restore returns
 //      undefined and the caller falls back to leaving the file intact. Even when
 //      restore SUCCEEDS, the caller re-runs `guard.check(input, restored)`; if the

@@ -5,7 +5,7 @@
 // arrowParens) is exercised twice:
 //   (1) EFFECT: toggling it changes Prettier's printed output;
 //   (2) SAFETY: guard.check(lang, input, output).equivalent === true for BOTH
-//       toggle states — the on-the-spot PROOF that the equivalence guard
+//       toggle states : the on-the-spot PROOF that the equivalence guard
 //       (semantic-equivalence-modulo-whitespace/style) accepts every stylistic
 //       change because none of them alter the babel AST (semicolons, quote style,
 //       trailing commas, and sole-arrow-param parens all canonicalise away).
@@ -45,7 +45,7 @@ function assertGuardEquivalent(lang: LangId, input: string, output: string, labe
   );
 }
 
-describe('engine/prettier — supported languages', () => {
+describe('engine/prettier : supported languages', () => {
   it('supports ts/tsx/jsx and js (JSX fallback)', () => {
     for (const lang of ['typescript', 'typescriptreact', 'javascriptreact', 'javascript'] as const) {
       assert.ok(engine.supports(lang));
@@ -53,7 +53,7 @@ describe('engine/prettier — supported languages', () => {
   });
 });
 
-describe('engine/prettier — stylistic option effects (each changes output)', () => {
+describe('engine/prettier : stylistic option effects (each changes output)', () => {
   it('semi=false drops trailing semicolons', async () => {
     const input = 'const a = 1';
     const withSemi = await fmt(input, { semi: true });
@@ -86,7 +86,7 @@ describe('engine/prettier — stylistic option effects (each changes output)', (
     assert.ok(sgl.includes("className='x'"));
     assert.notEqual(dbl, sgl);
     // SAFETY: JSX attribute quote style is AST-invariant AND must keep tag
-    // boundaries intact (jsxBoundaryFingerprint) — the guard checks both.
+    // boundaries intact (jsxBoundaryFingerprint) : the guard checks both.
     assertGuardEquivalent('typescriptreact', code, dbl, 'jsxSingleQuote=false');
     assertGuardEquivalent('typescriptreact', code, sgl, 'jsxSingleQuote=true');
   });
@@ -98,7 +98,7 @@ describe('engine/prettier — stylistic option effects (each changes output)', (
     assert.notEqual(none, all);
     assert.ok(!/2,\n\}/.test(none), 'none: no trailing comma');
     assert.ok(/2,\n\}/.test(all), 'all: trailing comma present');
-    // SAFETY: a trailing comma is punctuation only — same object AST.
+    // SAFETY: a trailing comma is punctuation only : same object AST.
     assertGuardEquivalent('typescript', code, none, 'trailingComma=none');
     assertGuardEquivalent('typescript', code, all, 'trailingComma=all');
   });
@@ -122,7 +122,7 @@ describe('engine/prettier — stylistic option effects (each changes output)', (
     assert.ok(always.includes('(x)'));
     assert.ok(!avoid.includes('(x)'));
     assert.notEqual(always, avoid);
-    // SAFETY: the parens are syntactic grouping only — same arrow-function AST.
+    // SAFETY: the parens are syntactic grouping only : same arrow-function AST.
     assertGuardEquivalent('typescript', input, always, 'arrowParens=always');
     assertGuardEquivalent('typescript', input, avoid, 'arrowParens=avoid');
   });
@@ -134,7 +134,7 @@ describe('engine/prettier — stylistic option effects (each changes output)', (
     assert.ok(!wide.includes('\n  '), 'wide stays on one line');
     assert.ok(narrow.includes('\n'), 'narrow wraps');
     assert.notEqual(wide, narrow);
-    // SAFETY: wrapping only inserts whitespace/newlines — same expression AST.
+    // SAFETY: wrapping only inserts whitespace/newlines : same expression AST.
     assertGuardEquivalent('typescript', code, wide, 'printWidth=200');
     assertGuardEquivalent('typescript', code, narrow, 'printWidth=20');
   });
@@ -155,7 +155,7 @@ describe('engine/prettier — stylistic option effects (each changes output)', (
   });
 });
 
-describe('engine/prettier — quoteProps is deliberately NOT consumed (AST-changing)', () => {
+describe('engine/prettier : quoteProps is deliberately NOT consumed (AST-changing)', () => {
   // quoteProps is the one Prettier "quote" option that is NOT AST-invariant:
   // quoting an object key turns its babel node from Identifier into StringLiteral,
   // a STRUCTURAL change the equivalence guard rejects. The engine must therefore
@@ -172,7 +172,7 @@ describe('engine/prettier — quoteProps is deliberately NOT consumed (AST-chang
     assertGuardEquivalent('typescript', code, out, 'quoteProps ignored');
   });
 
-  it('the guard WOULD reject key-quoting — proving why quoteProps is excluded', () => {
+  it('the guard WOULD reject key-quoting : proving why quoteProps is excluded', () => {
     // This is the contrapositive: a hypothetical formatter that quoted keys
     // (what quoteProps:"consistent"/"as-needed"→all could do) produces a
     // non-equivalent AST, so exposing quoteProps could silently no-op the engine.
@@ -183,7 +183,7 @@ describe('engine/prettier — quoteProps is deliberately NOT consumed (AST-chang
   });
 });
 
-describe('engine/prettier — invalid stylistic values are ignored (not propagated)', () => {
+describe('engine/prettier : invalid stylistic values are ignored (not propagated)', () => {
   it('ignores a non-boolean semi and an out-of-enum trailingComma', async () => {
     const out = await fmt('const a = 1', {
       semi: 'yes',

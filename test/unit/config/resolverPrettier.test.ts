@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { resolveOptions } from '../../../src/config/resolver';
 
-describe('config/resolver — prettier nesting', () => {
+describe('config/resolver : prettier nesting', () => {
   it('lifts flat prettier.* keys into a nested engineOptions.prettier object', () => {
     const r = resolveOptions({
       languageId: 'typescript',
@@ -53,7 +53,7 @@ describe('config/resolver — prettier nesting', () => {
   });
 });
 
-describe('config/resolver — per-language vs project precedence (5 layers)', () => {
+describe('config/resolver : per-language vs project precedence (5 layers)', () => {
   it('global brace_style=collapse + [lang] expand => expand', () => {
     const r = resolveOptions({
       languageId: 'javascript',

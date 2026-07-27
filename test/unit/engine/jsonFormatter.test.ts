@@ -6,7 +6,7 @@
 //   - it PRESERVES comments + trailing commas for JSONC (the #134 cluster),
 //   - tabs / spaces indentation mapping matches ResolvedOptions,
 //   - the engine still reports id 'js-beautify' for json/jsonc (engineFixtures),
-//   - and — the load-bearing safety property — a LARGE document that triggers the
+//   - and : the load-bearing safety property : a LARGE document that triggers the
 //     guard's native-JSON.parse fast path is still REJECTED when a value changes,
 //     so the optimisation never weakens the guarantee.
 import assert from 'node:assert/strict';
@@ -18,7 +18,7 @@ import type { LangId } from '../../../src/types';
 
 const engine = new JsBeautifyEngine();
 
-describe('engine/jsonFormatter — JSON pretty-print', () => {
+describe('engine/jsonFormatter : JSON pretty-print', () => {
   it('pretty-prints a compact object with 2-space indent', async () => {
     const out = await engine.format({
       languageId: 'json',
@@ -67,7 +67,7 @@ describe('engine/jsonFormatter — JSON pretty-print', () => {
   });
 });
 
-describe('engine/jsonFormatter — JSONC comment & trailing-comma preservation', () => {
+describe('engine/jsonFormatter : JSONC comment & trailing-comma preservation', () => {
   it('keeps a line comment and a block comment after formatting', async () => {
     const input = '{\n// line\n"a":1,\n/* block */\n"b":2,\n}';
     const out = await engine.format({ languageId: 'jsonc', code: input, options: resolved() });
@@ -89,7 +89,7 @@ describe('engine/jsonFormatter — JSONC comment & trailing-comma preservation',
   });
 });
 
-describe('engine/jsonFormatter — routing keeps the js-beautify engine id', () => {
+describe('engine/jsonFormatter : routing keeps the js-beautify engine id', () => {
   it("json/jsonc still report engine id 'js-beautify' (engineFixtures contract)", () => {
     // The JSON path lives inside JsBeautifyEngine, so its public id is unchanged;
     // this protects the dispatcher engineFixtures expectation.
@@ -105,7 +105,7 @@ describe('engine/jsonFormatter — routing keeps the js-beautify engine id', () 
 // rejected when a value changes. If the fast path ever weakened the guarantee,
 // THIS test fails.
 // ---------------------------------------------------------------------------
-describe('safety/guard — large-JSON fast path never weakens the guarantee', () => {
+describe('safety/guard : large-JSON fast path never weakens the guarantee', () => {
   // Build a > 256 KB strict-JSON document so parseJsonValue takes the native path.
   function bigJson(entries: number): string {
     const obj: Record<string, unknown> = {};
