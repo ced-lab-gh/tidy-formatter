@@ -36,6 +36,7 @@ PUBLISHING.md
 #    build reports / vsix archive) — consolidated under _internal/. ──
 _internal/**
 STRUCTURE.md
+HANDOFF.md
 
 # ── Secrets & personal data ──
 # MIRROR of .gitignore. This block is NOT redundant: vsce packages from the

@@ -17,6 +17,7 @@ samples/out/
 #    contain third-party PII scraped from store reviews.
 _internal/
 STRUCTURE.md
+HANDOFF.md
 
 # ── Secrets & personal data (defensive — none tracked today) ──
 *.env
