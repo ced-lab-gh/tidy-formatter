@@ -4,6 +4,28 @@ All notable changes to **Tidy Formatter : JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] - 2026-08-05
+
+Safety release. An adversarial audit of the safety guard found five ways a
+corrupted output could pass the equivalence check and be written to your file.
+All five are closed here, with regression fixtures for each. **This release
+changes no formatting behaviour**: the same valid outputs are still applied, the
+2045 existing tests are unchanged and green, and 25 new tests pin the fixes.
+
+### Fixed
+
+- **CSS/SCSS/LESS: whitespace next to a parenthesis is significant again.** The guard normalized it away on both sides, so an output that turned `calc(100% - 10px)` into `calc (100% - 10px)` was accepted, even though an identifier must touch `(` to form a function token, making the declaration invalid and silently dropped by the browser. The same hole covered `:nth-child (2n)` (drops the whole rule), `@media (a)and(b)` (malformed query), and `:not(.a) .b` collapsed to `:not(.a).b` (a descendant combinator turned into a compound selector, a different selector). Whitespace *inside* parentheses stays insignificant, so legitimate output such as `calc( 1px + 2px )` reformatted to `calc(1px + 2px)` is still accepted.
+- **HTML: `white-space: pre` is now inherited by the whole subtree.** Verbatim text was only detected when the immediate parent was `<pre>` or `<textarea>`. In `<pre><code>...</code></pre>`, the standard code-block markup, the text node's parent is `<code>`, so its indentation and line breaks were normalized away and any reflow of a code block passed unnoticed. Whitespace-only nodes anywhere inside a `<pre>` are likewise no longer dropped.
+- **HTML: `&nbsp;` is no longer treated as an ordinary space.** Text normalization used `\s`, which also matches U+00A0, U+202F and the U+2000..U+200A family. These are rendered characters, so degrading `10&nbsp;km` into `10 km` was accepted as equivalent, and a text node made only of `&nbsp;` was considered blank and dropped entirely. Only ASCII whitespace (space, tab, LF, CR, FF) is collapsed now.
+- **JavaScript/TypeScript: losing a comment is now rejected.** Comments are excluded from the structural AST comparison because they carry positions, but their *disappearance* was therefore invisible. An output dropping `/* eslint-disable no-console */`, a `/* webpackChunkName */` magic comment (which changes the emitted bundle), or a licence header was accepted. The guard now compares the sorted, whitespace-normalized comment texts: moving and reindenting a comment is still accepted, removing or altering one is not. This applies to embedded `<script>` bodies in HTML too.
+- **JSON/JSONC: a `"__proto__"` member is data again, and the verdict no longer depends on file size.** The lenient parser assigned members with `obj[key] = value`, so a `"__proto__"` member hit the prototype setter and left no own property, making its removal invisible; native `JSON.parse`, used as a fast path above 256 KB, kept it. The guard could therefore return two different verdicts for the same corruption depending on the document's size. Objects are now canonicalized from the syntax tree into sorted key/value pair arrays on both paths, so every key is plain data and the verdict is size-invariant.
+
+### Notes
+
+No new setting, no new command, no change to when Tidy runs. The safety guard
+remains the final judge before any edit: when it cannot prove the output is
+equivalent to the input, nothing is written.
+
 ## [0.2.1] - 2026-07-27
 
 ### Fixed

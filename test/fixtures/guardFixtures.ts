@@ -418,5 +418,191 @@ export const guardFixtures: GuardFixture[] = [
     input: '{\n  // a comment\n  "a": 1,\n}',
     output: '{\n  "a": 1\n}',
     equivalent: true
+  },
+
+  // ---- v0.2.2: false accepts found by the 2026-07-29 adversarial audit ----
+  // Each of these corruptions passed the guard before v0.2.2. They are the most
+  // dangerous class of defect for this product: the guard IS the moat, so a
+  // false accept means the file gets written with corrupted content.
+
+  // CSS: whitespace adjacent to a parenthesis is significant.
+  {
+    id: 'GUARD-CSS-FN-SPACE',
+    desc: 'a space inserted between a function name and "(" breaks the function token and drops the declaration, rejected',
+    ref: 'audit 2026-07-29 HIGH-01 (guard.ts:419)',
+    lang: 'css',
+    input: '.a { width: calc(100% - 10px); }',
+    output: '.a { width: calc (100% - 10px); }',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-CSS-PSEUDO-SPACE',
+    desc: 'a space between a pseudo-class and "(" drops the whole rule, rejected',
+    ref: 'audit 2026-07-29 HIGH-01 / #77,#78',
+    lang: 'css',
+    input: 'li:nth-child(2n) { color: red; }',
+    output: 'li:nth-child (2n) { color: red; }',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-CSS-MEDIA-AND',
+    desc: 'removing the space before "(" in a media query makes "and(" a function token and the query malformed, rejected',
+    ref: 'audit 2026-07-29 HIGH-01',
+    lang: 'css',
+    input: '@media (min-width: 600px) and (max-width: 900px) { .a { color: red; } }',
+    output: '@media (min-width: 600px)and(max-width: 900px) { .a { color: red; } }',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-CSS-DESCENDANT-TO-COMPOUND',
+    desc: 'removing the space after ")" turns a descendant combinator into a compound selector, rejected',
+    ref: 'audit 2026-07-29 HIGH-14',
+    lang: 'css',
+    input: '.z:not(.a) .b { color: red; }',
+    output: '.z:not(.a).b { color: red; }',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-CSS-PAREN-INNER-OK',
+    desc: 'whitespace INSIDE parentheses is insignificant and js-beautify strips it: must stay accepted (no-op guard)',
+    ref: 'audit 2026-07-29 HIGH-01 anti-false-reject / SPEC §12',
+    lang: 'css',
+    input: '.a { width: calc( 1px + 2px ); transform: translate( 10px , 20px ); }',
+    output: '.a { width: calc(1px + 2px); transform: translate(10px, 20px); }',
+    equivalent: true
+  },
+  {
+    id: 'GUARD-CSS-COMMA-OK',
+    desc: 'whitespace around a comma is insignificant, js-beautify normalizes it: accepted',
+    ref: 'audit 2026-07-29 HIGH-01 anti-false-reject',
+    lang: 'css',
+    input: '.a { font-family: Arial , sans-serif; }',
+    output: '.a { font-family: Arial, sans-serif; }',
+    equivalent: true
+  },
+
+  // HTML: white-space:pre is inherited by the whole subtree.
+  {
+    id: 'GUARD-HTML-PRE-CODE-REFLOW',
+    desc: 'reflowing the content of <pre><code> destroys rendered indentation, rejected (verbatim must be inherited)',
+    ref: 'audit 2026-07-29 HIGH-02 (guard.ts:710)',
+    lang: 'html',
+    input: '<pre><code>if (x) {\n    y();\n}</code></pre>',
+    output: '<pre><code>if (x) { y(); }</code></pre>',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-HTML-PRE-NESTED-COLLAPSE',
+    desc: 'collapsing whitespace inside an element nested under <pre> changes the rendering, rejected',
+    ref: 'audit 2026-07-29 HIGH-02',
+    lang: 'html',
+    input: '<pre><span>a  b</span></pre>',
+    output: '<pre><span>a b</span></pre>',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-HTML-PRE-REINDENT-OK',
+    desc: 'reindenting HTML around a <pre> whose content is byte-identical stays accepted',
+    ref: 'audit 2026-07-29 HIGH-02 anti-false-reject',
+    lang: 'html',
+    input: '<div><pre>a  b</pre></div>',
+    output: '<div>\n  <pre>a  b</pre>\n</div>',
+    equivalent: true
+  },
+
+  // HTML: non-breaking and Unicode spaces are rendered characters, not blanks.
+  {
+    id: 'GUARD-HTML-NBSP-DEGRADED',
+    desc: 'degrading a non-breaking space into an ordinary space is a content change, rejected',
+    ref: 'audit 2026-07-29 MEDIUM (guard.ts:629)',
+    lang: 'html',
+    input: '<p>10&nbsp;km</p>',
+    output: '<p>10 km</p>',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-HTML-NBSP-NODE-DROPPED',
+    desc: 'a text node made only of &nbsp; is rendered content and must not be dropped as blank, rejected',
+    ref: 'audit 2026-07-29 MEDIUM (guard.ts:757 blank filter)',
+    lang: 'html',
+    input: '<div><span>a</span>&nbsp;<span>b</span></div>',
+    output: '<div><span>a</span><span>b</span></div>',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-HTML-NBSP-REINDENT-OK',
+    desc: 'reindenting with ASCII whitespace around text containing &nbsp; stays accepted',
+    ref: 'audit 2026-07-29 MEDIUM anti-false-reject',
+    lang: 'html',
+    input: '<p>\n  10&nbsp;km\n</p>',
+    output: '<p>10&nbsp;km</p>',
+    equivalent: true
+  },
+
+  // JS/TS: losing a comment is losing content, not style.
+  {
+    id: 'GUARD-JS-ESLINT-DIRECTIVE-DROPPED',
+    desc: 'dropping an eslint-disable directive changes lint behaviour, rejected',
+    ref: 'audit 2026-07-29 HIGH-03 (guard.ts:90)',
+    lang: 'javascript',
+    input: '/* eslint-disable no-console */\nconsole.log(1);',
+    output: 'console.log(1);',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-JS-MAGIC-COMMENT-DROPPED',
+    desc: 'dropping a webpackChunkName magic comment changes the emitted bundle, rejected',
+    ref: 'audit 2026-07-29 HIGH-03',
+    lang: 'javascript',
+    input: 'import(/* webpackChunkName: "admin" */ "./admin");',
+    output: 'import("./admin");',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-JS-LICENCE-DROPPED',
+    desc: 'dropping a licence header removes a legal obligation, rejected',
+    ref: 'audit 2026-07-29 HIGH-03',
+    lang: 'typescript',
+    input: '/*! (c) ACME, MIT licence */\nconst a = 1;',
+    output: 'const a = 1;',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-JS-COMMENT-MOVED-OK',
+    desc: 'moving and reindenting a comment is style, not content: accepted',
+    ref: 'audit 2026-07-29 HIGH-03 anti-false-reject (Prettier reflow)',
+    lang: 'javascript',
+    input: 'const a = 1; // note\nconst b = 2;',
+    output: 'const a = 1;\n//   note\nconst b = 2;',
+    equivalent: true
+  },
+  {
+    id: 'GUARD-HTML-SCRIPT-COMMENT-DROPPED',
+    desc: 'dropping a comment inside an embedded <script> is the same content loss, rejected',
+    ref: 'audit 2026-07-29 HIGH-03 (canonicalizeEmbeddedCode)',
+    lang: 'html',
+    input: '<script>/* eslint-disable */\nvar a = 1;</script>',
+    output: '<script>var a = 1;</script>',
+    equivalent: false
+  },
+
+  // JSON: "__proto__" is data, and the verdict must not depend on file size.
+  {
+    id: 'GUARD-JSON-PROTO-DROPPED',
+    desc: 'dropping a "__proto__" member is a value change; jsonc-parser used to swallow the key entirely, rejected',
+    ref: 'audit 2026-07-29 HIGH-12 (guard.ts:814)',
+    lang: 'json',
+    input: '{"__proto__":{"p":1},"a":1}',
+    output: '{"a":1}',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-JSON-PROTO-REFORMAT-OK',
+    desc: 'pure reformatting of a document containing "__proto__" stays accepted',
+    ref: 'audit 2026-07-29 HIGH-12 anti-false-reject',
+    lang: 'json',
+    input: '{"__proto__":{"p":1},"a":1}',
+    output: '{\n  "a": 1,\n  "__proto__": {\n    "p": 1\n  }\n}',
+    equivalent: true
   }
 ];

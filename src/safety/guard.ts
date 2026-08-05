@@ -13,7 +13,12 @@ import { parse as parseCss, type Node as PostcssNode } from 'postcss';
 import { parse as parseScss } from 'postcss-scss';
 import { parse as parseLess } from 'postcss-less';
 import { parse as parseHtml, parseFragment as parseHtmlFragment } from 'parse5';
-import { parse as parseJsonc, ParseError, printParseErrorCode } from 'jsonc-parser';
+import {
+  parseTree as parseJsoncTree,
+  type Node as JsoncNode,
+  ParseError,
+  printParseErrorCode
+} from 'jsonc-parser';
 import type { Guard, GuardVerdict, LangId } from '../types';
 
 // --- shared verdicts -------------------------------------------------------
@@ -98,15 +103,38 @@ const STRUCTURAL_IGNORE_KEYS = new Set<string>([
   'parenStart'
 ]);
 
-function parseJsAst(code: string, plugins: BabelPlugins): unknown {
-  return babelParse(code, {
+interface ParsedJs {
+  program: unknown;
+  comments: string[];
+}
+
+/**
+ * Parse JS/TS and return both the program AST and the multiset of comment texts.
+ *
+ * Comments are stripped from the structural comparison (they carry positions and
+ * would reject any legitimate reflow), but their DISAPPEARANCE is a real content
+ * loss the guard must catch: `/* eslint-disable *\/` changes lint behaviour, a
+ * `/* webpackChunkName *\/` magic comment changes the emitted bundle, and a
+ * licence header carries a legal obligation. Comparing the sorted, whitespace-
+ * normalized comment texts tolerates reindentation and movement (both style)
+ * while catching removal or alteration (both content).
+ */
+function parseJs(code: string, plugins: BabelPlugins): ParsedJs {
+  const file = babelParse(code, {
     sourceType: 'unambiguous',
     allowReturnOutsideFunction: true,
     allowImportExportEverywhere: true,
     errorRecovery: false,
     plugins
-  }).program;
+  });
+  return {
+    program: file.program,
+    comments: (file.comments ?? [])
+      .map((comment) => comment.value.replace(/\s+/g, ' ').trim())
+      .sort()
+  };
 }
+
 
 /**
  * Apply JSX whitespace coalescing (the same algorithm Babel/React use for
@@ -266,26 +294,33 @@ export function astEqualJs(input: string, output: string, lang?: LangId): GuardV
   const plugins = babelPluginsFor(lang);
   const jsxEnabled = plugins.some((plugin) => plugin === 'jsx');
 
-  let inputAst: unknown;
+  let inputParsed: ParsedJs;
   try {
-    inputAst = parseJsAst(input, plugins);
+    inputParsed = parseJs(input, plugins);
   } catch (error: unknown) {
     // The original source did not parse. We cannot prove equivalence, so we are
     // conservative and refuse to apply (the file is left untouched upstream).
     return rejected(`input did not parse: ${describeError(error)}`);
   }
 
-  let outputAst: unknown;
+  let outputParsed: ParsedJs;
   try {
-    outputAst = parseJsAst(output, plugins);
+    outputParsed = parseJs(output, plugins);
   } catch (error: unknown) {
     return rejected(`formatted output did not parse: ${describeError(error)}`);
   }
 
-  const inputCanonical = JSON.stringify(canonicalizeAst(inputAst));
-  const outputCanonical = JSON.stringify(canonicalizeAst(outputAst));
+  const inputCanonical = JSON.stringify(canonicalizeAst(inputParsed.program));
+  const outputCanonical = JSON.stringify(canonicalizeAst(outputParsed.program));
   if (inputCanonical !== outputCanonical) {
     return rejected('AST structure changed after formatting');
+  }
+
+  // Comments are excluded from the structural diff (they carry positions), so a
+  // formatter that DROPS one would otherwise pass unnoticed. Compare the sorted
+  // comment texts: tolerant to reindentation and movement, strict on removal.
+  if (JSON.stringify(inputParsed.comments) !== JSON.stringify(outputParsed.comments)) {
+    return rejected('comments were lost or altered by formatting');
   }
 
   // ASTs match : now defend against the whitespace-insignificant JSX corruption
@@ -416,7 +451,31 @@ function normalizeOutsideStrings(value: string, normalizeSpan: (s: string) => st
  * change such as `+`/`-` arithmetic inside `calc()`.
  */
 function normalizeCssTextSpan(span: string): string {
-  return span.replace(/\s+/g, ' ').replace(/\s*([(),])\s*/g, '$1');
+  // Whitespace INSIDE parentheses is insignificant : js-beautify legitimately
+  // strips it (`calc( 1px + 2px )` -> `calc(1px + 2px)`), so collapsing it is
+  // required to avoid rejecting the formatter's own valid output.
+  //
+  // Whitespace ADJACENT to a parenthesis (before `(`, after `)`) is significant
+  // and must NOT be collapsed:
+  //  - `calc(x)` vs `calc (x)` : an ident must touch `(` to form a function
+  //    token, so `calc (` is an invalid declaration the browser drops,
+  //  - `:nth-child(2n)` vs `:nth-child (2n)` : same, the whole rule is dropped,
+  //  - `@media (a) and (b)` vs `(a)and(b)` : `and(` lexes as a function token,
+  //    producing a malformed media query,
+  //  - `:not(.a) .b` vs `:not(.a).b` : descendant combinator vs compound
+  //    selector, two different selectors.
+  // Verified empirically: js-beautify never inserts or removes whitespace on
+  // either outer side of a parenthesis, so keeping it significant introduces no
+  // false rejection.
+  //
+  // Whitespace around a comma stays insignificant : js-beautify normalizes
+  // `Arial , sans-serif` -> `Arial, sans-serif` and the comma is a pure
+  // separator in both selectors and values.
+  return span
+    .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*/g, ',')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s+\)/g, ')');
 }
 
 function normalizeCssText(value: string | undefined): string {
@@ -625,8 +684,18 @@ const VERBATIM_TEXT_TAGS = new Set(['pre', 'textarea']);
  */
 const EMBEDDED_CODE_TAGS = new Set(['script', 'style']);
 
+/**
+ * Collapse only the ASCII whitespace the HTML spec treats as insignificant
+ * (space, tab, LF, CR, FF). NOT `\s`, which also matches U+00A0 (`&nbsp;`),
+ * U+202F and the U+2000..U+200A family: those are RENDERED characters, so
+ * degrading `10&nbsp;km` into `10 km` is a content change the guard must catch.
+ *
+ * This also fixes the whitespace-only text-node filter below, which uses this
+ * function: a node made only of `&nbsp;` is no longer considered blank, so it is
+ * no longer silently dropped from the comparison.
+ */
 function normalizeHtmlText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+  return text.replace(/[ \t\n\r\f]+/g, ' ').replace(/^[ \t\n\r\f]+|[ \t\n\r\f]+$/g, '');
 }
 
 /**
@@ -680,7 +749,11 @@ function canonicalizeEmbeddedCode(
     // parentTag === 'script'
     const type = scriptType(parentAttrs);
     if (JS_SCRIPT_TYPES.has(type)) {
-      return `js:${JSON.stringify(canonicalizeAst(parseJsAst(body, BABEL_PLUGINS_JSX)))}`;
+      // Include the comment multiset for the same reason as `astEqualJs`: an
+      // embedded script losing an `eslint-disable` or a licence header is a
+      // content loss, and the structural AST alone cannot see it.
+      const parsed = parseJs(body, BABEL_PLUGINS_JSX);
+      return `js:${JSON.stringify(canonicalizeAst(parsed.program))}|c:${JSON.stringify(parsed.comments)}`;
     }
     if (type.includes('json')) {
       return `json:${JSON.stringify(canonicalizeJsonForEmbed(body))}`;
@@ -697,9 +770,17 @@ function canonicalizeEmbeddedCode(
 function htmlShape(
   node: Parse5Node,
   parentTag: string | undefined,
-  parentAttrs: Array<{ name: string; value: string }> | undefined
+  parentAttrs: Array<{ name: string; value: string }> | undefined,
+  // `white-space: pre` is INHERITED by the whole subtree, so verbatim-ness must
+  // be carried down the recursion, not recomputed from the immediate parent.
+  // `<pre><code>...</code></pre>` is the standard code-block markup: with a
+  // parent-only test, the text node's parent is `code`, its indentation and line
+  // breaks were normalized away, and any reflow of a code block passed the guard
+  // unnoticed.
+  inVerbatim = false
 ): HtmlShape {
   const shape: HtmlShape = { node: node.nodeName };
+  const verbatim = inVerbatim || (parentTag !== undefined && VERBATIM_TEXT_TAGS.has(parentTag));
 
   if (node.nodeName === '#text') {
     const raw = node.value ?? '';
@@ -707,7 +788,6 @@ function htmlShape(
       shape.text = canonicalizeEmbeddedCode(parentTag, parentAttrs, raw);
       return shape;
     }
-    const verbatim = parentTag !== undefined && VERBATIM_TEXT_TAGS.has(parentTag);
     shape.text = verbatim ? raw : normalizeHtmlText(raw);
     return shape;
   }
@@ -742,26 +822,30 @@ function htmlShape(
   const ownAttrs = node.attrs;
   const children: HtmlShape[] = [];
 
+  // Verbatim-ness for our own children: inherited from above, or opened by this
+  // very element being a <pre>/<textarea>.
+  const childVerbatim = verbatim || (ownTag !== undefined && VERBATIM_TEXT_TAGS.has(ownTag));
+
   // <template> content lives under `.content`, a document fragment.
   if (node.content && Array.isArray(node.content.childNodes)) {
     for (const child of node.content.childNodes) {
-      children.push(htmlShape(child, ownTag, ownAttrs));
+      children.push(htmlShape(child, ownTag, ownAttrs, childVerbatim));
     }
   }
   if (Array.isArray(node.childNodes)) {
     for (const child of node.childNodes) {
-      // Drop whitespace-only text nodes except inside <pre>/<textarea> (where
-      // whitespace is rendered): a formatter freely inserts/removes them and they
-      // carry no meaning. Inside <script>/<style> an all-whitespace body is empty
-      // embedded code and is likewise insignificant.
+      // Drop whitespace-only text nodes except anywhere inside <pre>/<textarea>
+      // (where whitespace is rendered): a formatter freely inserts/removes them
+      // and they carry no meaning. Inside <script>/<style> an all-whitespace body
+      // is empty embedded code and is likewise insignificant.
       if (
         child.nodeName === '#text' &&
-        !(ownTag !== undefined && VERBATIM_TEXT_TAGS.has(ownTag)) &&
+        !childVerbatim &&
         normalizeHtmlText(child.value ?? '') === ''
       ) {
         continue;
       }
-      children.push(htmlShape(child, ownTag, ownAttrs));
+      children.push(htmlShape(child, ownTag, ownAttrs, childVerbatim));
     }
   }
   if (children.length > 0) {
@@ -811,11 +895,69 @@ export function htmlTreeEqual(input: string, output: string): GuardVerdict {
  * authoritative parser for the JSON family; the native fast path below only
  * SHORT-CIRCUITS the common comment-free case and never changes the verdict.
  */
+/**
+ * Canonical form of a parsed JSON value in which OBJECTS become sorted arrays of
+ * `[key, value]` pairs.
+ *
+ * Why not compare parsed objects directly: `__proto__` is not an ordinary key
+ * for JS objects. `jsonc-parser` assigns members with `obj[key] = value`, so a
+ * `"__proto__"` member is swallowed entirely (it hits the prototype setter and
+ * leaves no own property), while native `JSON.parse` DOES create an own
+ * property. The guard therefore disagreed with itself depending on which parser
+ * ran, i.e. on the document's size, and below the fast-path threshold it
+ * accepted the silent removal of a `"__proto__"` member.
+ *
+ * Representing objects as pair arrays removes prototype semantics from the
+ * comparison altogether: every key, including `__proto__`, is plain data.
+ */
+function canonicalizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJsonValue);
+  }
+  if (value !== null && typeof value === 'object') {
+    const source = value as Record<string, unknown>;
+    return Object.keys(source)
+      .sort()
+      .map((key): [string, unknown] => [key, canonicalizeJsonValue(source[key])]);
+  }
+  return value;
+}
+
+/**
+ * Build the canonical form directly from the jsonc SYNTAX TREE rather than from
+ * an assembled JS object, so that a `"__proto__"` member survives parsing.
+ */
+function jsoncNodeToCanonical(node: JsoncNode): unknown {
+  switch (node.type) {
+    case 'object': {
+      const pairs: Array<[string, unknown]> = [];
+      for (const child of node.children ?? []) {
+        // A property node holds [keyNode, valueNode]; a value may be absent in
+        // malformed input, which the error check upstream has already rejected.
+        const keyNode = child.children?.[0];
+        const valueNode = child.children?.[1];
+        if (keyNode === undefined) {
+          continue;
+        }
+        pairs.push([
+          String(keyNode.value),
+          valueNode === undefined ? null : jsoncNodeToCanonical(valueNode)
+        ]);
+      }
+      return pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    }
+    case 'array':
+      return (node.children ?? []).map(jsoncNodeToCanonical);
+    default:
+      return node.value ?? null;
+  }
+}
+
 function parseJsoncValue(code: string): unknown {
   const errors: ParseError[] = [];
   // allowTrailingComma covers JSONC; comments are stripped by the parser, which
   // is correct: comment movement is whitespace/style, not value structure.
-  const value = parseJsonc(code, errors, {
+  const tree = parseJsoncTree(code, errors, {
     allowTrailingComma: true,
     disallowComments: false
   });
@@ -823,7 +965,10 @@ function parseJsoncValue(code: string): unknown {
     const first = errors[0];
     throw new Error(`JSON parse error: ${printParseErrorCode(first.error)} at offset ${first.offset}`);
   }
-  return value;
+  if (tree === undefined) {
+    throw new Error('JSON parse error: empty document');
+  }
+  return jsoncNodeToCanonical(tree);
 }
 
 // Above this size the token-level lightweight guard path is worth attempting:
@@ -851,7 +996,10 @@ function parseJsonValue(code: string): unknown {
     try {
       // Strict JSON only : native parser rejects comments/trailing commas, in
       // which case we transparently fall through to the lenient path below.
-      return JSON.parse(code);
+      // The result goes through the SAME canonicalisation as the authoritative
+      // path, so both produce an identical shape and the verdict is invariant
+      // by document size (previously, `__proto__` was visible only here).
+      return canonicalizeJsonValue(JSON.parse(code));
     } catch {
       // Not strict JSON (likely JSONC): defer to the authoritative parser.
     }
@@ -866,21 +1014,10 @@ function parseJsonValue(code: string): unknown {
  * invalid JSON so the caller can fall back to a verbatim comparison.
  */
 function canonicalizeJsonForEmbed(code: string): unknown {
-  const sortValue = (value: unknown): unknown => {
-    if (Array.isArray(value)) {
-      return value.map(sortValue);
-    }
-    if (value !== null && typeof value === 'object') {
-      const source = value as Record<string, unknown>;
-      const result: Record<string, unknown> = {};
-      for (const key of Object.keys(source).sort()) {
-        result[key] = sortValue(source[key]);
-      }
-      return result;
-    }
-    return value;
-  };
-  return sortValue(parseJsonValue(code));
+  // `parseJsonValue` already returns the canonical, key-sorted pair-array form
+  // (see `canonicalizeJsonValue`), which is exactly what a stable string
+  // comparison of an embedded JSON body needs.
+  return parseJsonValue(code);
 }
 
 /**
