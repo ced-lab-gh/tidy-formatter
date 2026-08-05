@@ -1,4 +1,4 @@
-# Release & dual-publish for Tidy Formatter — JS/CSS/HTML (ROADMAP Axe 5, T4/T5/T7).
+# Release & dual-publish for Tidy Formatter : JS/CSS/HTML (ROADMAP Axe 5, T4/T5/T7).
 #
 # Triggers:
 #   * push of a tag matching v* (e.g. v0.2.0, v1.0.0, v0.2.0-rc.1) -> real release.
@@ -28,7 +28,7 @@
 #
 # Both publish steps SKIP CLEANLY when their secret is absent: pushing a tag with no
 # secrets configured still runs the gates, packages the VSIX, and uploads it as an
-# artifact — it just publishes nothing. This lets you cut a tag for a dry/staging run,
+# artifact : it just publishes nothing. This lets you cut a tag for a dry/staging run,
 # or before the publisher accounts exist, without failing the workflow.
 #
 # See PUBLISHING.md for the full, step-by-step publishing guide (account creation,
@@ -71,7 +71,7 @@ jobs:
           node-version: '20'
           cache: npm
 
-      # Gate 0 — version parity. On a tag push, the tag (minus its leading "v")
+      # Gate 0 : version parity. On a tag push, the tag (minus its leading "v")
       # MUST equal package.json "version", so the two registries can never receive
       # a build whose manifest version disagrees with the tag (ROADMAP 5.T4). A
       # SemVer pre-release suffix (-rc.N / -beta.N) is allowed and carried through
@@ -83,29 +83,37 @@ jobs:
           PKG="$(node -p "require('./package.json').version")"
           echo "tag=$TAG  package.json=$PKG"
           if [ "$TAG" != "$PKG" ]; then
-            echo "::error::Tag '$GITHUB_REF_NAME' does not match package.json version '$PKG'. Aborting — nothing published."
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match package.json version '$PKG'. Aborting - nothing published."
             exit 1
           fi
 
-      # Gate 0.5 — anti-empty-bump. A version bump MUST ship a documented change:
+      # Gate 0.5 : anti-empty-bump. A version bump MUST ship a documented change:
       # CHANGELOG.md has to carry a "## [<version>]" heading matching package.json.
       # Pure-Node and zero-dependency, so it runs before `npm ci` and fails fast.
       - name: Changelog entry present (anti-empty-bump)
         run: node scripts/check-changelog.mjs
 
-      # Gate 1 — reproducible install from package-lock.json.
+      # Gate 1 : reproducible install from package-lock.json.
       - name: Install (npm ci)
         run: npm ci
 
-      # Gate 2 — production bundle.
+      # Gate 2 : static analysis. A tag can be cut from a branch that never went
+      # through ci.yml, so these run here too rather than being assumed.
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # Gate 3 : production bundle.
       - name: Compile (production bundle)
         run: npm run compile
 
-      # Gate 3 — unit corpus (pure modules, no VS Code host).
+      # Gate 4 : unit corpus (pure modules, no VS Code host).
       - name: Unit tests
         run: npm test
 
-      # Gate 4 — headless integration tests inside a real VS Code host.
+      # Gate 5 : headless integration tests inside a real VS Code host.
       # BEST-EFFORT on hosted runners: the Electron-under-xvfb host is fragile and
       # can hang, so this NEVER blocks a publish (continue-on-error). The lifecycle
       # tests are run authoritatively in local pre-release validation, and the
@@ -119,16 +127,70 @@ jobs:
           sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2 || true
           xvfb-run -a --server-args="-screen 0 1280x1024x24" npm run test:integration
 
-      # Gate 5 — package the extension into a single, reusable .vsix. Both publish
+      # Gate 6 : package the extension into a single, reusable .vsix. Both publish
       # steps below point at this exact file so the two registries get an identical
       # build.
       - name: Package (.vsix)
         run: npx @vscode/vsce package --no-dependencies -o tidy-formatter.vsix
 
+      # ── Idempotence probes ──
+      # Ask each registry whether it ALREADY serves this version. Without this,
+      # re-running the workflow (or cutting a tag after a local publish) fails
+      # with "version already exists", and worse: on a PARTIAL publish
+      # (Marketplace succeeded, Open VSX failed) the re-run dies on the first
+      # step and NEVER reaches the one that actually needs to run. Probing makes
+      # each publish independently skippable, so a re-run always converges.
+      #
+      # Fail-safe direction: if a probe cannot reach the registry, it reports
+      # "not published" so the publish is ATTEMPTED. A redundant attempt fails
+      # loudly and harmlessly; a wrongly skipped publish would silently ship
+      # nothing.
+      - name: Probe registries for this version
+        id: probe
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # VS Marketplace: vsce show --json lists every published version.
+          MP="false"
+          if MP_JSON="$(npx @vscode/vsce show ced-lab.tidy-formatter --json 2>/dev/null)"; then
+            if printf '%s' "$MP_JSON" | node -e "
+              let raw='';
+              process.stdin.on('data', (c) => { raw += c; });
+              process.stdin.on('end', () => {
+                try {
+                  const versions = JSON.parse(raw).versions || [];
+                  process.exit(versions.some((v) => v.version === process.argv[1]) ? 0 : 1);
+                } catch {
+                  process.exit(1);
+                }
+              });
+            " "$VERSION"; then
+              MP="true"
+            fi
+          else
+            echo "::warning::Could not query the VS Marketplace. Assuming the version is NOT published and attempting the publish."
+          fi
+          echo "marketplace_published=$MP" >> "$GITHUB_OUTPUT"
+
+          # Open VSX: the per-version endpoint answers 200 only if it exists.
+          OV="false"
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            "https://open-vsx.org/api/ced-lab/tidy-formatter/$VERSION" || echo "000")"
+          if [ "$CODE" = "200" ]; then
+            OV="true"
+          elif [ "$CODE" = "000" ]; then
+            echo "::warning::Could not query Open VSX. Assuming the version is NOT published and attempting the publish."
+          fi
+          echo "ovsx_published=$OV" >> "$GITHUB_OUTPUT"
+
+          echo "version=$VERSION  marketplace_published=$MP  ovsx_published=$OV"
+
       # ── Conditional publish steps ──
       # Each step probes its secret first and exports a boolean flag to
-      # $GITHUB_OUTPUT. The publish step then guards on that flag, so a missing
-      # secret is a clean skip (not a failure).
+      # $GITHUB_OUTPUT. The publish step then guards on that flag AND on the
+      # registry probe above, so a missing secret and an already-published
+      # version are both clean skips (not failures).
 
       # VS Marketplace --------------------------------------------------------
       - name: Detect VSCE_PAT
@@ -140,11 +202,18 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::VSCE_PAT secret is not set — skipping VS Marketplace publish."
+            echo "::notice::VSCE_PAT secret is not set - skipping VS Marketplace publish."
           fi
 
+      - name: VS Marketplace already has this version (skipping)
+        if: github.ref_type == 'tag' && steps.probe.outputs.marketplace_published == 'true'
+        run: echo "::notice::VS Marketplace already serves ${{ steps.probe.outputs.version }}. Nothing to publish."
+
       - name: Publish to VS Marketplace
-        if: github.ref_type == 'tag' && steps.vsce_secret.outputs.present == 'true'
+        if: >-
+          github.ref_type == 'tag'
+          && steps.vsce_secret.outputs.present == 'true'
+          && steps.probe.outputs.marketplace_published != 'true'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx @vscode/vsce publish -p "$VSCE_PAT" --packagePath tidy-formatter.vsix
@@ -159,17 +228,26 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::OVSX_PAT secret is not set — skipping Open VSX publish."
+            echo "::notice::OVSX_PAT secret is not set - skipping Open VSX publish."
           fi
 
+      - name: Open VSX already has this version (skipping)
+        if: github.ref_type == 'tag' && steps.probe.outputs.ovsx_published == 'true'
+        run: echo "::notice::Open VSX already serves ${{ steps.probe.outputs.version }}. Nothing to publish."
+
       - name: Publish to Open VSX
-        if: github.ref_type == 'tag' && steps.ovsx_secret.outputs.present == 'true'
+        if: >-
+          github.ref_type == 'tag'
+          && steps.ovsx_secret.outputs.present == 'true'
+          && steps.probe.outputs.ovsx_published != 'true'
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: npx ovsx publish tidy-formatter.vsix -p "$OVSX_PAT"
 
       # The .vsix is uploaded in ALL cases (publish or not), so a secret-less tag
       # still produces a downloadable, installable artifact.
+      # `overwrite: true` is required for "Re-run failed jobs" to work: without
+      # it the second attempt aborts on an existing artifact name.
       - name: Upload VSIX artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -178,3 +256,4 @@ jobs:
           path: tidy-formatter.vsix
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
