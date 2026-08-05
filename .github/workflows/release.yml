@@ -209,7 +209,15 @@ jobs:
         if: github.ref_type == 'tag' && steps.probe.outputs.marketplace_published == 'true'
         run: echo "::notice::VS Marketplace already serves ${{ steps.probe.outputs.version }}. Nothing to publish."
 
+      # continue-on-error is DELIBERATE and load-bearing: the two registries must
+      # be independent. Without it, a Marketplace failure skips every later step,
+      # so Open VSX never even gets attempted (observed on the v0.2.2 run, where
+      # an expired VSCE_PAT blocked a perfectly publishable Open VSX release).
+      # The job is still failed explicitly by the final gate below, so a failure
+      # is never silently swallowed.
       - name: Publish to VS Marketplace
+        id: publish_mp
+        continue-on-error: true
         if: >-
           github.ref_type == 'tag'
           && steps.vsce_secret.outputs.present == 'true'
@@ -219,8 +227,11 @@ jobs:
         run: npx @vscode/vsce publish -p "$VSCE_PAT" --packagePath tidy-formatter.vsix
 
       # Open VSX --------------------------------------------------------------
+      # Every Open VSX step carries always() so a Marketplace failure upstream
+      # cannot skip this registry: the two publishes are independent by design.
       - name: Detect OVSX_PAT
         id: ovsx_secret
+        if: always()
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
@@ -232,17 +243,44 @@ jobs:
           fi
 
       - name: Open VSX already has this version (skipping)
-        if: github.ref_type == 'tag' && steps.probe.outputs.ovsx_published == 'true'
+        if: always() && github.ref_type == 'tag' && steps.probe.outputs.ovsx_published == 'true'
         run: echo "::notice::Open VSX already serves ${{ steps.probe.outputs.version }}. Nothing to publish."
 
       - name: Publish to Open VSX
+        id: publish_ovsx
+        continue-on-error: true
         if: >-
-          github.ref_type == 'tag'
+          always()
+          && github.ref_type == 'tag'
           && steps.ovsx_secret.outputs.present == 'true'
           && steps.probe.outputs.ovsx_published != 'true'
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: npx ovsx publish tidy-formatter.vsix -p "$OVSX_PAT"
+
+      # Final gate: both registries have been given their chance; now fail loudly
+      # if either attempt failed. This keeps continue-on-error above from turning
+      # a failed publish into a green run.
+      - name: Publish result gate
+        if: always() && github.ref_type == 'tag'
+        run: |
+          MP="${{ steps.publish_mp.outcome }}"
+          OV="${{ steps.publish_ovsx.outcome }}"
+          echo "marketplace=$MP  open-vsx=$OV  (success | failure | skipped)"
+          FAILED=0
+          if [ "$MP" = "failure" ]; then
+            echo "::error::VS Marketplace publish FAILED. A TF400813 error here means VSCE_PAT is expired or revoked: regenerate it in Azure DevOps (scope Marketplace > Manage) and update the repository secret."
+            FAILED=1
+          fi
+          if [ "$OV" = "failure" ]; then
+            echo "::error::Open VSX publish FAILED. Check OVSX_PAT for the ced-lab namespace."
+            FAILED=1
+          fi
+          if [ "$FAILED" = "1" ]; then
+            echo "::notice::Re-running this workflow is safe: the registry probe skips whichever registry already serves this version."
+            exit 1
+          fi
+          echo "Publish gate OK."
 
       # The .vsix is uploaded in ALL cases (publish or not), so a secret-less tag
       # still produces a downloadable, installable artifact.
