@@ -127,6 +127,27 @@ describe('manifest : walkthrough (1.T3)', () => {
     );
   });
 
+  it('formatOnSave step wording reflects the consent-first opt-in (ADD-04)', () => {
+    const wt = walkthroughs.find((w) => w.id === 'tidy.gettingStarted')!;
+    const step = wt.steps.find(
+      (s) => s.id === 'tidy.gettingStarted.formatOnSave'
+    );
+    assert.ok(step, 'the formatOnSave walkthrough step must exist');
+    const description = step!.description ?? '';
+    assert.ok(
+      description.includes('confirm'),
+      'the step must state that format on save is written only after confirmation'
+    );
+    assert.ok(
+      description.includes('never hooks the save event'),
+      'the structural no-save-hook promise must survive verbatim'
+    );
+    assert.ok(
+      !description.includes('never enables Format On Save'),
+      'the pre-ADD-04 absolute claim must not survive (the guided opt-in CAN write it, with consent)'
+    );
+  });
+
   it('also completes a step on the migration command', () => {
     const wt = walkthroughs.find((w) => w.id === 'tidy.gettingStarted')!;
     const events = wt.steps.flatMap((s) => s.completionEvents ?? []);

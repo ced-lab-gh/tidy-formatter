@@ -6,6 +6,7 @@ import {
   clearLastFormat,
   formatChannelLine,
   sanitizeDetail,
+  setLastFormatListener,
   type LastFormatRecord
 } from '../../../src/diagnostics/lastFormat';
 
@@ -97,5 +98,46 @@ describe('diagnostics/lastFormat : formatChannelLine', () => {
     );
     assert.ok(line.includes('disabled'), line);
     assert.ok(!line.includes('undefined'), line);
+  });
+});
+
+// ADD-05: the status bar feeds its transient result from this single observer
+// slot, so recordLastFormat (which only ever runs inside a provider call) stays
+// the ONLY trigger surface. The observer must never be able to break a format.
+describe('diagnostics/lastFormat : listener (status bar feed, ADD-05)', () => {
+  afterEach(() => {
+    setLastFormatListener(undefined);
+    clearLastFormat();
+  });
+
+  it('notifies the listener with the SANITIZED record', () => {
+    let seen: LastFormatRecord | undefined;
+    setLastFormatListener((r) => {
+      seen = r;
+    });
+    recordLastFormat(
+      rec({ status: 'engine-error', detail: 'boom\nsecret-source' })
+    );
+    assert.equal(seen?.detail, 'boom');
+    assert.ok(!seen?.detail?.includes('secret-source'));
+  });
+
+  it('a throwing listener never breaks recordLastFormat and the record is stored', () => {
+    setLastFormatListener(() => {
+      throw new Error('observer bug');
+    });
+    assert.doesNotThrow(() => recordLastFormat(rec({ status: 'applied' })));
+    assert.equal(getLastFormat()?.status, 'applied');
+  });
+
+  it('clearing the listener stops notifications', () => {
+    let calls = 0;
+    setLastFormatListener(() => {
+      calls += 1;
+    });
+    recordLastFormat(rec());
+    setLastFormatListener(undefined);
+    recordLastFormat(rec());
+    assert.equal(calls, 1);
   });
 });

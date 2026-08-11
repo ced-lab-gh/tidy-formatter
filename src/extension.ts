@@ -46,6 +46,11 @@ import {
   EXPLAIN_LAST_FORMAT_COMMAND_ID,
   explainLastFormat
 } from './commands/explainLastFormat';
+import {
+  STATUS_BAR_MENU_COMMAND_ID,
+  showStatusBarMenu
+} from './commands/statusBarMenu';
+import { createTidyStatusBar } from './diagnostics/statusBarHost';
 import { getTidyOutputChannel } from './diagnostics/outputChannel';
 import { detectCompetingFormatters } from './deference/detect';
 import {
@@ -139,6 +144,20 @@ export function activate(context: vscode.ExtensionContext): void {
       explainLastFormat
     )
   );
+
+  // Status bar (ADD-05, v0.3.0): a single, purely OBSERVATIONAL StatusBarItem.
+  // Passive state of the active file + a short transient result after each
+  // attempt. Read-only by construction: its only listeners repaint the item,
+  // it never formats, never edits, never writes a setting, and its click opens
+  // a QuickPick over three existing commands. Everything (item, listeners,
+  // timer, observer slot) is owned by the single returned Disposable.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      STATUS_BAR_MENU_COMMAND_ID,
+      showStatusBarMenu
+    )
+  );
+  context.subscriptions.push(createTidyStatusBar());
 
   // One-shot, deduplicated migration prompt (1.T4). Fire-and-forget so it never
   // blocks activation; it writes nothing before the user confirms inside the

@@ -60,6 +60,25 @@ export function sanitizeDetail(detail: string): string {
 let lastRecord: LastFormatRecord | undefined;
 
 /**
+ * Optional observer notified with the SANITIZED record after each write. This
+ * is how the status bar (ADD-05) receives its transient feedback WITHOUT the
+ * provider knowing about it: recordLastFormat only ever runs inside a provider
+ * call, so the observer inherits exactly that trigger surface and no other.
+ * Single slot on purpose (one consumer today); if a second consumer appears
+ * (e.g. the v0.4.0 format history, ADD-14), upgrade to a small listener array.
+ */
+export type LastFormatListener = (record: LastFormatRecord) => void;
+
+let listener: LastFormatListener | undefined;
+
+/** Install (or clear, with undefined) the single record observer. */
+export function setLastFormatListener(
+  next: LastFormatListener | undefined
+): void {
+  listener = next;
+}
+
+/**
  * Record the most recent format attempt (overwrites any previous record). Any
  * `detail` is sanitized here too, so no caller can ever persist multi-line content.
  */
@@ -68,6 +87,14 @@ export function recordLastFormat(record: LastFormatRecord): void {
     record.detail !== undefined
       ? { ...record, detail: sanitizeDetail(record.detail) }
       : record;
+  if (listener !== undefined) {
+    try {
+      listener(lastRecord);
+    } catch {
+      // An observer failure must NEVER break a format attempt: the record is
+      // already stored, the observer just misses one repaint.
+    }
+  }
 }
 
 /** The most recent format attempt, or undefined if none has run this session. */

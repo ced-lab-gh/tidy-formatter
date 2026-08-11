@@ -8,12 +8,19 @@
 //      an in-source FILE-ignore marker is present -> [] (Tidy does nothing here);
 //   4. read the resolved options via vscodeConfig (precedence layers);
 //   5. dispatch the format off the UI thread : for the js-beautify path, in-source
-//      ignore REGIONS are protected with mask/restore (the protected bytes are put
-//      back VERBATIM); for the Prettier path, Prettier honours `// prettier-ignore`
-//      natively, so no masking is needed;
+//      ignore REGIONS are protected with mask/restore, and for HTML, TEMPLATE
+//      ISLANDS ({{ }}, {% %}, <% %>, head front matter '---') are masked too so
+//      the engine can never reflow inside them (CFG-04); every protected byte is
+//      put back VERBATIM, with a checked restore (a dropped or duplicated
+//      placeholder aborts with zero edits); for the Prettier path, Prettier
+//      honours `// prettier-ignore` natively, so no region masking is needed;
 //   6. run the safety Guard (semantic equivalence modulo whitespace) on the
-//      ORIGINAL input vs the (restored) output : so a region splice can never
-//      slip a non-equivalent or non-parsable result through;
+//      ORIGINAL input vs the (restored) output : so neither a region splice nor
+//      an island restore can ever slip a non-equivalent result through;
+//   6b. for css/scss/less ONLY, a guard REJECTION triggers one independent
+//      second attempt through Prettier's postcss parser, whose output is put
+//      through the same restore and the same fresh guard check (ADD-01). Any
+//      failure of that second attempt keeps the original rejection verbatim;
 //   7. ONLY if equivalent, return a single TextEdit replacing the formatted span;
 //      otherwise return [] (file stays intact) + a non-blocking warning and a
 //      detailed entry in the Tidy output channel.
@@ -24,11 +31,16 @@
 import * as vscode from 'vscode';
 import type { FormatOutcome, FormatRequest, LangId, ResolvedOptions } from '../types';
 import { SUPPORTED_LANG_IDS } from '../types';
-import { dispatchFormat, pickEngine } from '../engine/dispatcher';
+import {
+  dispatchFormat,
+  pickEngine,
+  dispatchCssFallback,
+  CSS_FALLBACK_LANGS
+} from '../engine/dispatcher';
 import { guard } from '../safety/guard';
 import { readResolvedOptions } from '../config/vscodeConfig';
 import { scanMarkers } from '../ignore/markers';
-import { applyMask, restoreMask } from '../ignore/mask';
+import { buildMaskPlan, type EngineMask } from '../engine/maskPlan';
 import { resolveDocumentIgnore } from '../ignore/ignoreGate';
 import { getTidyOutputChannel } from '../diagnostics/outputChannel';
 import {
@@ -52,26 +64,6 @@ import { REPORT_ISSUE_COMMAND_ID } from '../commands/reportIssue';
 export const SUPPORTED_LANGUAGES: readonly LangId[] = SUPPORTED_LANG_IDS;
 
 const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set(SUPPORTED_LANGUAGES);
-
-/**
- * Languages whose engine does NOT natively honour in-source ignore directives, so
- * Tidy protects `tidy-ignore-start`/`-end` regions itself via mask/restore. These
- * are the js-beautify languages. The Prettier path (typescript / typescriptreact
- * / javascriptreact, and plain javascript that gets re-routed to Prettier for JSX)
- * honours `// prettier-ignore` natively at the NODE level, so we never mask there
- * : masking would be redundant and Prettier's own directive support is richer.
- * Region masking for the Prettier path is a documented v1 limitation (no
- * corruption either way: the guard validates whatever the engine produced).
- */
-const REGION_MASKING_LANGUAGES: ReadonlySet<LangId> = new Set<LangId>([
-  'css',
-  'scss',
-  'less',
-  'html',
-  'json',
-  'jsonc',
-  'javascript'
-]);
 
 /**
  * Exact, user-facing message shown when a format is aborted (guard rejection,
@@ -197,20 +189,12 @@ function statusFromReason(reason: string): FormatStatus {
   if (reason.startsWith('engine error')) return 'engine-error';
   if (reason.startsWith('guard error')) return 'engine-error';
   if (reason.startsWith('ignore-region restore failed')) return 'restore-failed';
+  // Template-island collision (pre-engine) and island restore failure (ADD-02):
+  // both are "a protected span could not be guaranteed verbatim", the exact
+  // meaning of the existing 'restore-failed' status. No new FormatStatus, so the
+  // Explain command's exhaustive switch keeps compiling.
+  if (reason.startsWith('template-island')) return 'restore-failed';
   return 'guard-rejected';
-}
-
-/**
- * How an in-source region mask should be applied around the engine call.
- *  - `engineInput`  : the (possibly masked) text actually sent to the engine;
- *  - `restore`      : maps the engine output back to the verbatim-restored text,
- *                     or undefined when the restore is unsafe (placeholder
- *                     missing/duplicated) : in which case we abort (file intact).
- * When absent, the engine input is the original input and no restore runs.
- */
-interface RegionMask {
-  readonly engineInput: string;
-  readonly restore: (engineOutput: string) => string | undefined;
 }
 
 /**
@@ -233,7 +217,7 @@ async function runFormat(
   options: ResolvedOptions,
   range: { startOffset: number; endOffset: number } | undefined,
   token: vscode.CancellationToken,
-  mask?: RegionMask
+  mask?: EngineMask
 ): Promise<FormatOutcome> {
   const engineId = pickEngine(languageId).id;
 
@@ -264,20 +248,21 @@ async function runFormat(
     return { applied: false, aborted: true, reason: 'cancelled', engineId };
   }
 
-  // Restore protected regions verbatim. A failed restore (placeholder dropped or
-  // duplicated by the engine) is fail-safe: abort so the file is left intact.
+  // Restore protected spans verbatim (template islands first, then ignore
+  // regions). A failed restore (placeholder dropped or duplicated by the engine)
+  // is fail-safe: abort so the file is left intact.
   let output = rawOutput;
   if (mask) {
     const restored = mask.restore(rawOutput);
-    if (restored === undefined) {
+    if (!restored.ok) {
       return {
         applied: false,
         aborted: true,
-        reason: 'ignore-region restore failed (placeholder altered by engine)',
+        reason: restored.reason,
         engineId
       };
     }
-    output = restored;
+    output = restored.text;
   }
 
   // No textual change: nothing to apply, but this is a success (not an abort).
@@ -301,10 +286,26 @@ async function runFormat(
   }
 
   if (!verdict.equivalent) {
+    const primaryReason =
+      verdict.reason ?? 'output not semantically equivalent to input';
+    // ADD-01: ONE independent second chance for the CSS family, still fully
+    // under the guard. Any fallback failure keeps the primary rejection
+    // untouched, so today's behaviour is the worst case, never worse.
+    const fallback = await tryCssFallback(
+      languageId,
+      input,
+      options,
+      range,
+      token,
+      mask
+    );
+    if (fallback) {
+      return fallback;
+    }
     return {
       applied: false,
       aborted: true,
-      reason: verdict.reason ?? 'output not semantically equivalent to input',
+      reason: primaryReason,
       engineId
     };
   }
@@ -313,29 +314,98 @@ async function runFormat(
 }
 
 /**
- * Build a RegionMask for the full-document js-beautify path from the in-source
- * ignore markers, or undefined when there is nothing to protect (no regions) or
- * masking is unsafe (placeholder collision). When undefined, the caller formats
- * the document normally (no masking). PURE orchestration over the mask module.
+ * Second-chance format for the CSS family (ADD-01): called ONLY after the guard
+ * rejected the js-beautify candidate. Re-runs the SAME (possibly masked) input
+ * through the Prettier postcss engine, restores protected spans verbatim, and
+ * re-runs the guard on the result. The guard therefore stays the single final
+ * judge on BOTH candidates.
+ *
+ * Return contract:
+ *  - applied outcome (engineId 'prettier', detail 'fallback-postcss') when the
+ *    guard accepted a CHANGED second candidate;
+ *  - no-op success outcome when the second candidate is byte-identical to the
+ *    input (the file already IS the fallback engine's canonical form; this keeps
+ *    the pipeline idempotent: formatting a fallback-formatted file again is a
+ *    clean 'already-tidy', not a warning toast);
+ *  - cancelled outcome when the token fired around the second pass;
+ *  - undefined for EVERY other failure (engine error, restore failure, guard
+ *    rejection, guard exception): the caller keeps the primary guard-rejected
+ *    outcome with its original reason.
  */
-function buildRegionMask(
+async function tryCssFallback(
   languageId: LangId,
-  input: string
-): RegionMask | undefined {
-  if (!REGION_MASKING_LANGUAGES.has(languageId)) {
-    return undefined; // Prettier path honours `// prettier-ignore` natively.
-  }
-  const scan = scanMarkers(input, languageId);
-  if (scan.protectedRanges.length === 0) {
+  input: string,
+  options: ResolvedOptions,
+  range: { startOffset: number; endOffset: number } | undefined,
+  token: vscode.CancellationToken,
+  mask?: EngineMask
+): Promise<FormatOutcome | undefined> {
+  if (!CSS_FALLBACK_LANGS.has(languageId)) {
     return undefined;
   }
-  const masked = applyMask(input, scan.protectedRanges);
-  if (masked === undefined) {
-    return undefined; // collision / malformed ranges -> format normally.
+  if (token.isCancellationRequested) {
+    return {
+      applied: false,
+      aborted: true,
+      reason: 'cancelled',
+      engineId: 'prettier'
+    };
   }
+
+  let rawOutput: string;
+  try {
+    rawOutput = await dispatchCssFallback({
+      languageId,
+      code: mask ? mask.engineInput : input,
+      options,
+      range
+    });
+  } catch {
+    return undefined;
+  }
+
+  if (token.isCancellationRequested) {
+    return {
+      applied: false,
+      aborted: true,
+      reason: 'cancelled',
+      engineId: 'prettier'
+    };
+  }
+
+  let output = rawOutput;
+  if (mask) {
+    const restored = mask.restore(rawOutput);
+    if (!restored.ok) {
+      return undefined;
+    }
+    output = restored.text;
+  }
+
+  if (output === input) {
+    return {
+      applied: false,
+      output,
+      engineId: 'prettier',
+      detail: 'fallback-postcss'
+    };
+  }
+
+  let verdict;
+  try {
+    verdict = guard.check(languageId, input, output);
+  } catch {
+    return undefined;
+  }
+  if (!verdict.equivalent) {
+    return undefined;
+  }
+
   return {
-    engineInput: masked.masked,
-    restore: (engineOutput) => restoreMask(engineOutput, masked.restorations)
+    applied: true,
+    output,
+    engineId: 'prettier',
+    detail: 'fallback-postcss'
   };
 }
 
@@ -354,7 +424,8 @@ function outcomeToEdits(
 ): vscode.TextEdit[] {
   if (outcome.applied && typeof outcome.output === 'string') {
     recordOutcome(document, languageId, scope, 'applied', {
-      engineId: outcome.engineId
+      engineId: outcome.engineId,
+      detail: outcome.detail
     });
     return [buildReplaceEdit(document, startOffset, endOffset, outcome.output)];
   }
@@ -394,7 +465,8 @@ function outcomeToEdits(
 
   // No-op: the engine produced output identical to the input.
   recordOutcome(document, languageId, scope, 'already-tidy', {
-    engineId: outcome.engineId
+    engineId: outcome.engineId,
+    detail: outcome.detail
   });
   return [];
 }
@@ -501,11 +573,24 @@ async function provideEdits(
     ? { startOffset: 0, endOffset: input.length }
     : undefined;
 
-  // Protect in-source ignore REGIONS for the full-document js-beautify path only.
-  // Range formatting is a user-selected span where region semantics are ambiguous,
-  // so we keep it simple (no masking) : the guard still protects against any
-  // corruption regardless.
-  const mask = range ? undefined : buildRegionMask(languageId, input);
+  // Build the protect-and-restore plan:
+  //   - in-source ignore REGIONS: full-document js-beautify path only (range
+  //     formatting keeps its pre-existing no-region-masking behaviour: region
+  //     semantics are ambiguous inside a user selection);
+  //   - HTML TEMPLATE ISLANDS ({{ }}, {% %}, <% %>, head front matter): both
+  //     scopes, because an engine reflow INSIDE an island is whitespace-only in
+  //     a text node and therefore invisible to the guard (CFG-04).
+  // A placeholder collision means no clean restore can be guaranteed, so the
+  // only safe move is to decline formatting entirely (zero edits, file intact).
+  const plan = buildMaskPlan(languageId, input, range ? 'selection' : 'document');
+  if (plan.abortReason !== undefined) {
+    return outcomeToEdits(document, languageId, scope, startOffset, endOffset, {
+      applied: false,
+      aborted: true,
+      reason: plan.abortReason,
+      engineId: pickEngine(languageId).id
+    });
+  }
 
   const outcome = await runFormat(
     languageId,
@@ -513,7 +598,7 @@ async function provideEdits(
     options,
     requestRange,
     token,
-    mask
+    plan.mask
   );
 
   if (token.isCancellationRequested) {

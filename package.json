@@ -148,7 +148,7 @@
           {
             "id": "tidy.gettingStarted.formatOnSave",
             "title": "Format on save: your choice",
-            "description": "Tidy never enables Format On Save and never hooks save. Turn on $(gear) editor.formatOnSave yourself if you want it.",
+            "description": "Tidy never hooks the save event. Want format on save? The opt-in command can write $(gear) editor.formatOnSave for the exact languages you confirm, with one-click revert, or you set it yourself.",
             "media": {
               "markdown": "media/walkthrough/formatonsave.md"
             },
@@ -605,6 +605,13 @@
             "order": 4,
             "description": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification.",
             "markdownDescription": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification.\n\nDocs: [Deference behavior](https://github.com/ced-lab-gh/tidy-formatter#deference-behavior-coexisting-with-other-formatters)."
+          },
+          "tidy.statusBar.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 5,
+            "description": "Show the Tidy status bar item: the passive state of the active file plus a short transient result after each format attempt. Purely observational; disabling it changes no formatting behavior.",
+            "markdownDescription": "Show the Tidy status bar item: the passive state of the active file plus a short transient result after each format attempt. Purely observational; disabling it changes no formatting behavior.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       }

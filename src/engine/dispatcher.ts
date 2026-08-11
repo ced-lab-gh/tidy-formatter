@@ -55,6 +55,33 @@ export function pickEngine(lang: LangId): Engine {
 }
 
 /**
+ * Languages eligible for the guard-rejection fallback (ADD-01): when the
+ * js-beautify candidate for one of these is REJECTED by the safety guard, the
+ * provider makes ONE independent second attempt through Prettier's postcss
+ * parsers, and the guard re-checks that second candidate. The PRIMARY routing
+ * matrix (pickEngine/resolveEngine) is untouched.
+ */
+export const CSS_FALLBACK_LANGS: ReadonlySet<LangId> = new Set<LangId>([
+  'css',
+  'scss',
+  'less'
+]);
+
+/**
+ * Second-chance dispatch for the CSS family. NEVER used as primary routing.
+ * Throws on any non-CSS language so a future refactor cannot silently widen the
+ * fallback surface.
+ */
+export async function dispatchCssFallback(req: FormatRequest): Promise<string> {
+  if (!CSS_FALLBACK_LANGS.has(req.languageId)) {
+    throw new Error(
+      `css fallback does not support languageId '${req.languageId}'`
+    );
+  }
+  return prettierEngine.format(req);
+}
+
+/**
  * Detect whether a 'javascript' document actually contains JSX that js-beautify
  * would corrupt, in which case the prettier engine must be used.
  *

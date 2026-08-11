@@ -128,7 +128,10 @@ const EXPECTED_SECTIONS: readonly { title: string; keys: readonly string[] }[] =
       'tidy.editorconfig',
       'tidy.soukformatrc',
       'tidy.respectSoukformatignore',
-      'tidy.deferToOtherFormatters'
+      'tidy.deferToOtherFormatters',
+      // ADD-05: the status bar toggle. Purely observational UI, no engine
+      // option, so it is not part of OPTION_CATALOG.
+      'tidy.statusBar.enable'
     ]
   }
 ];

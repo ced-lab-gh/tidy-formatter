@@ -1,8 +1,8 @@
-# Format on save : you turn it on, never Tidy
+# Format on save : always your call
 
-The #1 complaint about the abandoned *JS-CSS-HTML Formatter* was that it formatted on save **even when you had turned that off**. Tidy makes that impossible by design: **Tidy never enables `editor.formatOnSave`, and never hooks the save event at all.**
+The #1 complaint about the abandoned *JS-CSS-HTML Formatter* was that it formatted on save **even when you had turned that off**. Tidy makes that impossible by design: **Tidy never hooks the save event at all, and never enables `editor.formatOnSave` behind your back.** The *Use Tidy as my Formatter* command can enable it for you, per language, but only after you confirm a recap of the exact keys it will write, and the success message offers a one-click **Revert**.
 
-The entire save lifecycle : *when* a save happens, *whether* it formats, which formatter runs, where the cursor lands : is owned **100% by VS Code core**, not by Tidy. There is deliberately no Tidy-specific "format on save" toggle. If you want formatting on save, you turn it on yourself, with the stock VS Code setting:
+The entire save lifecycle : *when* a save happens, *whether* it formats, which formatter runs, where the cursor lands : is owned **100% by VS Code core**, not by Tidy. There is deliberately no Tidy-specific "format on save" toggle: the opt-in flow writes the stock VS Code setting, nothing custom. You can also turn it on yourself at any time:
 
 ```jsonc
 {

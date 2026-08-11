@@ -71,4 +71,10 @@ export interface FormatOutcome {
   aborted?: boolean;
   reason?: string;
   engineId?: string;
+  /**
+   * Optional machine-readable qualifier for a SUCCESSFUL outcome, recorded into
+   * LastFormatRecord.detail (e.g. 'fallback-postcss' when the CSS fallback
+   * engine produced the result). Never contains document content.
+   */
+  detail?: string;
 }

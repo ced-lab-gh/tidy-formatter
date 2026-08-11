@@ -19,7 +19,13 @@ const SCANNED_SOURCES: readonly string[] = [
   'src/commands/showConfig.ts',
   'src/commands/useAsFormatter.ts',
   'src/commands/explainLastFormat.ts',
-  'src/providers/formattingProvider.ts'
+  'src/providers/formattingProvider.ts',
+  // v0.3.0 additions: every string they ship is user-facing from day one, so
+  // they join the scan rather than waiting for a future audit.
+  'src/commands/formatOnSaveOptIn.ts',
+  'src/commands/statusBarMenu.ts',
+  'src/diagnostics/statusBar.ts',
+  'src/diagnostics/statusBarHost.ts'
 ];
 
 /**

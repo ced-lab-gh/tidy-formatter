@@ -14,14 +14,23 @@ import { format as prettierFormat } from 'prettier/standalone';
 import * as prettierBabel from 'prettier/plugins/babel';
 import * as prettierEstree from 'prettier/plugins/estree';
 import * as prettierTypescript from 'prettier/plugins/typescript';
+// CSS family fallback parsers (ADD-01). Same standalone/static-import pattern as
+// the babel/typescript plugins above so esbuild bundles them cleanly.
+import * as prettierPostcss from 'prettier/plugins/postcss';
 import type { Engine, FormatRequest, LangId, ResolvedOptions } from '../types';
+import { postProcess } from './postProcess';
 
 const SUPPORTED: ReadonlySet<LangId> = new Set<LangId>([
   'typescript',
   'typescriptreact',
   'javascriptreact',
   // js with JSX is dispatched here as well (see dispatcher JSX re-routing)
-  'javascript'
+  'javascript',
+  // CSS family: reachable ONLY through the guard-rejection fallback
+  // (dispatchCssFallback); primary routing still goes to js-beautify.
+  'css',
+  'scss',
+  'less'
 ]);
 
 // Prettier's built-in parser name per languageId.
@@ -33,6 +42,17 @@ const PARSER_BY_LANG: Readonly<Record<string, 'typescript' | 'babel'>> = {
   typescriptreact: 'typescript',
   javascriptreact: 'babel',
   javascript: 'babel'
+};
+
+/**
+ * Prettier postcss parser per CSS-family languageId (ADD-01 fallback path).
+ * Kept separate from PARSER_BY_LANG so the two routing tables can never be
+ * confused: the CSS family is NEVER primary routing for this engine.
+ */
+const CSS_PARSER_BY_LANG: Readonly<Record<string, 'css' | 'scss' | 'less'>> = {
+  css: 'css',
+  scss: 'scss',
+  less: 'less'
 };
 
 /**
@@ -165,6 +185,56 @@ function buildPrettierOptions(
   return prettierOptions;
 }
 
+/**
+ * Prettier options for the CSS-family fallback (ADD-01). STYLISTIC ONLY, and
+ * deliberately much narrower than the TS/JSX path:
+ *  - tabWidth/useTabs/endOfLine: the layout knobs Tidy owns. endOfLine falls
+ *    back to 'auto' when unresolved so a CRLF stylesheet is never rewritten to
+ *    LF by the fallback (Prettier's own default is 'lf', which would).
+ *  - printWidth: shared wrap_line_length first, then an explicit
+ *    engineOptions.prettier.printWidth (same precedence as the TS path).
+ *  - NOTHING else from the prettier bag. singleQuote would rewrite quoted CSS
+ *    strings ("x" -> 'x'), which the guard compares VERBATIM, so every fallback
+ *    attempt would be rejected and the whole feature would silently never apply.
+ *  - rangeStart/rangeEnd are NEVER set: the verified behaviour of the postcss
+ *    parser is to return the input UNCHANGED when a range is passed, which would
+ *    no-op the fallback. The provider only ever sends whole-snippet ranges
+ *    ({0, input.length}), so formatting req.code entirely is exact.
+ */
+function buildCssPrettierOptions(
+  req: FormatRequest,
+  parser: 'css' | 'scss' | 'less'
+): PrettierOptions {
+  const { options } = req;
+
+  const prettierOptions: PrettierOptions = {
+    parser,
+    tabWidth: options.tabSize,
+    useTabs: !options.insertSpaces,
+    endOfLine: mapEndOfLine(options.endOfLine) ?? 'auto'
+  };
+
+  const sharedWrap = options.engineOptions.wrap_line_length;
+  if (
+    typeof sharedWrap === 'number' &&
+    Number.isInteger(sharedWrap) &&
+    sharedWrap > 0
+  ) {
+    prettierOptions.printWidth = sharedWrap;
+  }
+
+  const printWidth = readPrettierBag(options).printWidth;
+  if (
+    typeof printWidth === 'number' &&
+    Number.isInteger(printWidth) &&
+    printWidth > 0
+  ) {
+    prettierOptions.printWidth = printWidth;
+  }
+
+  return prettierOptions;
+}
+
 export class PrettierEngine implements Engine {
   public readonly id = 'prettier';
 
@@ -173,6 +243,11 @@ export class PrettierEngine implements Engine {
   }
 
   public async format(req: FormatRequest): Promise<string> {
+    const cssParser = CSS_PARSER_BY_LANG[req.languageId];
+    if (cssParser) {
+      return this.formatCssFamily(req, cssParser);
+    }
+
     const parser = PARSER_BY_LANG[req.languageId];
     if (!parser) {
       // Defensive: the dispatcher should never route an unsupported language
@@ -200,5 +275,42 @@ export class PrettierEngine implements Engine {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`prettier failed to format ${req.languageId}: ${message}`);
     }
+  }
+
+  /**
+   * CSS-family path (ADD-01): only reachable via the guard-rejection fallback
+   * (engine/dispatcher.ts dispatchCssFallback). The output goes through the
+   * SAME shared postProcess as the js-beautify family so the fallback is a
+   * drop-in for whitespace policy (trim, final newline, EOL). For a selection
+   * (range) request the final-newline policy is suppressed, mirroring the
+   * js-beautify range path: a selection is not the end of the document.
+   */
+  private async formatCssFamily(
+    req: FormatRequest,
+    parser: 'css' | 'scss' | 'less'
+  ): Promise<string> {
+    const prettierOptions = buildCssPrettierOptions(req, parser);
+
+    let raw: string;
+    try {
+      raw = await prettierFormat(req.code, {
+        ...prettierOptions,
+        plugins: [prettierPostcss]
+      });
+    } catch (error: unknown) {
+      // Never swallow: surface a typed error so the provider keeps the primary
+      // guard-rejected outcome (file intact, original reason unchanged).
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`prettier failed to format ${req.languageId}: ${message}`);
+    }
+
+    const effectiveOptions: ResolvedOptions = req.range
+      ? { ...req.options, insertFinalNewline: undefined }
+      : req.options;
+    return postProcess(
+      raw,
+      effectiveOptions,
+      req.range ? false : /\r?\n$/.test(req.code)
+    );
   }
 }

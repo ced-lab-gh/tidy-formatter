@@ -52,10 +52,11 @@ These are the real [`samples/`](./samples) inputs run through *Format Document*,
    [60-second opt-in setup](#60-second-opt-in-setup) below, or use the guided
    commands described next.
 
-> **Tidy never enables `editor.formatOnSave` or sets `editor.defaultFormatter`
-> without an explicit action from you.** Nothing is written at startup, on save,
-> or in the background. The two commands below are the *only* way Tidy writes a
-> setting, and each writes only after you confirm exactly what will change.
+> **Tidy never hooks the save event, and never writes a setting without an
+> explicit action from you.** Nothing is written at install time, at startup, on
+> save, or in the background. The two commands below are the *only* way Tidy
+> writes a setting; each shows you the exact keys first and writes only after you
+> confirm, and the format-on-save opt-in ships a one-click **Revert**.
 
 ### Guided migration commands
 
@@ -66,10 +67,14 @@ walkthrough:
 - **`tidy.useAsFormatter`**, *“Tidy: Use Tidy as my Formatter”*. Pick the
   languages you want, choose a scope (**Workspace** by default, **User**
   optional), and Tidy writes `editor.defaultFormatter` (override-in-language)
-  for just those languages. It writes **nothing else**, never
-  `editor.formatOnSave`, and cancelling the picker writes nothing at all. The
-  success message offers a passive button that *opens* the `editor.formatOnSave`
-  setting so you can decide for yourself.
+  for just those languages; cancelling the picker writes nothing at all. An
+  optional follow-up step can then enable format on save for those same
+  languages: it shows the exact `"[lang]": { "editor.formatOnSave": true }` keys
+  and the scope in a modal recap, writes only after you confirm, and the success
+  message offers a one-click **Revert** restoring the previous values. Decline
+  that step and you still get the passive button that merely *opens* the
+  `editor.formatOnSave` setting. Tidy installs no save hook either way: VS Code
+  core owns the save lifecycle.
 - **`tidy.runMigration`**, *“Tidy: Migrate from JS-CSS-HTML Formatter”*. Reads
   your project’s `.jsbeautifyrc` (best-effort, and **only** when the workspace is
   trusted, ignored in Restricted Mode), shows a recap of exactly which `tidy.*`
@@ -237,8 +242,11 @@ Right-click in an editor → **Format Document With…** → **Configure Default
 }
 ```
 
-**3. Turn on format-on-save yourself (optional).**
-This is a stock VS Code setting that Tidy never sets for you:
+**3. Turn on format-on-save (optional).**
+The **Tidy: Use Tidy as my Formatter** command offers this as a guided step: it
+lists the exact `editor.formatOnSave` keys it would write for your chosen
+languages, writes only after you confirm, and gives you a one-click **Revert**.
+Prefer doing it by hand? It is the stock VS Code setting:
 
 ```jsonc
 {
@@ -257,7 +265,7 @@ You can scope it per language so Tidy only runs on the languages you want:
 }
 ```
 
-That's it: there is no Tidy-specific "format on save" toggle, because Tidy delegates the entire save lifecycle to VS Code.
+That's it: there is no Tidy-specific "format on save" toggle, because Tidy delegates the entire save lifecycle to VS Code. The guided step above writes that same stock setting, nothing custom, and only for the languages you confirmed.
 
 > **"It does nothing?"** If you installed Tidy and saving no longer reformats,
 > that is expected: Tidy never auto-formats. Complete steps 2 and 3 above to
@@ -378,6 +386,22 @@ Run **Tidy: Preview Format (diff)** (`tidy.previewFormat`) from the Command Pale
 - The preview runs the **same** pipeline as a normal format, including the equivalence guard. If the guard would reject the output, no diff opens and you get a non-blocking notice (file intact).
 - Click **Apply** to write the result as a **single undo entry** (one `Ctrl+Z` fully reverts it). Dismiss the prompt and nothing is written.
 
+### Status bar
+
+For supported files, Tidy shows a single status bar item on the right. At rest it reflects the
+active file's state: ready, turned off for the language, excluded by `.soukformatignore`, over
+the `tidy.maxFileSizeKB` limit, or owned by another default formatter (named in the tooltip,
+with how to switch). Right after a format attempt it briefly shows what happened
+(`formatted`, `already tidy`, `guard blocked`, or the exact skip reason) before returning to
+the passive state, so a silent no-op can no longer look like a broken extension.
+
+Clicking the item opens a menu over three existing commands: **Explain last format**,
+**Preview format (diff)** and **Show Effective Configuration**. The item is purely
+observational: it never formats, never edits and never writes a setting, and its only refresh
+triggers are the active-editor switch and configuration changes. The bar and its tooltip carry
+only language, engine, status, timestamps and short sanitized reasons, never your source. Hide
+it with `tidy.statusBar.enable: false`.
+
 ### Deference behavior (coexisting with other formatters)
 
 When a workspace already configures another formatter (Prettier via `.prettierrc*` or a `prettier` key in `package.json`, Biome via `biome.json`, or dprint via `dprint.json`), Tidy **surfaces** that fact once, and otherwise stays out of the way. Controlled by `tidy.deferToOtherFormatters` (default `notify`):
@@ -411,6 +435,7 @@ All settings live under the `tidy.*` namespace. Indentation defaults come from y
 | `tidy.soukformatrc` | `true` | Read the project's `.soukformatrc` file (JSONC) for per-language options and glob overrides, layered above `.editorconfig`. Set to `false` to ignore it. Always ignored in Restricted Mode. |
 | `tidy.respectSoukformatignore` | `true` | Skip files matched by a project `.soukformatignore` (gitignore syntax), leaving them byte-identical. Set to `false` to format every file regardless. Always ignored in Restricted Mode. See [Ignore & coexistence](#ignore--coexistence). |
 | `tidy.deferToOtherFormatters` | `notify` | How Tidy reacts when another formatter (Prettier/Biome/dprint) is already configured: `notify` (one-time notice), `silent-defer` (no notice), or `off`. **Never** changes your default formatter. See [Deference behavior](#deference-behavior-coexisting-with-other-formatters). |
+| `tidy.statusBar.enable` | `true` | Show the Tidy status bar item (passive file state + a short transient result after each attempt). Purely observational; see [Status bar](#status-bar). |
 
 **The full option set ("not enough options", fixed).** Beyond the headline knobs above, Tidy exposes the complete js-beautify surface by family and the AST-safe Prettier stylistic options for TS/JSX. A few highlights:
 
@@ -457,7 +482,7 @@ All Tidy commands are in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
 | Command id | Title | What it does |
 |---|---|---|
 | `tidy.showEffectiveConfiguration` | Tidy: Show Effective Configuration | Shows every resolved option and the exact source of each value. |
-| `tidy.useAsFormatter` | Tidy: Use Tidy as my Formatter | Opt in per language: writes `editor.defaultFormatter` (Workspace by default) for the languages you pick. Never writes `editor.formatOnSave`; cancelling writes nothing. |
+| `tidy.useAsFormatter` | Tidy: Use Tidy as my Formatter | Opt in per language: writes `editor.defaultFormatter` (Workspace by default) for the languages you pick, then optionally `editor.formatOnSave` for the same languages, each only after an explicit confirmation with an exact recap; the format-on-save write has a one-click Revert. Cancelling writes nothing. |
 | `tidy.runMigration` | Tidy: Migrate from JS-CSS-HTML Formatter | Imports a legacy `.jsbeautifyrc` into `tidy.*` settings after a confirmation recap (trusted workspaces only), then optionally runs *Use Tidy as my Formatter*. |
 | `tidy.previewFormat` | Tidy: Preview Format (diff) | Opens a **read-only** diff of what Tidy would change, then applies it on an explicit *Apply* click as a **single undo entry**. Opening the diff writes nothing. See [Preview command](#preview-command-read-only-diff--atomic-undo). |
 | `tidy.reportIssue` | Tidy: Report an Issue | Opens a **prefilled GitHub issue** with your environment (Tidy version, VS Code version, OS, the active file's language) already filled in, so a bug report takes seconds. Read-only: it opens a browser tab and writes nothing. |
@@ -471,7 +496,7 @@ All Tidy commands are in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
 Open the file and run **Format Document** (`Shift+Alt+F`), or select a block and run **Format Selection**. VS Code needs a formatter registered for that language; Tidy provides one for HTML, CSS, SCSS, LESS, JavaScript, TypeScript, JSX/TSX and JSON. If more than one formatter is installed, pick which runs with **Format Document With… → Tidy Formatter**, or set it per language via **Tidy: Use Tidy as my Formatter**. Nothing formats automatically until you enable `editor.formatOnSave` yourself.
 
 **Is there a VS Code formatter that only runs when I ask, not on save?**
-Yes, that is Tidy's whole design. It registers *only* as an on-demand formatting provider (*Format Document* / *Format Selection*), never hooks the save event, and never sets `editor.formatOnSave` or `editor.defaultFormatter` for you. So it formats exactly when you invoke it and stays silent otherwise. If you *want* format-on-save later, you enable the stock VS Code setting yourself; see [60-second opt-in setup](#60-second-opt-in-setup).
+Yes, that is Tidy's whole design. It registers *only* as an on-demand formatting provider (*Format Document* / *Format Selection*), never hooks the save event, and never sets `editor.formatOnSave` or `editor.defaultFormatter` behind your back: both are written only inside the guided opt-in command, after you confirm an exact recap of the keys, with one-click revert for format on save. So it formats exactly when you invoke it and stays silent otherwise. If you *want* format-on-save later, run that command or enable the stock VS Code setting yourself; see [60-second opt-in setup](#60-second-opt-in-setup).
 
 **Why does VS Code keep formatting my code on save?**
 Something in your setup has `editor.formatOnSave` enabled and a default formatter assigned for that language, often an extension that made itself the default without asking. VS Code, not the extension, owns the save trigger, so the fix is to turn off `editor.formatOnSave` (globally or per language) or change `editor.defaultFormatter`. If code is *still* reformatted with format-on-save off, an extension is hooking save itself; disabling or uninstalling it is the only reliable fix. Tidy deliberately never hooks save, so it can never be the cause.
@@ -480,7 +505,7 @@ Something in your setup has `editor.formatOnSave` enabled and a default formatte
 Start by setting `"editor.formatOnSave": false`; you can scope it per language, e.g. `"[javascript]": { "editor.formatOnSave": false }`. If code is still reformatted on save, the culprit is an extension that registers its own save handler instead of relying on VS Code's (the JS-CSS-HTML Formatter is a well-known example), and you have to disable or uninstall that extension from the Extensions view. No other extension, Tidy included, can turn off a save hook that a different extension installed.
 
 **Is there a safe alternative to JS-CSS-HTML Formatter?**
-That is exactly why Tidy exists. It covers the same languages (JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML and JSON) but never formats on save, never makes itself the default formatter, and never writes a setting unless you confirm it. Every format is verified against your original (AST for JS/TS/JSX/TSX, tree compare for CSS/HTML, value compare for JSON), so it cannot produce the corrupted output the incumbent was reported for. See [Migrating from JS-CSS-HTML Formatter](#migrating-from-js-css-html-formatter) for a two-minute switch.
+That is exactly why Tidy exists. It covers the same languages (JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML and JSON) but never formats on save unless you turn that on, never makes itself the default formatter without asking, and never writes a setting unless you confirm it. Every format is verified against your original (AST for JS/TS/JSX/TSX, tree compare for CSS/HTML, value compare for JSON), so it cannot produce the corrupted output the incumbent was reported for. See [Migrating from JS-CSS-HTML Formatter](#migrating-from-js-css-html-formatter) for a two-minute switch.
 
 **How is Tidy different from Prettier?**
 Prettier is opinionated: it enforces one canonical style with very few knobs. Tidy is a *configurable* beautifier that respects your VS Code and project settings, so it fills the "lots of options" niche the JS-CSS-HTML Formatter used to. The two are built to coexist (a common setup is Prettier for JS/TS and Tidy for CSS/HTML/JSON), and for TypeScript, JSX and TSX Tidy actually runs Prettier under the hood, then adds its own equivalence guard on top. See [Works alongside Prettier](#works-alongside-prettier).
@@ -492,10 +517,10 @@ Tidy is a standard VS Code extension with no proprietary Marketplace dependencie
 No. JSX, TSX and TypeScript are formatted with a real parser (Prettier), not a token-level find-and-replace, so `<App />` stays `<App />`. On top of that, the AST-equivalence guard, plus a dedicated JSX tag-boundary check, compares the parse tree before and after and discards any output that changed meaning, so optional chaining (`?.`), nullish coalescing (`??`) and BigInt literals (`1n`) are always preserved. If a format ever couldn't be proven safe, you get zero edits and an intact file.
 
 **Will Tidy format my files on save?**
-Only if *you* enable `editor.formatOnSave` and select Tidy as the default formatter for that language. Out of the box it does nothing on save.
+Only if *you* enable `editor.formatOnSave` and select Tidy as the default formatter for that language, either by hand or through the guided **Tidy: Use Tidy as my Formatter** command, which shows the exact keys it would write and does nothing until you confirm. Out of the box it does nothing on save, and it never installs a save hook of its own.
 
 **Will it override Prettier / ESLint / my chosen formatter?**
-No. Tidy never sets or contributes `editor.defaultFormatter`. If another formatter is your default, Tidy does not run unless you explicitly invoke it.
+No. Tidy never contributes `editor.defaultFormatter` and never sets it on its own: the only write happens inside **Tidy: Use Tidy as my Formatter**, for the languages you tick, after you confirm. If another formatter is your default, Tidy does not run unless you explicitly invoke it.
 
 **I installed it and nothing happens when I save. Is it broken?**
 No, that is the intended default. If you are not sure what happened, run **Tidy: Explain last format** from the Command Palette: it tells you exactly what Tidy did on the active file, or why it did nothing (for example, another formatter owns the language, or the safety guard rejected the result). See [60-second opt-in setup](#60-second-opt-in-setup) to choose the behaviour you want.

@@ -5,8 +5,9 @@
 //     ticks languages in a QuickPick and confirms a scope). Cancelling at any
 //     step writes NOTHING.
 //   - We write `editor.defaultFormatter` (overrideInLanguage) per chosen
-//     language and NOTHING ELSE. We NEVER write `editor.formatOnSave`; the user
-//     is merely offered a button that OPENS that setting so they decide.
+//     language. `editor.formatOnSave` is written ONLY inside the separate,
+//     optional format-on-save step (formatOnSaveOptIn.ts), ONLY after the user
+//     confirms a modal recap of the exact keys, and it ships a one-click Revert.
 //   - There is no auto-set at boot, no save/change/watcher hook : this command
 //     is invoked only from the Command Palette.
 //
@@ -215,30 +216,6 @@ async function applyPlan(vscode: any, plan: UseAsFormatterPlan): Promise<void> {
 }
 
 /**
- * Show a non-modal success message listing the configured languages, offering a
- * single passive action that OPENS the formatOnSave setting (we never write it).
- */
-function announceSuccess(vscode: any, plan: UseAsFormatterPlan): void {
-  const scopeLabel = plan.target === 'workspace' ? 'workspace' : 'user';
-  const message =
-    `Tidy is now the default formatter for ${plan.langs.join(', ')} ` +
-    `(${scopeLabel} scope). It will only run when you format a document; ` +
-    `enable "Format On Save" yourself if you want it on save.`;
-  const openFormatOnSave = 'Open formatOnSave setting';
-
-  void vscode.window
-    .showInformationMessage(message, openFormatOnSave)
-    .then((picked: string | undefined) => {
-      if (picked === openFormatOnSave) {
-        void vscode.commands.executeCommand(
-          'workbench.action.openSettings',
-          'editor.formatOnSave'
-        );
-      }
-    });
-}
-
-/**
  * Handler for "Tidy: Use Tidy as my formatter".
  *
  * Flow (every step user-initiated; any cancel = zero writes):
@@ -246,7 +223,8 @@ function announceSuccess(vscode: any, plan: UseAsFormatterPlan): void {
  *   2. QuickPick of scope (Workspace default / User);
  *   3. plan via the pure planner;
  *   4. write `editor.defaultFormatter` per chosen language (overrideInLanguage);
- *   5. non-modal success + passive "Open formatOnSave setting" button.
+ *   5. optional format-on-save step (QuickPick, modal recap, confirmed write,
+ *      revert button); every branch ends on a non-modal success message.
  *
  * Never throws: any write failure is surfaced as a non-blocking error so the
  * command can't break the editor.
@@ -299,6 +277,11 @@ export async function useAsFormatter(): Promise<void> {
   if (plan.warning) {
     void vscode.window.showWarningMessage(plan.warning);
   }
-  announceSuccess(vscode, plan);
+
+  // Optional, separately-confirmed format-on-save step (ADD-04). It owns the
+  // success toast for every branch and writes editor.formatOnSave ONLY after
+  // its own modal recap is confirmed; cancelling it writes nothing further.
+  const { runFormatOnSaveStep } = require('./formatOnSaveOptIn');
+  await runFormatOnSaveStep(vscode, plan.langs, plan.target);
 }
 /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */

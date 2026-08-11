@@ -1,0 +1,1 @@
+li:not(.done):nth-child(2n){color:red}

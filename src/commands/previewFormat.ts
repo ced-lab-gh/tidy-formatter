@@ -56,6 +56,22 @@ export const GUARD_REJECTED_REASON =
 export const NO_CHANGE_REASON =
   'this document is already formatted : there is nothing to change';
 
+/**
+ * Surfaced when the document already contains the template-island placeholder
+ * text: masking cannot guarantee a byte-identical restore, so no preview is
+ * produced and nothing is ever written (ADD-02).
+ */
+export const TEMPLATE_COLLISION_MESSAGE =
+  'Tidy: this document collides with the template placeholder scheme, so no safe preview is possible. The file is left intact.';
+
+/**
+ * Surfaced when the engine dropped or duplicated a protected placeholder (an
+ * ignore region or a template island): the restore cannot be trusted, so no
+ * preview is produced and nothing is ever written (ADD-02).
+ */
+export const RESTORE_FAILED_MESSAGE =
+  'Tidy: a protected span could not be restored exactly, so no safe preview is possible. The file is left intact.';
+
 /* -------------------------------------------------------------------------- */
 /* Pure planner (no 'vscode' : unit-testable under mocha + tsx)                 */
 /* -------------------------------------------------------------------------- */
@@ -305,6 +321,7 @@ export async function previewFormat(): Promise<void> {
   const { dispatchFormat } = require('../engine/dispatcher');
   const { guard } = require('../safety/guard');
   const { readResolvedOptions } = require('../config/vscodeConfig');
+  const { buildMaskPlan } = require('../engine/maskPlan');
 
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
@@ -338,7 +355,31 @@ export async function previewFormat(): Promise<void> {
   let verdict: GuardVerdict;
   try {
     const options = readResolvedOptions(document, languageId, formattingOptions);
-    formatted = await dispatchFormat({ languageId, code: input, options });
+    // Same protect-and-restore plan as the providers (ignore regions + HTML
+    // template islands): without it, previewing a template file would SHOW, and
+    // Apply would WRITE, islands reflowed in ways the guard cannot see, because
+    // whitespace inside an HTML text node is normalised away before comparison
+    // (CFG-04 / ADD-02).
+    const plan = buildMaskPlan(languageId, input, 'document');
+    if (plan.abortReason !== undefined) {
+      void vscode.window.showInformationMessage(TEMPLATE_COLLISION_MESSAGE);
+      return;
+    }
+    const rawOutput = await dispatchFormat({
+      languageId,
+      code: plan.mask ? plan.mask.engineInput : input,
+      options
+    });
+    if (plan.mask) {
+      const restored = plan.mask.restore(rawOutput);
+      if (!restored.ok) {
+        void vscode.window.showInformationMessage(RESTORE_FAILED_MESSAGE);
+        return;
+      }
+      formatted = restored.text;
+    } else {
+      formatted = rawOutput;
+    }
     // input === output short-circuits inside the guard to "equivalent"; the
     // pure planner then reports the no-change case explicitly.
     verdict = guard.check(languageId, input, formatted);
