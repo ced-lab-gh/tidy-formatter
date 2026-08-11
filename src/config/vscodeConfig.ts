@@ -24,6 +24,7 @@ import {
   type OptionEntry
 } from './optionCatalog';
 import { readSoukformatrcLayers } from './soukformatrc';
+import { resolveSizeLimit, type EffectiveSizeLimit } from './sizeLimit';
 
 /** Origin labels surfaced verbatim in "Show Effective Configuration". */
 const SOURCE_VSCODE_GLOBAL = 'VS Code settings (tidy.*)';
@@ -403,4 +404,23 @@ export function readResolvedOptionsWithDiagnostics(
   const { layers, souk } = buildLayers(document, languageId, formattingOptions);
   const options = resolveOptions({ languageId, layers });
   return { options, soukformatrcPath: souk.path, warnings: souk.warnings };
+}
+
+/**
+ * Resolve the effective per-family size cap for a document (ADD-08). Reads the
+ * two governing settings ONLY when explicitly set by the user (any scope, via
+ * inspect) and delegates precedence + validation to the pure resolveSizeLimit.
+ * Used by the formatting provider (too-large gate), the status bar and
+ * "Show Effective Configuration" so all three always agree.
+ */
+export function readSizeLimit(
+  document: vscode.TextDocument,
+  languageId: LangId
+): EffectiveSizeLimit {
+  const config = vscode.workspace.getConfiguration('tidy', document.uri);
+  return resolveSizeLimit({
+    languageId,
+    globalKB: readExplicit<unknown>(config, 'maxFileSizeKB'),
+    jsonKB: readExplicit<unknown>(config, 'json.maxFileSizeKB')
+  });
 }

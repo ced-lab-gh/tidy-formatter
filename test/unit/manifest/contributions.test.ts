@@ -63,6 +63,7 @@ const EXPECTED_TITLES: Record<string, string> = {
   'tidy.useAsFormatter': 'Use Tidy as My Formatter',
   'tidy.runMigration': 'Migrate from JS-CSS-HTML Formatter',
   'tidy.previewFormat': 'Preview Format (Diff)',
+  'tidy.openPlayground': 'Open Playground',
   'tidy.reportIssue': 'Report an Issue',
   'tidy.explainLastFormat': 'Explain Last Format'
 };
@@ -81,7 +82,7 @@ function findCommand(id: string): CommandContribution {
 }
 
 describe('manifest : command titles are Title Case (ADD-10)', () => {
-  it('contributes exactly the 6 known commands, no more, no less', () => {
+  it('contributes exactly the 7 known commands, no more, no less', () => {
     assert.deepEqual(
       manifest.contributes.commands.map((c) => c.command).sort(),
       Object.keys(EXPECTED_TITLES).sort()

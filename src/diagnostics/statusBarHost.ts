@@ -32,16 +32,16 @@ import {
   type LastFormatRecord
 } from './lastFormat';
 import { resolveDocumentIgnore } from '../ignore/ignoreGate';
-import { SUPPORTED_LANG_IDS } from '../types';
+import { SUPPORTED_LANG_IDS, type LangId } from '../types';
+// Same per-family cap resolution the provider uses (ADD-08), so the bar can
+// never announce "too large" for a document the provider would format.
+import { readSizeLimit } from '../config/vscodeConfig';
 // Command id the item triggers on click; the command itself is registered by
 // extension.ts. This module is vscode-free at its top level, so the import is
 // safe here.
 import { STATUS_BAR_MENU_COMMAND_ID } from '../commands/statusBarMenu';
 
 const SUPPORTED: ReadonlySet<string> = new Set(SUPPORTED_LANG_IDS);
-
-/** Default of `tidy.maxFileSizeKB`, mirrored from the manifest. */
-const DEFAULT_MAX_FILE_SIZE_KB = 5120;
 
 /** `tidy.statusBar.enable`, default true (absent setting behaves as enabled). */
 function isStatusBarEnabled(): boolean {
@@ -51,7 +51,7 @@ function isStatusBarEnabled(): boolean {
 
 /**
  * Gather the passive state of a document from the EXISTING sources only:
- * tidy.<lang>.enable, the ignore gate, tidy.maxFileSizeKB and
+ * tidy.<lang>.enable, the ignore gate, the per-family size cap and
  * editor.defaultFormatter. Reads only; the decision itself is pure.
  */
 function gatherPassiveState(document: vscode.TextDocument): PassiveFileState {
@@ -62,10 +62,9 @@ function gatherPassiveState(document: vscode.TextDocument): PassiveFileState {
 
   const tidyConfig = vscode.workspace.getConfiguration('tidy', document.uri);
   const enabled = tidyConfig.get<boolean>(`${languageId}.enable`, true);
-  const maxKb = tidyConfig.get<number>(
-    'maxFileSizeKB',
-    DEFAULT_MAX_FILE_SIZE_KB
-  );
+  // Same resolver as the provider (ADD-08): json/jsonc are governed by
+  // tidy.json.maxFileSizeKB, every other language by tidy.maxFileSizeKB.
+  const sizeLimit = readSizeLimit(document, languageId as LangId);
 
   // Same gate order and same byte measure as the provider, so the bar can never
   // contradict what a format would do. The getText() read happens at most once
@@ -73,10 +72,9 @@ function gatherPassiveState(document: vscode.TextDocument): PassiveFileState {
   const ignoredByFile = enabled
     ? resolveDocumentIgnore(document).ignored
     : false;
-  const sizeGuardActive = Number.isFinite(maxKb) && maxKb > 0;
   const tooLarge =
-    enabled && !ignoredByFile && sizeGuardActive
-      ? Buffer.byteLength(document.getText(), 'utf8') > maxKb * 1024
+    enabled && !ignoredByFile && sizeLimit.limitBytes !== undefined
+      ? Buffer.byteLength(document.getText(), 'utf8') > sizeLimit.limitBytes
       : false;
 
   const editorConfig = vscode.workspace.getConfiguration('editor', {
@@ -98,7 +96,8 @@ function gatherPassiveState(document: vscode.TextDocument): PassiveFileState {
   return {
     kind,
     languageId,
-    maxFileSizeKB: maxKb,
+    maxFileSizeKB: sizeLimit.limitKB,
+    sizeLimitSettingKey: sizeLimit.settingKey,
     otherFormatterId: kind === 'other-default' ? defaultFormatter : undefined,
     lastRecord: last && last.uri === document.uri.toString() ? last : undefined
   };

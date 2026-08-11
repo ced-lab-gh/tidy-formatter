@@ -72,8 +72,22 @@ jobs:
       - name: Perf budgets
         run: npm run perf
 
+      # ADD-09: drift gate. `npm run perf` (above) wrote test/perf/results.json;
+      # fail when any p95 exceeds the frozen baseline x1.35 (x3 more on CI).
+      - name: Perf regression vs frozen baseline
+        run: npm run perf:check
+
       - name: Compile (production bundle)
         run: npm run compile
+
+      # ADD-09: cold-require budget of the production bundle (child process,
+      # stubbed vscode). Needs dist/, hence after compile.
+      - name: Startup budgets (cold require)
+        run: npm run perf:startup
+
+      # ADD-09: frozen dist/ size budgets + metafile presence. Needs dist/.
+      - name: Bundle size budgets
+        run: npm run check:bundle
 
       - name: Package (.vsix)
         run: npm run package
@@ -84,6 +98,17 @@ jobs:
         with:
           name: tidy-formatter-vsix-node${{ matrix.node }}
           path: '*.vsix'
+          if-no-files-found: warn
+          retention-days: 14
+
+      # ADD-09: the measured numbers behind the perf gates, kept for later
+      # comparison (and for ADD-11 to prove its before/after).
+      - name: Upload perf results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results-node${{ matrix.node }}
+          path: test/perf/results.json
           if-no-files-found: warn
           retention-days: 14
 

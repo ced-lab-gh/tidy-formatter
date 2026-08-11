@@ -94,9 +94,27 @@ describe('commands/explainLastFormat : buildExplanation', () => {
     assert.match(e.lines.join(' '), /tidy\.json\.enable/);
   });
 
-  it('too-large surfaces the KB limit', () => {
-    const e = buildExplanation(rec('too-large', { detail: '5120' }), ctx());
-    assert.match(e.lines.join(' '), /5120 KB/);
+  it('too-large surfaces the applied cap, its key and its source', () => {
+    const e = buildExplanation(
+      rec('too-large', { detail: '5120 KB via tidy.maxFileSizeKB (default)' }),
+      ctx()
+    );
+    assert.match(
+      e.lines.join(' '),
+      /Limit: 5120 KB via tidy\.maxFileSizeKB \(default\)\./
+    );
+  });
+
+  it('too-large for a json record names the json family cap', () => {
+    const e = buildExplanation(
+      rec('too-large', {
+        languageId: 'json',
+        detail: '10240 KB via tidy.json.maxFileSizeKB (default)'
+      }),
+      ctx()
+    );
+    assert.match(e.lines.join(' '), /tidy\.json\.maxFileSizeKB/);
+    assert.ok(e.lines.some((l) => /set it to 0/.test(l)));
   });
 
   it('no record + unsupported language explains Tidy does not handle it', () => {
@@ -195,9 +213,34 @@ describe('commands/explainLastFormat : actions mapping (ADD-06)', () => {
   });
 
   it('too-large offers Open Settings targeting tidy.maxFileSizeKB', () => {
-    const a = actionsOf(buildExplanation(rec('too-large', { detail: '5120' }), ctx()));
+    const a = actionsOf(
+      buildExplanation(
+        rec('too-large', { detail: '5120 KB via tidy.maxFileSizeKB (default)' }),
+        ctx()
+      )
+    );
     assert.equal(a.length, 1);
     assert.equal(a[0].commandId, OPEN_SETTINGS_COMMAND_ID);
+    assert.deepEqual(a[0].args, ['tidy.maxFileSizeKB']);
+  });
+
+  it('too-large on a json record targets the json family cap instead (ADD-08)', () => {
+    const a = actionsOf(
+      buildExplanation(
+        rec('too-large', {
+          languageId: 'json',
+          detail: '10240 KB via tidy.json.maxFileSizeKB (default)'
+        }),
+        ctx()
+      )
+    );
+    assert.equal(a.length, 1);
+    assert.deepEqual(a[0].args, ['tidy.json.maxFileSizeKB']);
+  });
+
+  it('too-large with a legacy or missing detail falls back to the generic key', () => {
+    const a = actionsOf(buildExplanation(rec('too-large'), ctx()));
+    assert.equal(a.length, 1);
     assert.deepEqual(a[0].args, ['tidy.maxFileSizeKB']);
   });
 

@@ -3,7 +3,8 @@
 //
 // Each provider follows the same safe pipeline:
 //   1. respect `tidy.<lang>.enable` (disabled -> [] so VS Code does nothing);
-//   2. respect `tidy.maxFileSizeKB` (oversized -> [] + non-blocking notice);
+//   2. respect the per-family size cap (tidy.json.maxFileSizeKB for json/jsonc,
+//      tidy.maxFileSizeKB otherwise; oversized -> [] + non-blocking notice);
 //   3. consult the IGNORE layer (Axe 4): if .soukformatignore matches the file OR
 //      an in-source FILE-ignore marker is present -> [] (Tidy does nothing here);
 //   4. read the resolved options via vscodeConfig (precedence layers);
@@ -38,7 +39,8 @@ import {
   CSS_FALLBACK_LANGS
 } from '../engine/dispatcher';
 import { guard } from '../safety/guard';
-import { readResolvedOptions } from '../config/vscodeConfig';
+import { readResolvedOptions, readSizeLimit } from '../config/vscodeConfig';
+import { describeSizeLimit } from '../config/sizeLimit';
 import { scanMarkers } from '../ignore/markers';
 import { buildMaskPlan, type EngineMask } from '../engine/maskPlan';
 import { resolveDocumentIgnore } from '../ignore/ignoreGate';
@@ -98,19 +100,6 @@ function isLanguageEnabled(
 ): boolean {
   const config = vscode.workspace.getConfiguration('tidy', document.uri);
   return config.get<boolean>(`${languageId}.enable`, true);
-}
-
-/**
- * Read `tidy.maxFileSizeKB` (default 5120, 0 disables). Returns the size guard
- * limit in bytes, or undefined when the guard is disabled.
- */
-function getMaxFileSizeBytes(document: vscode.TextDocument): number | undefined {
-  const config = vscode.workspace.getConfiguration('tidy', document.uri);
-  const maxKb = config.get<number>('maxFileSizeKB', 5120);
-  if (!Number.isFinite(maxKb) || maxKb <= 0) {
-    return undefined;
-  }
-  return maxKb * 1024;
 }
 
 /**
@@ -268,6 +257,18 @@ async function runFormat(
   // No textual change: nothing to apply, but this is a success (not an abort).
   if (output === input) {
     return { applied: false, output, engineId };
+  }
+
+  // Yield once so the cancellation RPC macrotask can be processed, THEN check
+  // the token: on the synchronous engine path the await continuation is a
+  // microtask, so without this yield isCancellationRequested can never turn
+  // true before the CPU-bound guard runs. On a 5-10 MB JSON document the guard
+  // is the second largest cost after the engine; skipping it on cancel keeps
+  // the extension host responsive. Cancelling here writes NOTHING: without an
+  // `equivalent` verdict no edit is ever produced (see outcomeToEdits).
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  if (token.isCancellationRequested) {
+    return { applied: false, aborted: true, reason: 'cancelled', engineId };
   }
 
   // Safety guard: never apply output that is not semantically equivalent to the
@@ -500,8 +501,40 @@ async function provideEdits(
     return [];
   }
 
-  // Size guard: never block the UI thread on a huge document.
+  // Size guard, resolved PER FAMILY and BEFORE any work proportional to the
+  // document (ignore lookup, marker scan, engine, guard). json/jsonc get their
+  // own, higher cap because their format path is linear and their guard is a
+  // cheap value equality (see src/config/sizeLimit.ts). A rejected document
+  // costs O(1) beyond getText().
   const fullText = document.getText();
+  const sizeLimit = readSizeLimit(document, languageId);
+  const maxKb = sizeLimit.limitKB;
+  if (
+    sizeLimit.limitBytes !== undefined &&
+    byteLength(fullText) > sizeLimit.limitBytes
+  ) {
+    recordOutcome(document, languageId, scope, 'too-large', {
+      engineId: pickEngine(languageId).id,
+      detail: describeSizeLimit(sizeLimit)
+    });
+    // English per the v0.3.0 string migration; the button opens the Settings UI
+    // filtered to the cap that actually applied (opens UI only, never writes).
+    void vscode.window
+      .showInformationMessage(
+        `Tidy skipped this file: it is larger than ${maxKb} KB ` +
+          `(${sizeLimit.settingKey}). Raise that setting, or set it to 0, to format it.`,
+        ACTION_OPEN_SETTINGS_LABEL
+      )
+      .then((picked: string | undefined) => {
+        if (picked === ACTION_OPEN_SETTINGS_LABEL) {
+          void vscode.commands.executeCommand(
+            OPEN_SETTINGS_COMMAND_ID,
+            sizeLimit.settingKey
+          );
+        }
+      });
+    return [];
+  }
 
   // Ignore layer (Axe 4) : consulted BEFORE any formatting work:
   //   (a) .soukformatignore matches this file -> Tidy does nothing here;
@@ -523,32 +556,6 @@ async function provideEdits(
     recordOutcome(document, languageId, scope, 'ignored-marker');
     return [];
   }
-  const maxBytes = getMaxFileSizeBytes(document);
-  if (maxBytes !== undefined && byteLength(fullText) > maxBytes) {
-    const config = vscode.workspace.getConfiguration('tidy', document.uri);
-    const maxKb = config.get<number>('maxFileSizeKB', 5120);
-    recordOutcome(document, languageId, scope, 'too-large', {
-      engineId: pickEngine(languageId).id,
-      detail: String(maxKb)
-    });
-    // English per the v0.3.0 string migration; the button opens the Settings UI
-    // filtered to the size limit (opens UI only, never writes the setting).
-    void vscode.window
-      .showInformationMessage(
-        `Tidy skipped this file: it is larger than ${maxKb} KB (tidy.maxFileSizeKB).`,
-        ACTION_OPEN_SETTINGS_LABEL
-      )
-      .then((picked: string | undefined) => {
-        if (picked === ACTION_OPEN_SETTINGS_LABEL) {
-          void vscode.commands.executeCommand(
-            OPEN_SETTINGS_COMMAND_ID,
-            'tidy.maxFileSizeKB'
-          );
-        }
-      });
-    return [];
-  }
-
   let options: ResolvedOptions;
   try {
     options = readResolvedOptions(document, languageId, formattingOptions);

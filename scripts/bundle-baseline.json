@@ -1,0 +1,14 @@
+{
+  "//": "FROZEN dist/ size budgets (ADD-09). Every shipped executable (.js/.wasm) in dist/ MUST have an entry; scripts/check-bundle-size.mjs fails on any file over budget, any budgeted file missing from dist/, and any unbudgeted executable appearing in dist/. Raising a maxBytes is a deliberate, reviewed decision. ADD-11 adds one entry per lazy chunk.",
+  "schemaVersion": 1,
+  "files": {
+    "extension.js": {
+      "maxBytes": 2900000,
+      "//": "measured 2818641 bytes on the v0.3.0 branch (production build, after ADD-01..ADD-08); ~2.9% headroom"
+    },
+    "one_ini_bg.wasm": {
+      "maxBytes": 120000,
+      "//": "measured 89224 bytes; @one-ini/wasm runtime needed by the editorconfig dependency, must keep shipping"
+    }
+  }
+}

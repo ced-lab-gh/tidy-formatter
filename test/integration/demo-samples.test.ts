@@ -12,23 +12,19 @@ import {
   openFixture,
   runFormatDocument
 } from './helpers';
+import {
+  PLAYGROUND_CSS_SAMPLE as MESSY_CSS,
+  PLAYGROUND_TSX_SAMPLE as MESSY_TSX
+} from '../../src/commands/openPlayground';
 
 // out/test/integration/demo-samples.test.js -> project root is three levels up.
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 const OUT_DIR = path.join(PROJECT_ROOT, 'samples', 'out');
 
-const MESSY_CSS =
-  '.card{display:flex;padding:8px;color:red}\n' +
-  '   #main   >   .item:nth-child(2n){margin:calc(100% - 20px);background:blue}\n' +
-  'a:hover{text-decoration:underline}    .footer    {   gap : 12px  }\n';
-
-const MESSY_TSX =
-  'import {useState,useEffect} from "react"\n' +
-  'type Props={title:string,count?:number}\n' +
-  'export function Widget({title,count=0}:Props){\n' +
-  'const [n,setN]=useState(count);useEffect(()=>{console.log(n?.toString()??"none")},[n])\n' +
-  'return <div className="card"   onClick={()=>setN(n+1)}><h1>{title}</h1><span>{n}</span></div>\n' +
-  '}\n';
+// ADD-03: the demo, the playground command and samples/ now share ONE source of
+// truth. The embedded constants are locked byte-for-byte against samples/*.by
+// test/unit/commands/openPlayground.test.ts, so a drift fails there, loudly,
+// instead of silently making this demo showcase something the user never sees.
 
 describe('DEMO : Tidy formats the real sample files in a real VS Code host', function () {
   // CI-aware: slow/shared CI runners get headroom for the cold first run; local

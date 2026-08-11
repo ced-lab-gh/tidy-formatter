@@ -23,6 +23,9 @@ import {
   type LastFormatRecord
 } from '../diagnostics/lastFormat';
 import { SUPPORTED_LANG_IDS } from '../types';
+// Pure module (no 'vscode'): lets the too-large explanation name the cap that
+// actually applied instead of always pointing at the generic setting.
+import { settingKeyFromDescription } from '../config/sizeLimit';
 import { REPORT_ISSUE_COMMAND_ID } from './reportIssue';
 import { USE_AS_FORMATTER_COMMAND_ID } from './useAsFormatter';
 
@@ -184,17 +187,25 @@ function explainRecord(record: LastFormatRecord): Explanation {
           'Check your .editorconfig / .soukformatrc for invalid values.'
         ]
       };
-    case 'too-large':
+    case 'too-large': {
+      // The provider stores describeSizeLimit(...) as the detail, so it already
+      // names the cap, the exact setting key and where that value came from.
+      // Point Open Settings at THAT key (json/jsonc get their own cap), falling
+      // back to the generic one for an older or truncated record.
+      const settingKey =
+        settingKeyFromDescription(record.detail) ?? 'tidy.maxFileSizeKB';
       return {
         headline: 'Tidy skipped this file because it exceeds the size limit.',
         lines: [
           record.detail
-            ? `Limit: tidy.maxFileSizeKB is ${record.detail} KB.`
-            : 'See tidy.maxFileSizeKB.',
-          'Raise the limit, or set tidy.maxFileSizeKB to 0 to disable it.'
+            ? `Limit: ${record.detail}.`
+            : 'See tidy.maxFileSizeKB (and tidy.json.maxFileSizeKB for JSON/JSONC).',
+          `Raise ${settingKey}, or set it to 0, to disable the cap.`,
+          'JSON and JSONC have their own, higher cap (tidy.json.maxFileSizeKB, default 10240 KB) because their formatter and safety check stay fast on large documents.'
         ],
-        actions: [openSettingsAction('tidy.maxFileSizeKB')]
+        actions: [openSettingsAction(settingKey)]
       };
+    }
     case 'ignored-file': {
       const pathLine = record.detail ? `Ignore file: ${record.detail}.` : undefined;
       return {

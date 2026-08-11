@@ -39,6 +39,10 @@ import {
   previewFormat
 } from './commands/previewFormat';
 import {
+  OPEN_PLAYGROUND_COMMAND_ID,
+  openPlayground
+} from './commands/openPlayground';
+import {
   REPORT_ISSUE_COMMAND_ID,
   reportIssue
 } from './commands/reportIssue';
@@ -126,6 +130,14 @@ export function activate(context: vscode.ExtensionContext): void {
   // an explicit command invocation + explicit "Apply" click.
   context.subscriptions.push(
     vscode.commands.registerCommand(PREVIEW_FORMAT_COMMAND_ID, previewFormat)
+  );
+
+  // Open Playground (ADD-03): opens two UNTITLED sample documents (messy CSS +
+  // messy TSX) so the walkthrough's "Try it now" step runs on scratch buffers.
+  // ZERO disk writes, ZERO hooks: the command only opens editors; formatting
+  // still happens exclusively through the explicit preview/format commands.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(OPEN_PLAYGROUND_COMMAND_ID, openPlayground)
   );
 
   // Report an Issue: opens a prefilled GitHub issue with environment details.

@@ -76,6 +76,41 @@ describe('commands/showConfig : header', () => {
     });
     assert.match(report, /^\.soukformatrc : \/proj\/\.soukformatrc$/m);
   });
+
+  it('renders the effective size limit line with key and source (ADD-08)', () => {
+    const report = reportFor('json', resolved(), {
+      sizeLimit: {
+        limitKB: 10240,
+        limitBytes: 10240 * 1024,
+        settingKey: 'tidy.json.maxFileSizeKB',
+        source: 'default'
+      }
+    });
+    assert.match(
+      report,
+      /^Size limit : 10240 KB via tidy\.json\.maxFileSizeKB \(default\)$/m
+    );
+  });
+
+  it('renders a disabled cap on the same line', () => {
+    const report = reportFor('json', resolved(), {
+      sizeLimit: {
+        limitKB: 0,
+        limitBytes: undefined,
+        settingKey: 'tidy.json.maxFileSizeKB',
+        source: 'user setting'
+      }
+    });
+    assert.match(
+      report,
+      /^Size limit : disabled via tidy\.json\.maxFileSizeKB \(user setting\)$/m
+    );
+  });
+
+  it('renders "(not resolved)" when no size limit was provided', () => {
+    const report = reportFor('css', resolved());
+    assert.match(report, /^Size limit : \(not resolved\)$/m);
+  });
 });
 
 describe('commands/showConfig : indentation block', () => {

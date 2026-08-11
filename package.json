@@ -2,7 +2,7 @@
   "name": "tidy-formatter",
   "displayName": "Tidy: JS/CSS/HTML Formatter & Beautifier",
   "description": "Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON. A safe, config-respecting replacement for JS-CSS-HTML Formatter that never touches your files unless you ask.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "ced-lab",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -84,6 +84,11 @@
         "enablement": "editorLangId in tidy.supportedLanguages"
       },
       {
+        "command": "tidy.openPlayground",
+        "title": "Open Playground",
+        "category": "Tidy"
+      },
+      {
         "command": "tidy.reportIssue",
         "title": "Report an Issue",
         "category": "Tidy"
@@ -133,6 +138,17 @@
             "media": {
               "markdown": "media/walkthrough/safety.md"
             }
+          },
+          {
+            "id": "tidy.gettingStarted.tryIt",
+            "title": "Try it now",
+            "description": "See Tidy work in 30 seconds, on scratch buffers that never touch your disk.\n[Open the playground](command:tidy.openPlayground)\nThen run [Tidy: Preview Format (Diff)](command:tidy.previewFormat) on the playground tab to see a read-only diff of exactly what Tidy would change.",
+            "media": {
+              "markdown": "media/walkthrough/tryit.md"
+            },
+            "completionEvents": [
+              "onCommand:tidy.previewFormat"
+            ]
           },
           {
             "id": "tidy.gettingStarted.choose",
@@ -250,8 +266,16 @@
             "default": 5120,
             "minimum": 0,
             "order": 11,
-            "description": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard.",
-            "markdownDescription": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+            "description": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard. For JSON and JSONC documents, tidy.json.maxFileSizeKB takes precedence over this value.",
+            "markdownDescription": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard. For JSON and JSONC documents, tidy.json.maxFileSizeKB takes precedence over this value.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.json.maxFileSizeKB": {
+            "type": "integer",
+            "default": 10240,
+            "minimum": 0,
+            "order": 12,
+            "description": "Size cap in KB for JSON and JSONC documents only, taking precedence over tidy.maxFileSizeKB for these two languages. JSON gets a higher default because Tidy formats it on a fast linear path and verifies it with a cheap value-equality check, so large files such as package-lock.json format instead of being skipped. 0 disables the cap for JSON/JSONC. When this setting is unset, an explicitly configured tidy.maxFileSizeKB still applies to JSON.",
+            "markdownDescription": "Size cap in KB for JSON and JSONC documents only, taking precedence over tidy.maxFileSizeKB for these two languages. JSON gets a higher default because Tidy formats it on a fast linear path and verifies it with a cheap value-equality check, so large files such as package-lock.json format instead of being skipped. 0 disables the cap for JSON/JSONC. When this setting is unset, an explicitly configured tidy.maxFileSizeKB still applies to JSON.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       },
@@ -627,6 +651,11 @@
     "test:unit": "mocha --require tsx 'test/unit/**/*.test.ts'",
     "coverage": "c8 --reporter=text --reporter=lcov --check-coverage --lines 80 --branches 75 mocha --require tsx 'test/unit/**/*.test.ts'",
     "perf": "tsx test/perf/perf.ts",
+    "perf:baseline": "tsx test/perf/perf.ts --write-baseline",
+    "perf:check": "node scripts/check-perf-regression.mjs",
+    "perf:startup": "tsx test/perf/startup.ts",
+    "check:bundle": "node scripts/check-bundle-size.mjs",
+    "analyze": "node scripts/analyze-bundle.mjs",
     "pretest:integration": "tsc -p ./",
     "test:integration": "vscode-test",
     "package": "vsce package --no-dependencies",

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "note": "Frozen perf regression baseline (ADD-09). Regenerate ONLY deliberately via `npm run perf:baseline` on the reference machine (refused on CI) and review the diff. perf:check fails when a measured p95 exceeds baseline p95 x1.35 (x3 more on CI).",
+  "environment": {
+    "node": "v24.13.0",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "scenarios": {
+    "format": {
+      "cases": {
+        "css": {
+          "p50Ms": 25.8,
+          "p95Ms": 34.5,
+          "guardShare": 1.545
+        },
+        "scss": {
+          "p50Ms": 19,
+          "p95Ms": 26.2,
+          "guardShare": 1.485
+        },
+        "less": {
+          "p50Ms": 73.2,
+          "p95Ms": 82.7,
+          "guardShare": 9.038
+        },
+        "html": {
+          "p50Ms": 22.2,
+          "p95Ms": 27.6,
+          "guardShare": 0.991
+        },
+        "json": {
+          "p50Ms": 6,
+          "p95Ms": 10,
+          "guardShare": 2.927
+        },
+        "jsonc": {
+          "p50Ms": 5.6,
+          "p95Ms": 8.1,
+          "guardShare": 3.099
+        },
+        "javascript": {
+          "p50Ms": 72.6,
+          "p95Ms": 106,
+          "guardShare": 4.118
+        },
+        "typescript": {
+          "p50Ms": 138.9,
+          "p95Ms": 180.6,
+          "guardShare": 0.398
+        },
+        "typescriptreact": {
+          "p50Ms": 129.4,
+          "p95Ms": 153.4,
+          "guardShare": 0.541
+        },
+        "javascriptreact": {
+          "p50Ms": 82.8,
+          "p95Ms": 99.7,
+          "guardShare": 0.829
+        },
+        "json_5mb": {
+          "p50Ms": 789.4,
+          "p95Ms": 789.4,
+          "guardShare": 1.034
+        },
+        "json_10mb": {
+          "p50Ms": 1524.3,
+          "p95Ms": 1524.3,
+          "guardShare": 0.869
+        }
+      }
+    }
+  }
+}

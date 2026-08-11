@@ -23,6 +23,7 @@ const SCANNED_SOURCES: readonly string[] = [
   // v0.3.0 additions: every string they ship is user-facing from day one, so
   // they join the scan rather than waiting for a future audit.
   'src/commands/formatOnSaveOptIn.ts',
+  'src/commands/openPlayground.ts',
   'src/commands/statusBarMenu.ts',
   'src/diagnostics/statusBar.ts',
   'src/diagnostics/statusBarHost.ts'
@@ -87,7 +88,11 @@ describe('commands + provider : every shipped user string is English (audit #16)
     const source = readSource('src/providers/formattingProvider.ts');
     assert.match(source, /Tidy skipped this file: it is larger than \$\{maxKb\} KB/);
     assert.match(source, /ACTION_OPEN_SETTINGS_LABEL/);
-    assert.match(source, /'tidy\.maxFileSizeKB'/);
+    // ADD-08: the toast and the Open Settings target now name the cap that
+    // actually applied (tidy.json.maxFileSizeKB for json/jsonc), resolved once
+    // into sizeLimit.settingKey rather than hard-coded to the generic key.
+    assert.match(source, /\$\{sizeLimit\.settingKey\}/);
+    assert.match(source, /OPEN_SETTINGS_COMMAND_ID,\s*sizeLimit\.settingKey/);
   });
 
   it('no handler surfaces a raw error.message (the code-frame leak)', () => {

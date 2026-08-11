@@ -245,13 +245,14 @@ describe('Tidy onboarding & migration (Axe 1) : consent-first guarantees', funct
       'the VSIX must include media/walkthrough/* assets for the getting-started walkthrough'
     );
 
-    // The four walkthrough steps each reference a markdown file in package.json;
-    // all four must actually ship or the walkthrough renders broken.
+    // The five walkthrough steps each reference a markdown file in package.json;
+    // all five must actually ship or the walkthrough renders broken.
     const shippedMarkdown = new Set(
       walkthrough.map((f) => f.replace(/\\/g, '/'))
     );
     for (const step of [
       'safety.md',
+      'tryit.md',
       'choose.md',
       'formatonsave.md',
       'migration.md'

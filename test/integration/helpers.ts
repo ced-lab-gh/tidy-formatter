@@ -309,7 +309,9 @@ export async function clearTouchedConfig(): Promise<void> {
     'css.enable',
     'html.enable',
     'json.enable',
-    'javascript.enable'
+    'javascript.enable',
+    'maxFileSizeKB',
+    'json.maxFileSizeKB'
   ]) {
     await tidy.update(key, undefined, vscode.ConfigurationTarget.Workspace);
   }

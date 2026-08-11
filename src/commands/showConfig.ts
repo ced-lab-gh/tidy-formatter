@@ -21,6 +21,7 @@ import {
   type CatalogLang,
   type OptionEntry
 } from '../config/optionCatalog';
+import { describeSizeLimit, type EffectiveSizeLimit } from '../config/sizeLimit';
 // The shared, 'vscode'-free detail sanitizer: a resolver/parser error can embed a
 // multi-line payload carrying the user's own content, which must never reach a
 // notification. Every error surfaced below goes through it.
@@ -69,6 +70,13 @@ export interface ReportInput {
   readonly soukformatrcPath?: string;
   /** Non-fatal .soukformatrc warnings to surface (never throws). */
   readonly warnings: readonly string[];
+  /**
+   * Effective per-family size cap for this document (ADD-08): the resolved
+   * tidy.json.maxFileSizeKB / tidy.maxFileSizeKB winner. Optional so pure
+   * callers that do not resolve it keep working; when absent the header line
+   * reads "(not resolved)".
+   */
+  readonly sizeLimit?: EffectiveSizeLimit;
   /**
    * Ignore + coexistence (deference) status for the ACTIVE document (Axe 4.T8).
    * Optional so the pure builder stays usable by callers that do not resolve it;
@@ -231,6 +239,11 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
   lines.push(`Language : ${languageId}`);
   lines.push(`Resolved : ${input.now ?? new Date().toISOString()}`);
   lines.push(`.soukformatrc : ${input.soukformatrcPath ?? '(none found)'}`);
+  lines.push(
+    `Size limit : ${
+      input.sizeLimit ? describeSizeLimit(input.sizeLimit) : '(not resolved)'
+    }`
+  );
   lines.push('');
 
   // Indentation (typed fields, not in the catalogue): the most-asked-about value.
@@ -404,7 +417,7 @@ function getOutputChannel(vscode: any): {
  */
 export async function showEffectiveConfiguration(): Promise<void> {
   const vscode = require('vscode');
-  const { readResolvedOptionsWithDiagnostics } = require('../config/vscodeConfig');
+  const { readResolvedOptionsWithDiagnostics, readSizeLimit } = require('../config/vscodeConfig');
   const { scanMarkers } = require('../ignore/markers');
   const { resolveDocumentIgnore } = require('../ignore/ignoreGate');
   const { detectCompetingFormatters } = require('../deference/detect');
@@ -457,6 +470,15 @@ export async function showEffectiveConfiguration(): Promise<void> {
     return;
   }
 
+  // Effective per-family size cap (ADD-08). Fail-soft like the ignore section:
+  // a resolution failure only omits the line, never breaks the report.
+  let sizeLimit: EffectiveSizeLimit | undefined;
+  try {
+    sizeLimit = readSizeLimit(document, languageId);
+  } catch {
+    sizeLimit = undefined;
+  }
+
   // Resolve the read-only ignore + coexistence status for the active document
   // (Axe 4.T8). Every call here is a READ: it never writes a setting nor touches
   // editor.defaultFormatter. Any failure is fail-soft (the section is omitted).
@@ -489,7 +511,8 @@ export async function showEffectiveConfiguration(): Promise<void> {
     options,
     soukformatrcPath,
     warnings,
-    ignoreStatus
+    ignoreStatus,
+    sizeLimit
   });
 
   const channel = getOutputChannel(vscode);

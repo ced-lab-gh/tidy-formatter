@@ -2,6 +2,8 @@
 // Bundles src/extension.ts -> dist/extension.js as a CommonJS Node module,
 // keeping the 'vscode' module external (provided by the VS Code runtime).
 const esbuild = require('esbuild');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const watch = process.argv.includes('--watch');
 const production = process.argv.includes('--production');
@@ -23,6 +25,11 @@ const options = {
   external: ['vscode'],
   sourcemap: !production,
   minify: production,
+  // ADD-09: in production, emit the esbuild metafile so the bundle-size gate
+  // (scripts/check-bundle-size.mjs) and `npm run analyze`
+  // (scripts/analyze-bundle.mjs) can attribute every byte of dist/extension.js
+  // to its source module. Dev/watch builds skip it (nothing consumes it there).
+  metafile: production,
   logLevel: 'info'
 };
 
@@ -32,7 +39,14 @@ async function main() {
     await ctx.watch();
     console.log('[esbuild] watching...');
   } else {
-    await esbuild.build(options);
+    const result = await esbuild.build(options);
+    if (production) {
+      // dist/meta.json is dev tooling: gitignored via dist/, excluded from the
+      // VSIX via .vscodeignore (locked by test/unit/manifest/perfTooling.test.ts).
+      const metaPath = path.join(__dirname, 'dist', 'meta.json');
+      fs.writeFileSync(metaPath, JSON.stringify(result.metafile));
+      console.log(`[esbuild] metafile written to ${metaPath}`);
+    }
     console.log('[esbuild] build complete');
   }
 }

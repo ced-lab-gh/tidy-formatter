@@ -22,8 +22,15 @@ import {
   APPLY_BUTTON_LABEL,
   GUARD_REJECTED_REASON,
   NO_CHANGE_REASON,
-  type PreviewPlan
+  evaluatePreviewPreconditions,
+  previewDisabledReason,
+  previewTooLargeReason,
+  PREVIEW_IGNORED_FILE_REASON,
+  PREVIEW_IGNORED_MARKER_REASON,
+  type PreviewPlan,
+  type PreviewPreconditionInput
 } from '../../../src/commands/previewFormat';
+import { resolveSizeLimit } from '../../../src/config/sizeLimit';
 import type { GuardVerdict } from '../../../src/types';
 
 const EQUIVALENT: GuardVerdict = { equivalent: true };
@@ -176,6 +183,162 @@ describe('commands/previewFormat : buildPreviewPlan is pure', () => {
       } else {
         assert.equal(typeof plan.reason, 'string');
       }
+    }
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* ADD-03: the preview pre-gates must mirror the provider's, in the same order  */
+/* -------------------------------------------------------------------------- */
+
+describe('commands/previewFormat : evaluatePreviewPreconditions (ADD-03)', () => {
+  // The default CSS cap as the provider resolves it (5120 KB, generic key).
+  const CSS_LIMIT = resolveSizeLimit({ languageId: 'css' });
+
+  const CLEAR: PreviewPreconditionInput = {
+    languageId: 'css',
+    languageEnabled: true,
+    byteLength: 1024,
+    sizeLimit: CSS_LIMIT,
+    ignoredByFile: false,
+    ignoredByMarker: false
+  };
+
+  /** A cap of `kb` KB attributed to `key`, shaped exactly like readSizeLimit's. */
+  function cap(kb: number, key: 'tidy.maxFileSizeKB' | 'tidy.json.maxFileSizeKB') {
+    return {
+      limitKB: kb,
+      limitBytes: kb > 0 ? kb * 1024 : undefined,
+      settingKey: key,
+      source: 'user setting'
+    } as const;
+  }
+
+  it('all gates clear => ok:true', () => {
+    assert.deepEqual(evaluatePreviewPreconditions(CLEAR), { ok: true });
+  });
+
+  it('disabled language => refusal naming the exact setting key', () => {
+    const verdict = evaluatePreviewPreconditions({
+      ...CLEAR,
+      languageEnabled: false
+    });
+    assert.deepEqual(verdict, {
+      ok: false,
+      reason: "no preview: formatting for 'css' is disabled (tidy.css.enable is false)"
+    });
+    assert.equal(verdict.ok === false && verdict.reason, previewDisabledReason('css'));
+  });
+
+  it('ignored by .soukformatignore => stable refusal reason', () => {
+    const verdict = evaluatePreviewPreconditions({ ...CLEAR, ignoredByFile: true });
+    assert.deepEqual(verdict, { ok: false, reason: PREVIEW_IGNORED_FILE_REASON });
+  });
+
+  it('ignored by a head marker => stable refusal reason', () => {
+    const verdict = evaluatePreviewPreconditions({ ...CLEAR, ignoredByMarker: true });
+    assert.deepEqual(verdict, { ok: false, reason: PREVIEW_IGNORED_MARKER_REASON });
+  });
+
+  it('oversized document => refusal naming the KB limit AND the applied key', () => {
+    const verdict = evaluatePreviewPreconditions({
+      ...CLEAR,
+      byteLength: 2 * 1024 * 1024,
+      sizeLimit: cap(1024, 'tidy.maxFileSizeKB')
+    });
+    assert.deepEqual(verdict, {
+      ok: false,
+      reason: previewTooLargeReason(1024, 'tidy.maxFileSizeKB')
+    });
+    assert.ok(verdict.ok === false && verdict.reason.includes('1024 KB'));
+  });
+
+  it('names the per-family key for json/jsonc (ADD-08 attribution survives)', () => {
+    const verdict = evaluatePreviewPreconditions({
+      ...CLEAR,
+      languageId: 'json',
+      byteLength: 20 * 1024 * 1024,
+      sizeLimit: cap(10240, 'tidy.json.maxFileSizeKB')
+    });
+    assert.equal(
+      verdict.ok === false && verdict.reason,
+      'no preview: the document is larger than 10240 KB (tidy.json.maxFileSizeKB)'
+    );
+  });
+
+  it('size boundary matches the provider: equality passes, +1 byte refuses', () => {
+    const atLimit = {
+      ...CLEAR,
+      byteLength: 1024 * 1024,
+      sizeLimit: cap(1024, 'tidy.maxFileSizeKB')
+    };
+    assert.deepEqual(evaluatePreviewPreconditions(atLimit), { ok: true });
+    const overLimit = { ...atLimit, byteLength: 1024 * 1024 + 1 };
+    assert.equal(evaluatePreviewPreconditions(overLimit).ok, false);
+  });
+
+  it('a disabled cap (limitBytes undefined) disables the size gate entirely', () => {
+    const verdict = evaluatePreviewPreconditions({
+      ...CLEAR,
+      byteLength: 10 * 1024 * 1024,
+      sizeLimit: cap(0, 'tidy.maxFileSizeKB')
+    });
+    assert.deepEqual(verdict, { ok: true });
+  });
+
+  it('gate ORDER mirrors provideEdits: disabled beats size beats ignore', () => {
+    // Adversarial: every gate failing at once must surface the FIRST provider
+    // gate, so the preview and the provider always agree on the surfaced WHY.
+    // The provider's order is disabled -> too-large -> ignored-file ->
+    // ignored-marker (ADD-08 moved the size check above the ignore layer so a
+    // rejected document costs O(1) beyond getText()).
+    const everything: PreviewPreconditionInput = {
+      languageId: 'html',
+      languageEnabled: false,
+      byteLength: 99 * 1024 * 1024,
+      sizeLimit: cap(1, 'tidy.maxFileSizeKB'),
+      ignoredByFile: true,
+      ignoredByMarker: true
+    };
+    assert.equal(
+      evaluatePreviewPreconditions(everything).ok === false &&
+        (evaluatePreviewPreconditions(everything) as { reason: string }).reason,
+      previewDisabledReason('html')
+    );
+
+    const enabled = { ...everything, languageEnabled: true };
+    assert.equal(
+      (evaluatePreviewPreconditions(enabled) as { reason: string }).reason,
+      previewTooLargeReason(1, 'tidy.maxFileSizeKB'),
+      'size must be surfaced before either ignore reason'
+    );
+
+    const sized = { ...enabled, byteLength: 10 };
+    assert.equal(
+      (evaluatePreviewPreconditions(sized) as { reason: string }).reason,
+      PREVIEW_IGNORED_FILE_REASON,
+      'the .soukformatignore reason must beat the marker reason'
+    );
+  });
+
+  it('is pure: never mutates a frozen input', () => {
+    const frozen = Object.freeze({ ...CLEAR, ignoredByFile: true });
+    const verdict = evaluatePreviewPreconditions(frozen as PreviewPreconditionInput);
+    assert.equal(verdict.ok, false);
+    assert.equal(frozen.byteLength, 1024);
+    assert.equal(frozen.ignoredByFile, true);
+  });
+
+  it('every refusal reason is English and em-dash free', () => {
+    const reasons = [
+      previewDisabledReason('scss'),
+      previewTooLargeReason(5120, 'tidy.maxFileSizeKB'),
+      PREVIEW_IGNORED_FILE_REASON,
+      PREVIEW_IGNORED_MARKER_REASON
+    ];
+    for (const reason of reasons) {
+      assert.ok(!reason.includes('\u2014'));
+      assert.ok(reason.startsWith('no preview: '));
     }
   });
 });

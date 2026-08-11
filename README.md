@@ -385,6 +385,9 @@ Run **Tidy: Preview Format (diff)** (`tidy.previewFormat`) from the Command Pale
 - Opens a **read-only** side-by-side diff (original vs. formatted). Opening it writes nothing; your file's dirty state is unchanged.
 - The preview runs the **same** pipeline as a normal format, including the equivalence guard. If the guard would reject the output, no diff opens and you get a non-blocking notice (file intact).
 - Click **Apply** to write the result as a **single undo entry** (one `Ctrl+Z` fully reverts it). Dismiss the prompt and nothing is written.
+- The preview honours the same pre-checks as *Format Document*, in the same order: the per-language `tidy.<lang>.enable` switch, the size cap, `.soukformatignore`, and top-of-file ignore markers. When one of them applies, Tidy tells you which and opens no diff, so a preview can never promise a change a real format would refuse.
+
+No file at hand? Run **Tidy: Open Playground** first: it opens the two messy samples from this README as untitled scratch buffers, ready to preview.
 
 ### Status bar
 
@@ -430,7 +433,8 @@ All settings live under the `tidy.*` namespace. Indentation defaults come from y
 | `tidy.wrap_line_length` | `0` | Max characters per line before wrapping; `0` disables wrapping. |
 | `tidy.wrap_attributes` | `auto` | How HTML attributes wrap (`auto`, `force`, `force-aligned`, `force-expand-multiline`, `aligned-multiple`, `preserve`, `preserve-aligned`). |
 | `tidy.space_after_anon_function` | `false` | Add a space after an anonymous `function` keyword. |
-| `tidy.maxFileSizeKB` | `5120` | Skip (with a notice) documents larger than this, so huge files never freeze the editor. `0` disables the guard. |
+| `tidy.maxFileSizeKB` | `5120` | Skip (with a notice) documents larger than this, so huge files never freeze the editor. `0` disables the guard. For JSON and JSONC, `tidy.json.maxFileSizeKB` takes precedence. |
+| `tidy.json.maxFileSizeKB` | `10240` | Size cap for JSON/JSONC only; wins over `tidy.maxFileSizeKB` for these two languages. JSON formats on a fast linear path with a cheap value-equality guard, so big files like `package-lock.json` format instead of being skipped. `0` disables the cap. |
 | `tidy.editorconfig` | `true` | Read the project's `.editorconfig` cascade and let it override plain VS Code settings. Set to `false` to ignore `.editorconfig`. |
 | `tidy.soukformatrc` | `true` | Read the project's `.soukformatrc` file (JSONC) for per-language options and glob overrides, layered above `.editorconfig`. Set to `false` to ignore it. Always ignored in Restricted Mode. |
 | `tidy.respectSoukformatignore` | `true` | Skip files matched by a project `.soukformatignore` (gitignore syntax), leaving them byte-identical. Set to `false` to format every file regardless. Always ignored in Restricted Mode. See [Ignore & coexistence](#ignore--coexistence). |
@@ -485,6 +489,7 @@ All Tidy commands are in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
 | `tidy.useAsFormatter` | Tidy: Use Tidy as my Formatter | Opt in per language: writes `editor.defaultFormatter` (Workspace by default) for the languages you pick, then optionally `editor.formatOnSave` for the same languages, each only after an explicit confirmation with an exact recap; the format-on-save write has a one-click Revert. Cancelling writes nothing. |
 | `tidy.runMigration` | Tidy: Migrate from JS-CSS-HTML Formatter | Imports a legacy `.jsbeautifyrc` into `tidy.*` settings after a confirmation recap (trusted workspaces only), then optionally runs *Use Tidy as my Formatter*. |
 | `tidy.previewFormat` | Tidy: Preview Format (diff) | Opens a **read-only** diff of what Tidy would change, then applies it on an explicit *Apply* click as a **single undo entry**. Opening the diff writes nothing. See [Preview command](#preview-command-read-only-diff--atomic-undo). |
+| `tidy.openPlayground` | Tidy: Open Playground | Opens two **untitled** scratch documents (the messy CSS and TSX samples from this README) so you can try **Preview Format (Diff)** in 30 seconds without touching any file on disk. It opens editors and nothing else: no file is created, no setting is written. |
 | `tidy.reportIssue` | Tidy: Report an Issue | Opens a **prefilled GitHub issue** with your environment (Tidy version, VS Code version, OS, the active file's language) already filled in, so a bug report takes seconds. Read-only: it opens a browser tab and writes nothing. |
 | `tidy.explainLastFormat` | Tidy: Explain last format | Tells you what Tidy's most recent format did on the active file, or **why it did nothing** (safety guard, an ignore rule, the size limit, another default formatter, a disabled language). Writes a content-free trace to the **Tidy Formatter** output channel. Read-only. |
 
@@ -539,6 +544,9 @@ It declares support for untrusted and virtual workspaces. In Restricted Mode it 
 
 **How do I stop Tidy from formatting a specific language?**
 Set `tidy.<lang>.enable` to `false` (e.g. `"tidy.json.enable": false`), or simply don't choose it as the default formatter for that language.
+
+**Can Tidy format large files like `package-lock.json`?**
+Yes. JSON and JSONC have their own size cap, `tidy.json.maxFileSizeKB` (default `10240` KB), which takes precedence over the generic `tidy.maxFileSizeKB` (default `5120` KB). JSON gets the higher default because Tidy formats it on a fast linear path and verifies the result with a cheap value-equality check, so a 10 MB `package-lock.json` formats well inside the performance budget instead of freezing the editor. Other languages keep the stricter cap because their engines and safety checks are heavier. Precedence in one line: an explicitly set `tidy.json.maxFileSizeKB` wins for JSON/JSONC; if it is unset, an explicitly set `tidy.maxFileSizeKB` still applies; otherwise each family uses its own default. If Tidy skips a file, run **Tidy: Explain last format**: it names the applied cap, its setting key and its source, so you know exactly which knob to raise. Set either cap to `0` to disable it.
 
 **How do I stop Tidy from touching a specific file or region?**
 Three ways, all covered in [Ignore & coexistence](#ignore--coexistence): a `.soukformatignore` (gitignore syntax) excludes files project-wide; `tidy-ignore-start`/`tidy-ignore-end` comments preserve a region byte-for-byte; and a head `tidy-ignore-file` / `// prettier-ignore` comment skips the whole file.

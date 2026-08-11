@@ -80,6 +80,24 @@ describe('manifest : onboarding commands (1.T6)', () => {
     const cmd = find('tidy.showEffectiveConfiguration');
     assert.equal(cmd.category, 'Tidy');
   });
+
+  it('declares tidy.openPlayground with category Tidy (ADD-03)', () => {
+    const cmd = find('tidy.openPlayground');
+    assert.equal(cmd.title, 'Open Playground');
+    assert.equal(cmd.category, 'Tidy');
+  });
+
+  it('leaves tidy.openPlayground palette-available on any language', () => {
+    // The playground opens its OWN scratch buffers, so gating it on the active
+    // editor's language would hide it exactly when the user has nothing open :
+    // the moment the walkthrough targets.
+    const cmd = find('tidy.openPlayground');
+    assert.equal(
+      (cmd as { enablement?: string }).enablement,
+      undefined,
+      'the playground command must not be gated on editorLangId'
+    );
+  });
 });
 
 describe('manifest : walkthrough (1.T3)', () => {
@@ -92,9 +110,65 @@ describe('manifest : walkthrough (1.T3)', () => {
     assert.ok(wt, "walkthrough 'tidy.gettingStarted' must exist");
   });
 
-  it('has 4 steps', () => {
+  it('has 5 steps in the aha-first order (ADD-03)', () => {
     const wt = walkthroughs.find((w) => w.id === 'tidy.gettingStarted')!;
-    assert.equal(wt.steps.length, 4);
+    assert.deepEqual(
+      wt.steps.map((s) => s.id),
+      [
+        'tidy.gettingStarted.safety',
+        'tidy.gettingStarted.tryIt',
+        'tidy.gettingStarted.choose',
+        'tidy.gettingStarted.formatOnSave',
+        'tidy.gettingStarted.migration'
+      ]
+    );
+  });
+
+  it('the Try it now step links the playground and completes on the preview command', () => {
+    const wt = walkthroughs.find((w) => w.id === 'tidy.gettingStarted')!;
+    const step = wt.steps.find((s) => s.id === 'tidy.gettingStarted.tryIt');
+    assert.ok(step, 'the tryIt step must exist');
+    assert.equal(step!.title, 'Try it now');
+    assert.ok(
+      step!.description!.includes('command:tidy.openPlayground'),
+      'the step description must carry the playground command link'
+    );
+    assert.ok(
+      step!.description!.includes('command:tidy.previewFormat'),
+      'the step must point at the preview command it completes on'
+    );
+    assert.deepEqual(step!.completionEvents, ['onCommand:tidy.previewFormat']);
+    assert.equal(step!.media?.markdown, 'media/walkthrough/tryit.md');
+    assert.ok(
+      step!.description!.includes('never touch your disk'),
+      'the step must state the zero-disk-write promise up front'
+    );
+  });
+
+  it('every command referenced by a step points at a CONTRIBUTED command', () => {
+    // A dead command: link renders as a button that silently does nothing, which
+    // is the worst possible first contact. Lock every link against the manifest.
+    const contributed = new Set(
+      manifest.contributes.commands.map((c) => c.command)
+    );
+    const wt = walkthroughs.find((w) => w.id === 'tidy.gettingStarted')!;
+    for (const step of wt.steps) {
+      const description = step.description ?? '';
+      for (const match of description.matchAll(/command:([\w.]+)/g)) {
+        assert.ok(
+          contributed.has(match[1]),
+          `step '${step.id}' links command '${match[1]}' which is not contributed`
+        );
+      }
+      for (const event of step.completionEvents ?? []) {
+        if (!event.startsWith('onCommand:')) continue;
+        const id = event.slice('onCommand:'.length);
+        assert.ok(
+          contributed.has(id),
+          `step '${step.id}' completes on '${id}' which is not contributed`
+        );
+      }
+    }
   });
 
   it('each step references an existing markdown media file (no SVG)', () => {

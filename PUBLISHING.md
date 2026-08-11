@@ -1,4 +1,4 @@
-# Publishing Guide — Tidy Formatter
+# Publishing Guide : Tidy Formatter
 
 This guide explains how a maintainer publishes **Tidy Formatter** to both the
 **Visual Studio Marketplace** and **Open VSX** (the open registry used by Cursor,
@@ -113,7 +113,7 @@ commands (and document the intent in the CHANGELOG).
 ## 3. Local fallback (manual publish)
 
 Use this only if GitHub Actions is unavailable. Run everything from this
-directory. **Never** paste a token into a file or commit it — export it in your
+directory. **Never** paste a token into a file or commit it. Export it in your
 shell instead.
 
 ```bash
@@ -146,10 +146,33 @@ npx ovsx publish tidy-formatter.vsix -p "$OVSX_PAT"
 
 ## 4. Token hygiene
 
-- Tokens are **secrets** — store them only in GitHub Actions secrets or a local
+- Tokens are **secrets**: store them only in GitHub Actions secrets or a local
   secret manager; never in the repo, never in a commit message.
 - Set an **expiry** on every token and rotate before it lapses.
 - If a token is ever exposed, **revoke it immediately** at its source (Azure
   DevOps / Open VSX) and issue a new one.
 - The Azure DevOps PAT model is being retired in favour of Entra ID; track the
   Marketplace deprecation timeline and migrate the auth method when required.
+
+---
+
+## 5. Performance gates and baselines
+
+CI blocks a release on three performance gates (see `.github/workflows/ci.yml`):
+
+| Gate | Command | Frozen reference |
+| ---- | ------- | ---------------- |
+| Perf drift | `npm run perf:check` | `test/perf/baseline.json` (p95 x1.35, x3 more on CI) |
+| Cold startup | `npm run perf:startup` | budgets in `test/perf/startupBudgets.ts` |
+| Bundle size | `npm run check:bundle` | `scripts/bundle-baseline.json` |
+
+Rules of thumb:
+
+- **Never edit a frozen baseline to silence a red gate.** First run `npm run analyze`
+  (bundle) or compare `test/perf/results.json` against the baseline (perf) to understand
+  what grew or slowed down.
+- **Raising a budget is a reviewed decision**: regenerate the perf baseline with
+  `npm run perf:baseline` on the reference machine (the command is refused on CI) or
+  edit `scripts/bundle-baseline.json`, and explain the increase in the PR description.
+- `test/perf/results.json` is generated and gitignored; every CI run uploads it as the
+  `perf-results-node*` artifact for later comparison.

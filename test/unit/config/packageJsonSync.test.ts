@@ -9,6 +9,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OPTION_CATALOG } from '../../../src/config/optionCatalog';
+import {
+  DEFAULT_MAX_FILE_SIZE_KB,
+  JSON_DEFAULT_MAX_FILE_SIZE_KB
+} from '../../../src/config/sizeLimit';
 
 interface PkgProperty {
   type?: string;
@@ -65,7 +69,8 @@ const EXPECTED_SECTIONS: readonly { title: string; keys: readonly string[] }[] =
       'tidy.typescript.enable',
       'tidy.typescriptreact.enable',
       'tidy.javascriptreact.enable',
-      'tidy.maxFileSizeKB'
+      'tidy.maxFileSizeKB',
+      'tidy.json.maxFileSizeKB'
     ]
   },
   {
@@ -252,6 +257,7 @@ describe('config/packageJsonSync : catalogue ⇄ package.json', () => {
     // Operational / non-catalogue settings legitimately present in package.json.
     const allowed = new Set([
       'tidy.maxFileSizeKB',
+      'tidy.json.maxFileSizeKB',
       'tidy.editorconfig',
       'tidy.soukformatrc',
       'tidy.respectSoukformatignore',
@@ -266,6 +272,33 @@ describe('config/packageJsonSync : catalogue ⇄ package.json', () => {
       }
       assert.fail(`package.json declares un-catalogued setting "${key}"`);
     }
+  });
+
+  it('declares the per-family json size cap with its exact default (ADD-08)', () => {
+    const prop = props['tidy.json.maxFileSizeKB'];
+    assert.ok(prop, 'tidy.json.maxFileSizeKB must be declared');
+    assert.equal(prop.type, 'integer');
+    assert.equal(prop.default, 10240);
+    assert.equal(prop.minimum, 0);
+    assert.match(
+      String(prop.description),
+      /taking precedence over tidy\.maxFileSizeKB/
+    );
+  });
+
+  it('the generic cap documents that JSON has its own (ADD-08)', () => {
+    const prop = props['tidy.maxFileSizeKB'];
+    assert.ok(prop, 'tidy.maxFileSizeKB must be declared');
+    assert.equal(prop.default, 5120);
+    assert.match(String(prop.description), /tidy\.json\.maxFileSizeKB/);
+  });
+
+  it('the manifest defaults match the pure resolver defaults (no drift)', () => {
+    assert.equal(props['tidy.maxFileSizeKB'].default, DEFAULT_MAX_FILE_SIZE_KB);
+    assert.equal(
+      props['tidy.json.maxFileSizeKB'].default,
+      JSON_DEFAULT_MAX_FILE_SIZE_KB
+    );
   });
 
   it('declares the .soukformatrc opt-out (default true)', () => {

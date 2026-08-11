@@ -27,6 +27,9 @@
 // test fail to load (which is the point: commands/* touch 'vscode', but the
 // planner stays testable).
 import type { GuardVerdict, LangId } from '../types';
+// Type-only: the per-family size cap shape (ADD-08). src/config/sizeLimit.ts is
+// itself 'vscode'-free, and this import erases at compile time either way.
+import type { EffectiveSizeLimit } from '../config/sizeLimit';
 // The shared, 'vscode'-free detail sanitizer: engine/parser errors (Prettier,
 // babel, ...) embed a multi-line code frame carrying the user's SOURCE, which must
 // never reach a notification. Every error surfaced below goes through it.
@@ -71,6 +74,99 @@ export const TEMPLATE_COLLISION_MESSAGE =
  */
 export const RESTORE_FAILED_MESSAGE =
   'Tidy: a protected span could not be restored exactly, so no safe preview is possible. The file is left intact.';
+
+/* -------------------------------------------------------------------------- */
+/* Pure precondition gate (ADD-03): mirrors the provider's pre-checks           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * English, user-facing refusal reasons for the preview pre-gates. The handler
+ * prefixes them with "Tidy: ". They mirror, in the SAME order, the pre-checks
+ * the formatting provider runs (formattingProvider.ts provideEdits): disabled,
+ * too-large, ignored-file, ignored-marker. The preview can therefore never
+ * offer a diff that a real Format Document would refuse to produce.
+ *
+ * ORDER NOTE: the size check sits BEFORE the two ignore checks because ADD-08
+ * moved it there in the provider (a rejected document must cost O(1) beyond
+ * getText(), so no document-proportional work runs above it). The order here is
+ * contractual: both surfaces must always agree on WHY nothing happened.
+ */
+export const PREVIEW_IGNORED_FILE_REASON =
+  'no preview: this file is excluded by .soukformatignore';
+
+export const PREVIEW_IGNORED_MARKER_REASON =
+  'no preview: a top-of-file ignore marker excludes this file';
+
+/** Refusal reason when tidy.<lang>.enable is false. */
+export function previewDisabledReason(languageId: string): string {
+  return `no preview: formatting for '${languageId}' is disabled (tidy.${languageId}.enable is false)`;
+}
+
+/**
+ * Refusal reason when the document exceeds the effective size cap. Names the
+ * cap that ACTUALLY applied (tidy.json.maxFileSizeKB for json/jsonc, the
+ * generic key otherwise, ADD-08) so the user turns the right knob.
+ */
+export function previewTooLargeReason(
+  limitKB: number,
+  settingKey: string
+): string {
+  return `no preview: the document is larger than ${limitKB} KB (${settingKey})`;
+}
+
+/** Plain inputs to the pure precondition gate. No 'vscode' types leak here. */
+export interface PreviewPreconditionInput {
+  readonly languageId: string;
+  /** tidy.<lang>.enable resolved for the document (default true). */
+  readonly languageEnabled: boolean;
+  /** UTF-8 byte length of the document text. */
+  readonly byteLength: number;
+  /** The effective per-family size cap (ADD-08), as the provider resolves it. */
+  readonly sizeLimit: EffectiveSizeLimit;
+  /** Whether .soukformatignore excludes the document (host-gated lookup). */
+  readonly ignoredByFile: boolean;
+  /** Whether a top-of-file ignore marker excludes the document. */
+  readonly ignoredByMarker: boolean;
+}
+
+/** The gate's verdict: ok, or a refusal with its user-facing reason. */
+export type PreviewPrecondition =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Decide whether a preview may run at all. PURE: no I/O, no 'vscode' import.
+ * The check ORDER is contractual: it matches provideEdits so both surfaces
+ * always agree on WHY nothing happens (disabled beats size beats ignore).
+ * Size uses the provider's exact semantics: strict '>' (equality passes), and
+ * an undefined `limitBytes` means the cap is disabled.
+ */
+export function evaluatePreviewPreconditions(
+  input: PreviewPreconditionInput
+): PreviewPrecondition {
+  if (!input.languageEnabled) {
+    return { ok: false, reason: previewDisabledReason(input.languageId) };
+  }
+  if (
+    input.sizeLimit.limitBytes !== undefined &&
+    input.byteLength > input.sizeLimit.limitBytes
+  ) {
+    return {
+      ok: false,
+      reason: previewTooLargeReason(
+        input.sizeLimit.limitKB,
+        input.sizeLimit.settingKey
+      )
+    };
+  }
+  if (input.ignoredByFile) {
+    return { ok: false, reason: PREVIEW_IGNORED_FILE_REASON };
+  }
+  if (input.ignoredByMarker) {
+    return { ok: false, reason: PREVIEW_IGNORED_MARKER_REASON };
+  }
+  return { ok: true };
+}
 
 /* -------------------------------------------------------------------------- */
 /* Pure planner (no 'vscode' : unit-testable under mocha + tsx)                 */
@@ -307,6 +403,9 @@ function basenameOf(path: string): string {
  *
  * Flow (every apply step user-initiated; opening the diff writes nothing):
  *   1. resolve the active editor's language (bail with a notice if unsupported);
+ *   1b. run the SAME pre-gates as the providers, in the same order (enable,
+ *      size, .soukformatignore, head marker); any refusal ends here with a
+ *      non-blocking reason and no diff (ADD-03);
  *   2. resolve options + format via the SAME pipeline as the providers;
  *   3. run the safety guard and the pure `buildPreviewPlan`;
  *   4. if not applicable (guard rejected or no change) -> non-blocking message;
@@ -320,8 +419,10 @@ export async function previewFormat(): Promise<void> {
   const vscode = require('vscode');
   const { dispatchFormat } = require('../engine/dispatcher');
   const { guard } = require('../safety/guard');
-  const { readResolvedOptions } = require('../config/vscodeConfig');
+  const { readResolvedOptions, readSizeLimit } = require('../config/vscodeConfig');
   const { buildMaskPlan } = require('../engine/maskPlan');
+  const { resolveDocumentIgnore } = require('../ignore/ignoreGate');
+  const { scanMarkers } = require('../ignore/markers');
 
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
@@ -340,6 +441,30 @@ export async function previewFormat(): Promise<void> {
     return;
   }
 
+  // ADD-03 prerequisite: honour the SAME pre-gates as the providers
+  // (enable / size / ignore-file / ignore-marker), in the SAME order, BEFORE any
+  // engine or config work, so the diff can only ever show what a real Format
+  // Document would do. READ-ONLY: a preview is an inspection, not a format
+  // attempt, so nothing is recorded (overwriting the lastFormat record would
+  // falsify "Explain last format") and nothing is written.
+  const input = document.getText();
+  const tidyConfig = vscode.workspace.getConfiguration('tidy', document.uri);
+  const precondition = evaluatePreviewPreconditions({
+    languageId,
+    // Truthiness, exactly like the provider's isLanguageEnabled: any falsy
+    // value disables, so a hand-edited settings.json cannot make the preview
+    // and Format Document disagree.
+    languageEnabled: Boolean(tidyConfig.get(`${languageId}.enable`, true)),
+    byteLength: Buffer.byteLength(input, 'utf8'),
+    sizeLimit: readSizeLimit(document, languageId),
+    ignoredByFile: resolveDocumentIgnore(document).ignored === true,
+    ignoredByMarker: scanMarkers(input, languageId).ignoreFile === true
+  });
+  if (!precondition.ok) {
+    void vscode.window.showInformationMessage(`Tidy: ${precondition.reason}`);
+    return;
+  }
+
   // Synthesize the FormattingOptions VS Code would inject, from the editor.
   const tabSize =
     typeof editor.options.tabSize === 'number' ? editor.options.tabSize : 4;
@@ -348,8 +473,6 @@ export async function previewFormat(): Promise<void> {
       ? editor.options.insertSpaces
       : true;
   const formattingOptions = { tabSize, insertSpaces };
-
-  const input = document.getText();
 
   let formatted: string;
   let verdict: GuardVerdict;

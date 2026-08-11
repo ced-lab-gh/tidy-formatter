@@ -22,6 +22,7 @@ tsconfig.json
 # ── QA / coverage / CI artifacts ──
 coverage/**
 .github/**
+dist/meta.json
 
 # ── Dev-only assets & scripts (the .png/.md they PRODUCE are shipped) ──
 samples/**
@@ -33,7 +34,7 @@ scripts/**
 PUBLISHING.md
 
 # ── Local-only internal working docs (strategy / mining / growth /
-#    build reports / vsix archive) — consolidated under _internal/. ──
+#    build reports / vsix archive), consolidated under _internal/. ──
 _internal/**
 STRUCTURE.md
 HANDOFF.md

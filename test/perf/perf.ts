@@ -2,7 +2,8 @@
 //
 // What it proves, end-to-end (format + safety guard, the way the provider runs it):
 //   - P95 < 200 ms for files <= 2000 lines (across every supported language);
-//   - a ~5 MB JSON document formats + guards in < 2 s;
+//   - a ~5 MB JSON document formats + guards in < 2 s, and a ~10 MB one (the
+//     tidy.json.maxFileSizeKB default cap, ADD-08) in < 4 s;
 //   - the Node event loop is never blocked > 50 ms OUTSIDE an awaited format call
 //     (i.e. the formatter introduces no background jank / busy-wait / sync I/O).
 //
@@ -28,6 +29,19 @@ import { performance } from 'node:perf_hooks';
 import { dispatchFormat } from '../../src/engine/dispatcher';
 import { guard } from '../../src/safety/guard';
 import type { LangId, ResolvedOptions } from '../../src/types';
+import {
+  BASELINE_PATH,
+  RESULTS_PATH,
+  currentEnvironment,
+  mergeScenario,
+  readResults,
+  round1,
+  round3,
+  writeBaseline,
+  writeResults,
+  type FormatCaseMetrics,
+  type PerfBaseline
+} from './resultsFile';
 
 // --- budgets (SPEC QA-03 / §9) ---------------------------------------------
 
@@ -42,11 +56,24 @@ import type { LangId, ResolvedOptions } from '../../src/types';
 const CI_BUDGET_MULTIPLIER = 3;
 const PERF_TIME_MULTIPLIER = process.env.CI ? CI_BUDGET_MULTIPLIER : 1;
 
+// ADD-09: `npm run perf:baseline` (--write-baseline) regenerates the versioned
+// regression baseline test/perf/baseline.json from this run. Refused on CI:
+// the baseline must come from a deliberate local run reviewed in diff.
+const WRITE_BASELINE = process.argv.includes('--write-baseline');
+
 const BUDGET = {
   /** P95 of format+guard for files <= 2000 lines (wall-clock, CI-scaled). */
   p95SmallMs: 200 * PERF_TIME_MULTIPLIER,
   /** A single ~5 MB JSON document, format+guard (wall-clock, CI-scaled). */
   json5MbMs: 2000 * PERF_TIME_MULTIPLIER,
+  /**
+   * A single ~10 MB JSON document, format+guard (wall-clock, CI-scaled).
+   * Rationale (ADD-08): 10 MB is the tidy.json.maxFileSizeKB default cap, and
+   * the JSON path is linear, so 2x the 5 MB budget is the honest bound. This is
+   * the budget that makes raising the JSON cap a measured decision rather than
+   * an optimistic one: exceed it and CI fails.
+   */
+  json10MbMs: 4000 * PERF_TIME_MULTIPLIER,
   /** Max event-loop block at any point (wall-clock, CI-scaled). */
   eventLoopMaxMs: 50 * PERF_TIME_MULTIPLIER,
   /** Guard overhead should stay under this fraction of format time (soft, NOT scaled). */
@@ -463,13 +490,13 @@ async function runSmallCase(
   };
 }
 
-async function runJson5Mb(): Promise<CaseResult> {
-  // Build a JSON document of ~5 MB. Each generated entry is well over 100 bytes,
-  // so target the entry count from a per-entry byte estimate, then verify size.
-  const targetBytes = 5 * 1024 * 1024;
-  let entries = 18000;
+async function runLargeJson(targetMb: number, label: string): Promise<CaseResult> {
+  // Build a JSON document of ~targetMb MB. Each generated entry is well over
+  // 100 bytes, so target the entry count from a per-entry byte estimate, then
+  // grow until at or above the target (a couple of iterations at most).
+  const targetBytes = targetMb * 1024 * 1024;
+  let entries = Math.ceil(3600 * targetMb);
   let code = JSON.stringify(makeJsonValue(entries));
-  // Grow until we are at or above 5 MB (a couple of iterations at most).
   while (Buffer.byteLength(code, 'utf8') < targetBytes) {
     entries = Math.ceil(entries * 1.25);
     code = JSON.stringify(makeJsonValue(entries));
@@ -480,7 +507,7 @@ async function runJson5Mb(): Promise<CaseResult> {
   const t = await measureOnce('json', code, options);
 
   return {
-    label: 'json (~5 MB)',
+    label,
     lines: code.split('\n').length,
     bytes: Buffer.byteLength(code, 'utf8'),
     samples: 1,
@@ -543,6 +570,7 @@ interface Violation {
 function collectViolations(
   smallResults: readonly CaseResult[],
   jsonResult: CaseResult,
+  json10Result: CaseResult,
   residualLoopMaxMs: number
 ): Violation[] {
   const violations: Violation[] = [];
@@ -583,6 +611,21 @@ function collectViolations(
     });
   }
 
+  // ADD-08: the document class the raised tidy.json.maxFileSizeKB default now
+  // admits. Both the time and the guard verdict are gated.
+  if (json10Result.maxTotalMs >= BUDGET.json10MbMs) {
+    violations.push({
+      budget: `10 MB JSON < ${BUDGET.json10MbMs} ms`,
+      detail: `json (~10 MB): ${json10Result.maxTotalMs.toFixed(1)} ms`
+    });
+  }
+  if (!json10Result.allApplied) {
+    violations.push({
+      budget: 'guard accepts 10 MB JSON',
+      detail: 'json (~10 MB): guard rejected its own formatted output'
+    });
+  }
+
   if (residualLoopMaxMs >= BUDGET.eventLoopMaxMs) {
     violations.push({
       budget: `event loop never blocked > ${BUDGET.eventLoopMaxMs} ms (outside an awaited format)`,
@@ -591,6 +634,105 @@ function collectViolations(
   }
 
   return violations;
+}
+
+// --- results + baseline persistence (ADD-09) --------------------------------
+
+/**
+ * Stable results/baseline key per case. Human labels carry spaces and
+ * parentheses ('json (~5 MB)'), which make terrible JSON keys and terrible
+ * diffs, so every such label gets an explicit stable key here. A new case with
+ * a label that is neither listed nor already key-shaped fails LOUDLY rather
+ * than silently landing an unreadable key in the versioned baseline.
+ */
+const CASE_KEY_OVERRIDES: Readonly<Record<string, string>> = {
+  'json (~5 MB)': 'json_5mb',
+  'json (~10 MB)': 'json_10mb'
+};
+
+function caseKey(label: string): string {
+  const override = CASE_KEY_OVERRIDES[label];
+  if (override !== undefined) {
+    return override;
+  }
+  if (!/^[a-z0-9_]+$/i.test(label)) {
+    throw new Error(
+      `perf case label '${label}' has no stable results key; ` +
+        'add an entry to CASE_KEY_OVERRIDES in test/perf/perf.ts'
+    );
+  }
+  return label;
+}
+
+function toCaseMetrics(r: CaseResult): FormatCaseMetrics {
+  return {
+    lines: r.lines,
+    bytes: r.bytes,
+    samples: r.samples,
+    p50Ms: round1(r.p50TotalMs),
+    p95Ms: round1(r.p95TotalMs),
+    maxMs: round1(r.maxTotalMs),
+    meanFormatMs: round1(r.meanFormatMs),
+    meanGuardMs: round1(r.meanGuardMs),
+    guardShare: round3(r.guardShare),
+    allApplied: r.allApplied
+  };
+}
+
+/**
+ * Persist this run as the 'format' scenario of test/perf/results.json (always,
+ * even when a budget fails: a red run must still leave numbers to diagnose),
+ * and regenerate the versioned baseline when --write-baseline was passed.
+ */
+function persistResults(
+  allResults: readonly CaseResult[],
+  residualLoopMaxMs: number,
+  rawLoopMaxMs: number
+): void {
+  const cases: Record<string, FormatCaseMetrics> = {};
+  for (const r of allResults) {
+    cases[caseKey(r.label)] = toCaseMetrics(r);
+  }
+  const next = mergeScenario(readResults(), 'format', {
+    cases,
+    eventLoop: {
+      residualMaxMs: round1(residualLoopMaxMs),
+      rawMaxMs: round1(rawLoopMaxMs)
+    }
+  });
+  writeResults(next);
+  // eslint-disable-next-line no-console
+  console.log(`\nResults written to ${RESULTS_PATH}`);
+
+  if (!WRITE_BASELINE) {
+    return;
+  }
+  if (process.env.CI) {
+    throw new Error(
+      'refusing --write-baseline on CI: regenerate the baseline locally on the ' +
+        'reference machine and commit the reviewed diff'
+    );
+  }
+  const env = currentEnvironment();
+  const baselineCases = Object.fromEntries(
+    Object.entries(cases).map(([key, metrics]) => [
+      key,
+      { p50Ms: metrics.p50Ms, p95Ms: metrics.p95Ms, guardShare: metrics.guardShare }
+    ])
+  );
+  const baseline: PerfBaseline = {
+    schemaVersion: 1,
+    note:
+      'Frozen perf regression baseline (ADD-09). Regenerate ONLY deliberately ' +
+      'via `npm run perf:baseline` on the reference machine (refused on CI) and ' +
+      'review the diff. perf:check fails when a measured p95 exceeds baseline ' +
+      'p95 x1.35 (x3 more on CI).',
+    environment: { node: env.node, platform: env.platform, arch: env.arch },
+    scenarios: { format: { cases: baselineCases } }
+  };
+  writeBaseline(baseline);
+  // eslint-disable-next-line no-console
+  console.log(`Baseline written to ${BASELINE_PATH}; review the diff before committing.`);
 }
 
 // --- main -------------------------------------------------------------------
@@ -604,6 +746,7 @@ async function main(): Promise<number> {
       `CI mode: wall-clock budgets relaxed x${PERF_TIME_MULTIPLIER} ` +
         `(shared CI runners are slower/variable; local budgets stay strict). ` +
         `P95 < ${BUDGET.p95SmallMs} ms, 5 MB JSON < ${BUDGET.json5MbMs} ms, ` +
+        `10 MB JSON < ${BUDGET.json10MbMs} ms, ` +
         `event loop < ${BUDGET.eventLoopMaxMs} ms.\n`
     );
   }
@@ -626,14 +769,17 @@ async function main(): Promise<number> {
   const rawLoopMaxMs = heartbeat.rawMaxLatenessMs;
 
   // Large-document budget is measured separately, outside the heartbeat window.
-  const jsonResult = await runJson5Mb();
+  const jsonResult = await runLargeJson(5, 'json (~5 MB)');
+  // ADD-08: the 10 MB case proves the tidy.json.maxFileSizeKB default cap
+  // admits documents that still format + guard within a bounded, CI-gated time.
+  const json10Result = await runLargeJson(10, 'json (~10 MB)');
 
   // eslint-disable-next-line no-console
   console.log('Small files (target <= 2000 lines):');
   printTable(smallResults);
   // eslint-disable-next-line no-console
   console.log('\nLarge document:');
-  printTable([jsonResult]);
+  printTable([jsonResult, json10Result]);
   // eslint-disable-next-line no-console
   console.log(
     `\nEvent loop (small-file campaign): residual background delay = ${residualLoopMaxMs.toFixed(
@@ -646,9 +792,15 @@ async function main(): Promise<number> {
     `Large 5 MB JSON wall time = ${jsonResult.maxTotalMs.toFixed(1)} ms ` +
       `(governed by the < ${BUDGET.json5MbMs} ms budget; runs async off the UI thread in VS Code).`
   );
+  // eslint-disable-next-line no-console
+  console.log(
+    `Large 10 MB JSON wall time = ${json10Result.maxTotalMs.toFixed(1)} ms ` +
+      `(governed by the < ${BUDGET.json10MbMs} ms budget; matches the ` +
+      `tidy.json.maxFileSizeKB default cap).`
+  );
 
   const guardOverBudget = smallResults
-    .concat(jsonResult)
+    .concat(jsonResult, json10Result)
     .filter((r) => r.guardShare > BUDGET.guardShareOfFormat);
   if (guardOverBudget.length > 0) {
     // Soft budget (SPEC §9): report, do not fail the build. Cheap engines make
@@ -661,7 +813,18 @@ async function main(): Promise<number> {
     );
   }
 
-  const violations = collectViolations(smallResults, jsonResult, residualLoopMaxMs);
+  persistResults(
+    smallResults.concat(jsonResult, json10Result),
+    residualLoopMaxMs,
+    rawLoopMaxMs
+  );
+
+  const violations = collectViolations(
+    smallResults,
+    jsonResult,
+    json10Result,
+    residualLoopMaxMs
+  );
 
   // eslint-disable-next-line no-console
   console.log('');

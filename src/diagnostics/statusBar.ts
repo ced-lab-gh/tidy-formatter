@@ -11,6 +11,9 @@
 // detail string is additionally Markdown-escaped before rendering.
 import type { FormatStatus, LastFormatRecord } from './lastFormat';
 import { EXTENSION_ID } from '../commands/setDefaultFormatter';
+// Pure module (no 'vscode'): lets a too-large view name the cap that actually
+// applied (json/jsonc have their own) instead of always the generic key.
+import { settingKeyFromDescription } from '../config/sizeLimit';
 
 /** Setting key relative to the 'tidy' section (declared in package.json). */
 export const STATUS_BAR_ENABLE_KEY = 'statusBar.enable';
@@ -82,8 +85,14 @@ export function computePassiveKind(gates: PassiveGates): PassiveStateKind {
 export interface PassiveFileState {
   readonly kind: PassiveStateKind;
   readonly languageId: string;
-  /** The effective tidy.maxFileSizeKB, surfaced in the too-large tooltip. */
+  /** The effective size cap in KB, surfaced in the too-large tooltip. */
   readonly maxFileSizeKB?: number;
+  /**
+   * The setting key that produced that cap (ADD-08): json/jsonc are governed by
+   * tidy.json.maxFileSizeKB, every other language by tidy.maxFileSizeKB. Absent
+   * means "not resolved", and the tooltip falls back to the generic key.
+   */
+  readonly sizeLimitSettingKey?: string;
   /** The competing editor.defaultFormatter id (kind 'other-default' only). */
   readonly otherFormatterId?: string;
   /** The last format record, ONLY when it belongs to the active document. */
@@ -218,7 +227,10 @@ function transientSentence(record: LastFormatRecord): string {
     case 'config-error':
       return 'Options could not be resolved; nothing was applied.';
     case 'too-large':
-      return 'Skipped: the file exceeds tidy.maxFileSizeKB.';
+      return (
+        'Skipped: the file exceeds ' +
+        `${settingKeyFromDescription(record.detail) ?? 'tidy.maxFileSizeKB'}.`
+      );
     case 'ignored-file':
       return 'Skipped: a .soukformatignore rule excludes this file.';
     case 'ignored-marker':
@@ -271,7 +283,7 @@ function passiveFace(state: PassiveFileState): { icon: string; reason: string } 
       return {
         icon: 'warning',
         reason:
-          `This file exceeds tidy.maxFileSizeKB ` +
+          `This file exceeds ${state.sizeLimitSettingKey ?? 'tidy.maxFileSizeKB'} ` +
           `(${state.maxFileSizeKB ?? '?'} KB); Tidy will skip it.`
       };
     case 'other-default':

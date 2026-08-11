@@ -7,19 +7,20 @@ out/
 
 # ── Test / coverage artifacts (contain absolute local paths) ──
 coverage/
+test/perf/results.json
 .nyc_output/
 .vscode-test/
 samples/out/
 
 # ── Local-only working docs: strategy, mining data, growth/GTM,
-#    build reports, and the vsix archive — all consolidated under
+#    build reports, and the vsix archive, all consolidated under
 #    _internal/. NEVER for the public repo: the mining data can
 #    contain third-party PII scraped from store reviews.
 _internal/
 STRUCTURE.md
 HANDOFF.md
 
-# ── Secrets & personal data (defensive — none tracked today) ──
+# ── Secrets & personal data (defensive: none tracked today) ──
 *.env
 .env*
 *.pat

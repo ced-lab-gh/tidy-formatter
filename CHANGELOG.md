@@ -4,10 +4,12 @@ All notable changes to **Tidy Formatter : JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-08-11
 
-Work towards 0.3.0. The safety guard remains the final judge on every write path,
-including the two new ones below.
+The release that makes Tidy explain itself, format more of what you actually
+write, and let you opt in to format on save without editing JSON by hand. The
+safety guard remains the final judge on every write path, including the two new
+ones below, and Tidy still never hooks the save event.
 
 ### Added
 
@@ -23,16 +25,27 @@ including the two new ones below.
 - **Actionable buttons on every diagnostic.** `Tidy: Explain Last Format` and the guard/size notifications now carry a button mapped to the actual remedy: *Report an Issue* when the guard rejected an output or an engine errored, *Open Settings* for a disabled language or a file over `tidy.maxFileSizeKB`, *Open .soukformatignore* when an ignore rule excluded the file, and *Use Tidy as My Formatter* when another formatter owns the language. The mapping lives in a single pure function, so the notification and the output channel can never disagree. The number of unsolicited notifications is unchanged: buttons were added to the toasts that already existed.
 - **ESLint is now part of the deference check.** Tidy already stepped back when it found a Prettier, Biome or dprint configuration; it now also recognises `.eslintrc*` and flat `eslint.config.*` files, plus the `eslintConfig` key in `package.json`. The message is specific: ESLint reformats through `--fix` rather than acting as a formatter, so Tidy stays manual and does not compete. An `.eslintignore` on its own triggers nothing. Reading is Workspace-Trust gated and executes no project code.
 - **A Tidy submenu in the editor context menu** (*Preview Format (Diff)*, *Explain Last Format*), shown only for supported languages. No default keybinding is added.
+- **Per-family size cap: `tidy.json.maxFileSizeKB` (default `10240`).** Large JSON and JSONC documents such as `package-lock.json` now format instead of being skipped as too large. JSON gets its own, higher cap because Tidy formats it on a fast linear path (jsonc-parser, about 13x faster than js-beautify on big documents) and verifies it with a cheap value-equality check, so multi-megabyte JSON stays well within the performance budget: a ~10 MB document is format-plus-guard benchmarked and CI-gated under 4 seconds. An explicitly set `tidy.json.maxFileSizeKB` wins over `tidy.maxFileSizeKB` for JSON/JSONC; when it is unset, an explicit `tidy.maxFileSizeKB` still applies; `0` disables the cap. Heavier families (js-beautify, Prettier, AST guard) keep the stricter `5120` KB cap. The safety guard is unchanged and still verifies every applied edit.
+- **`Tidy: Open Playground` and a "Try it now" walkthrough step.** The getting-started walkthrough gains a second step that opens **two untitled scratch documents** (the repository's real `messy.css` and `messy.tsx` samples, embedded in the bundle) and invites you to run **Tidy: Preview Format (Diff)** on them. The first look at what Tidy does now takes 30 seconds, on buffers that **never touch your disk**: opening the playground creates zero files, writes no setting and adds no hook, and the step completes only once you have actually previewed a format. The samples are locked byte for byte against `samples/` by a unit test, so the playground, the listing visuals and the integration demo all showcase the same inputs.
+- **Performance instrumentation, gated in CI (developer tooling; zero runtime change).** Three new gates freeze today's numbers before the lazy-loading work planned for 0.4.0, so that any drift becomes a red build instead of a silent slide.
+  - **Startup harness** (`npm run perf:startup`): measures the cold `require` of the production bundle in a child Node process with a stubbed `vscode` module, five samples, median reported. Fails when the median exceeds its budget (400 ms locally, x3 on CI; calibrated on measured medians of 207.7 ms idle and 256.5 ms under load) or when the heap retained at load exceeds 40 MB (measured: 10.7 MB). It also asserts the bundle still exports `activate`/`deactivate`, that the `vscode` require path was really exercised, and, once code splitting lands, that zero lazy chunks load at require time.
+  - **Bundle size budgets** (`npm run check:bundle`): the production build now emits `dist/meta.json` (esbuild metafile, excluded from the VSIX and from git); every shipped executable in `dist/` must stay under its frozen budget in `scripts/bundle-baseline.json` (`extension.js` 2 900 000 bytes against a measured 2 818 641; `one_ini_bg.wasm` 120 000 against 89 224), no budgeted file may disappear, and no unbudgeted executable may appear. `npm run analyze` prints the top 20 size contributors so a size increase can be attributed to a module instead of guessed at.
+  - **Perf regression baseline** (`npm run perf:check`): `npm run perf` now writes `test/perf/results.json` (p50, p95, guard share and the guard verdict per language, uploaded as a CI artifact); the gate fails when any p95 drifts beyond the versioned `test/perf/baseline.json` x1.35 (x3 more on CI). `npm run perf:baseline` regenerates that baseline deliberately, is refused on CI, and produces a diff a reviewer can read.
+  - No change to formatting behaviour, to any decision the safety guard makes, or to the provider-only integration surface: nothing under `src/` was touched. The results file is designed to accept future scenarios (memory, configuration, pathological guard inputs) as additional sections without any coordination between harnesses.
+- **Clearer "too large" diagnostics.** The skip notification, the status bar tooltip, the Output channel line and `Tidy: Explain last format` now name the applied cap, its exact setting key and whether it came from your settings or the default, and the *Open Settings* button targets that exact key. `Tidy: Show Effective Configuration` gained a `Size limit` line for the active document.
 
 ### Changed
 
 - **Settings are now grouped into seven titled sections** (general and safety, indentation and line endings, JavaScript, CSS/SCSS/LESS, HTML, TypeScript and JSX, project and coexistence) with ordering and richer descriptions. **No setting was renamed or removed**: all 44 `tidy.*` identifiers are unchanged, so existing configurations keep working exactly as before.
 - **Commands no longer appear for unsupported languages.** `Preview Format`, `Explain Last Format` and `Show Effective Configuration` are now gated on the active language, instead of appearing in the palette and failing when run.
 - Command titles are consistently Title Case.
+- **`Tidy: Preview Format (Diff)` now honours the full formatting pipeline.** Before doing any work, the preview applies the same pre-checks as *Format Document*, in the same order: `tidy.<lang>.enable`, the effective size cap (`tidy.json.maxFileSizeKB` for JSON/JSONC, `tidy.maxFileSizeKB` otherwise), `.soukformatignore`, and top-of-file ignore markers. When a check refuses, Tidy says which one in a non-blocking message and opens no diff, so the preview can never offer a change that a real format would refuse to produce. The preview stays read-only: it records nothing, so `Explain last format` keeps describing your last real format.
 
 ### Fixed
 
 - **Every user-facing string is now in English.** Seventeen notification strings in the preview, configuration, formatter-opt-in and formatting-provider paths were still in French, while the rest of the product was English. A test now fails the build if a French string reappears, and another fails it if an em dash is introduced anywhere in the shipped surface.
+- **The size guard now runs before any document-proportional work** (ignore-file lookup, in-source marker scan), so skipping an oversized document is immediate. A non-number value in `tidy.maxFileSizeKB` no longer silently disables the guard: it falls back to the default instead.
+- **A cancelled format no longer runs the safety guard.** The provider now yields once before the guard and re-checks the cancellation token, so pressing Escape on a multi-megabyte document stops the work instead of paying for the whole equivalence check first. Cancelling still writes nothing: without an `equivalent` verdict no edit is ever produced.
 
 ## [0.2.2] - 2026-08-11
 
