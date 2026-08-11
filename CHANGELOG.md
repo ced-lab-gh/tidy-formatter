@@ -4,7 +4,28 @@ All notable changes to **Tidy Formatter : JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.2.2] - 2026-08-05
+## [Unreleased]
+
+First wave of the 0.3.0 work. No change to the formatting engine and no change to
+any decision the safety guard makes.
+
+### Added
+
+- **Actionable buttons on every diagnostic.** `Tidy: Explain Last Format` and the guard/size notifications now carry a button mapped to the actual remedy: *Report an Issue* when the guard rejected an output or an engine errored, *Open Settings* for a disabled language or a file over `tidy.maxFileSizeKB`, *Open .soukformatignore* when an ignore rule excluded the file, and *Use Tidy as My Formatter* when another formatter owns the language. The mapping lives in a single pure function, so the notification and the output channel can never disagree. The number of unsolicited notifications is unchanged: buttons were added to the toasts that already existed.
+- **ESLint is now part of the deference check.** Tidy already stepped back when it found a Prettier, Biome or dprint configuration; it now also recognises `.eslintrc*` and flat `eslint.config.*` files, plus the `eslintConfig` key in `package.json`. The message is specific: ESLint reformats through `--fix` rather than acting as a formatter, so Tidy stays manual and does not compete. An `.eslintignore` on its own triggers nothing. Reading is Workspace-Trust gated and executes no project code.
+- **A Tidy submenu in the editor context menu** (*Preview Format (Diff)*, *Explain Last Format*), shown only for supported languages. No default keybinding is added.
+
+### Changed
+
+- **Settings are now grouped into seven titled sections** (general and safety, indentation and line endings, JavaScript, CSS/SCSS/LESS, HTML, TypeScript and JSX, project and coexistence) with ordering and richer descriptions. **No setting was renamed or removed**: all 44 `tidy.*` identifiers are unchanged, so existing configurations keep working exactly as before.
+- **Commands no longer appear for unsupported languages.** `Preview Format`, `Explain Last Format` and `Show Effective Configuration` are now gated on the active language, instead of appearing in the palette and failing when run.
+- Command titles are consistently Title Case.
+
+### Fixed
+
+- **Every user-facing string is now in English.** Seventeen notification strings in the preview, configuration, formatter-opt-in and formatting-provider paths were still in French, while the rest of the product was English. A test now fails the build if a French string reappears, and another fails it if an em dash is introduced anywhere in the shipped surface.
+
+## [0.2.2] - 2026-08-11
 
 Safety release. An adversarial audit of the safety guard found five ways a
 corrupted output could pass the equivalence check and be written to your file.

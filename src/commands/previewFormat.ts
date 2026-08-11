@@ -27,6 +27,10 @@
 // test fail to load (which is the point: commands/* touch 'vscode', but the
 // planner stays testable).
 import type { GuardVerdict, LangId } from '../types';
+// The shared, 'vscode'-free detail sanitizer: engine/parser errors (Prettier,
+// babel, ...) embed a multi-line code frame carrying the user's SOURCE, which must
+// never reach a notification. Every error surfaced below goes through it.
+import { sanitizeDetail } from '../diagnostics/lastFormat';
 
 /** Command id (registered by extension.ts; this module owns only the constant). */
 export const PREVIEW_FORMAT_COMMAND_ID = 'tidy.previewFormat';
@@ -43,13 +47,14 @@ export const APPLY_BUTTON_LABEL = 'Apply';
  * sees one consistent message across the format and preview paths.
  */
 export const GUARD_REJECTED_REASON =
-  'aucun changement applique (la sortie aurait casse la syntaxe)';
+  'no change applied: the formatted output was not provably equivalent to your original';
 
 /**
  * Surfaced verbatim when formatting would change nothing: the document is
  * already tidy, so there is nothing to preview or apply.
  */
-export const NO_CHANGE_REASON = 'le document est deja formate : aucun changement';
+export const NO_CHANGE_REASON =
+  'this document is already formatted : there is nothing to change';
 
 /* -------------------------------------------------------------------------- */
 /* Pure planner (no 'vscode' : unit-testable under mocha + tsx)                 */
@@ -248,7 +253,7 @@ async function showDiffAndOfferApply(
   );
 
   const picked = await vscode.window.showInformationMessage(
-    `Tidy: apercu pret pour ${baseName}. Cliquez "${APPLY_BUTTON_LABEL}" pour appliquer (un seul Ctrl+Z annule).`,
+    `Tidy: preview ready for ${baseName}. Click "${APPLY_BUTTON_LABEL}" to apply it (a single Ctrl+Z reverts it).`,
     APPLY_BUTTON_LABEL
   );
 
@@ -260,16 +265,17 @@ async function showDiffAndOfferApply(
   try {
     applied = await applyFormatted(vscode, document, formatted);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'unknown error';
+    const detail =
+      error instanceof Error ? sanitizeDetail(error.message) : 'unknown error';
     void vscode.window.showErrorMessage(
-      `Tidy: impossible d'appliquer l'apercu (${message}).`
+      `Tidy: could not apply the preview (${detail}).`
     );
     return;
   }
 
   if (!applied) {
     void vscode.window.showWarningMessage(
-      'Tidy: l\'apercu n\'a pas pu etre applique (le document a peut-etre change).'
+      'Tidy: the preview could not be applied (the document may have changed).'
     );
   }
 }
@@ -303,7 +309,7 @@ export async function previewFormat(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     void vscode.window.showInformationMessage(
-      'Tidy: ouvrez un fichier pour previsualiser son formatage.'
+      'Tidy: open a file to preview how it would be formatted.'
     );
     return;
   }
@@ -312,7 +318,7 @@ export async function previewFormat(): Promise<void> {
   const languageId = toSupportedLangId(document.languageId);
   if (!languageId) {
     void vscode.window.showInformationMessage(
-      `Tidy: le langage "${document.languageId}" n'est pas pris en charge.`
+      `Tidy: the language "${document.languageId}" is not supported.`
     );
     return;
   }
@@ -337,9 +343,13 @@ export async function previewFormat(): Promise<void> {
     // pure planner then reports the no-change case explicitly.
     verdict = guard.check(languageId, input, formatted);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'unknown error';
+    // NEVER surface a raw engine message: a Prettier/babel parse error carries a
+    // code frame with the user's own source. sanitizeDetail keeps the first line
+    // only and caps its length.
+    const detail =
+      error instanceof Error ? sanitizeDetail(error.message) : 'unknown error';
     void vscode.window.showErrorMessage(
-      `Tidy: impossible de preparer l'apercu (${message}).`
+      `Tidy: could not prepare the preview (${detail}).`
     );
     return;
   }

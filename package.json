@@ -64,11 +64,12 @@
       {
         "command": "tidy.showEffectiveConfiguration",
         "title": "Show Effective Configuration",
-        "category": "Tidy"
+        "category": "Tidy",
+        "enablement": "editorLangId in tidy.supportedLanguages"
       },
       {
         "command": "tidy.useAsFormatter",
-        "title": "Use Tidy as my Formatter",
+        "title": "Use Tidy as My Formatter",
         "category": "Tidy"
       },
       {
@@ -78,8 +79,9 @@
       },
       {
         "command": "tidy.previewFormat",
-        "title": "Preview Format (diff)",
-        "category": "Tidy"
+        "title": "Preview Format (Diff)",
+        "category": "Tidy",
+        "enablement": "editorLangId in tidy.supportedLanguages"
       },
       {
         "command": "tidy.reportIssue",
@@ -88,10 +90,36 @@
       },
       {
         "command": "tidy.explainLastFormat",
-        "title": "Explain last format",
-        "category": "Tidy"
+        "title": "Explain Last Format",
+        "category": "Tidy",
+        "enablement": "editorLangId in tidy.supportedLanguages"
       }
     ],
+    "submenus": [
+      {
+        "id": "tidy.editorContext",
+        "label": "Tidy"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "tidy.editorContext",
+          "group": "1_modification@99",
+          "when": "editorLangId in tidy.supportedLanguages"
+        }
+      ],
+      "tidy.editorContext": [
+        {
+          "command": "tidy.previewFormat",
+          "group": "1_tidy@1"
+        },
+        {
+          "command": "tidy.explainLastFormat",
+          "group": "1_tidy@2"
+        }
+      ]
+    },
     "walkthroughs": [
       {
         "id": "tidy.gettingStarted",
@@ -109,7 +137,7 @@
           {
             "id": "tidy.gettingStarted.choose",
             "title": "Use Tidy as your formatter",
-            "description": "Run [Tidy: Use Tidy as my Formatter](command:tidy.useAsFormatter) to opt in per language: fully reversible, nothing is written until you confirm.",
+            "description": "Run [Tidy: Use Tidy as My Formatter](command:tidy.useAsFormatter) to opt in per language: fully reversible, nothing is written until you confirm.",
             "media": {
               "markdown": "media/walkthrough/choose.md"
             },
@@ -142,318 +170,445 @@
         ]
       }
     ],
-    "configuration": {
-      "title": "Tidy Formatter",
-      "properties": {
-        "tidy.css.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for CSS."
-        },
-        "tidy.scss.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for SCSS."
-        },
-        "tidy.less.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for LESS."
-        },
-        "tidy.html.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for HTML."
-        },
-        "tidy.json.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for JSON."
-        },
-        "tidy.jsonc.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for JSON with comments."
-        },
-        "tidy.javascript.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for JavaScript."
-        },
-        "tidy.typescript.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for TypeScript."
-        },
-        "tidy.typescriptreact.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for TSX (TypeScript React)."
-        },
-        "tidy.javascriptreact.enable": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Tidy as a formatting provider for JSX (JavaScript React)."
-        },
-        "tidy.indent": {
-          "type": "integer",
-          "default": 4,
-          "minimum": 1,
-          "maximum": 16,
-          "description": "Indentation size used when neither the editor nor a project config provides one (js-beautify indent_size).",
-          "scope": "language-overridable"
-        },
-        "tidy.brace_style": {
-          "type": "string",
-          "default": "collapse",
-          "enum": [
-            "collapse",
-            "expand",
-            "end-expand",
-            "none",
-            "collapse-preserve-inline"
-          ],
-          "description": "Brace placement style (js-beautify brace_style).",
-          "scope": "language-overridable"
-        },
-        "tidy.wrap_line_length": {
-          "type": "integer",
-          "default": 0,
-          "minimum": 0,
-          "description": "Maximum characters per line before wrapping; 0 disables wrapping (js-beautify wrap_line_length).",
-          "scope": "language-overridable"
-        },
-        "tidy.wrap_attributes": {
-          "type": "string",
-          "default": "auto",
-          "enum": [
-            "auto",
-            "force",
-            "force-aligned",
-            "force-expand-multiline",
-            "aligned-multiple",
-            "preserve",
-            "preserve-aligned"
-          ],
-          "description": "How HTML attributes are wrapped (js-beautify wrap_attributes).",
-          "scope": "language-overridable"
-        },
-        "tidy.space_after_anon_function": {
-          "type": "boolean",
-          "default": false,
-          "description": "Add a space after an anonymous function keyword (js-beautify space_after_anon_function).",
-          "scope": "language-overridable"
-        },
-        "tidy.end_of_line": {
-          "type": "string",
-          "default": "lf",
-          "enum": [
-            "lf",
-            "crlf"
-          ],
-          "description": "Line-ending style applied to formatted output when no editor/project setting governs (lf or crlf).",
-          "scope": "language-overridable"
-        },
-        "tidy.preserve_newlines": {
-          "type": "boolean",
-          "default": true,
-          "description": "Keep existing blank lines between statements/rules (js-beautify preserve_newlines).",
-          "scope": "language-overridable"
-        },
-        "tidy.max_preserve_newlines": {
-          "type": "integer",
-          "default": 10,
-          "minimum": 0,
-          "description": "Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines).",
-          "scope": "language-overridable"
-        },
-        "tidy.indent_empty_lines": {
-          "type": "boolean",
-          "default": false,
-          "description": "Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines).",
-          "scope": "language-overridable"
-        },
-        "tidy.space_in_paren": {
-          "type": "boolean",
-          "default": false,
-          "description": "Add padding spaces inside parentheses, e.g. f( a ) (js-beautify space_in_paren).",
-          "scope": "language-overridable"
-        },
-        "tidy.space_in_empty_paren": {
-          "type": "boolean",
-          "default": false,
-          "description": "Keep a space inside an empty parentheses pair, e.g. f( ) (js-beautify space_in_empty_paren).",
-          "scope": "language-overridable"
-        },
-        "tidy.break_chained_methods": {
-          "type": "boolean",
-          "default": false,
-          "description": "Break chained method calls across lines (js-beautify break_chained_methods).",
-          "scope": "language-overridable"
-        },
-        "tidy.keep_array_indentation": {
-          "type": "boolean",
-          "default": false,
-          "description": "Preserve array element indentation as authored (js-beautify keep_array_indentation).",
-          "scope": "language-overridable"
-        },
-        "tidy.comma_first": {
-          "type": "boolean",
-          "default": false,
-          "description": "Put commas at the start of the next line rather than the end (js-beautify comma_first).",
-          "scope": "language-overridable"
-        },
-        "tidy.operator_position": {
-          "type": "string",
-          "default": "before-newline",
-          "enum": [
-            "before-newline",
-            "after-newline",
-            "preserve-newline"
-          ],
-          "description": "Where line-breaking operators are placed relative to the newline (js-beautify operator_position).",
-          "scope": "language-overridable"
-        },
-        "tidy.selector_separator_newline": {
-          "type": "boolean",
-          "default": true,
-          "description": "Put each selector in a comma-separated group on its own line (js-beautify selector_separator_newline).",
-          "scope": "language-overridable"
-        },
-        "tidy.newline_between_rules": {
-          "type": "boolean",
-          "default": true,
-          "description": "Insert a blank line between CSS rules (js-beautify newline_between_rules).",
-          "scope": "language-overridable"
-        },
-        "tidy.space_around_combinator": {
-          "type": "boolean",
-          "default": false,
-          "description": "Put spaces around selector combinators, e.g. a > b (js-beautify space_around_combinator).",
-          "scope": "language-overridable"
-        },
-        "tidy.indent_inner_html": {
-          "type": "boolean",
-          "default": false,
-          "description": "Indent <head> and <body> sections inside <html> (js-beautify indent_inner_html).",
-          "scope": "language-overridable"
-        },
-        "tidy.indent_scripts": {
-          "type": "string",
-          "default": "normal",
-          "enum": [
-            "keep",
-            "separate",
-            "normal"
-          ],
-          "description": "How <script>/<style> contents are indented inside HTML (js-beautify indent_scripts).",
-          "scope": "language-overridable"
-        },
-        "tidy.wrap_attributes_indent_size": {
-          "type": "integer",
-          "default": 4,
-          "minimum": 0,
-          "description": "Indent size for wrapped HTML attributes (js-beautify wrap_attributes_indent_size).",
-          "scope": "language-overridable"
-        },
-        "tidy.prettier.printWidth": {
-          "type": "integer",
-          "default": 80,
-          "minimum": 1,
-          "description": "Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only.",
-          "scope": "language-overridable"
-        },
-        "tidy.prettier.semi": {
-          "type": "boolean",
-          "default": true,
-          "description": "Print semicolons at the end of statements (Prettier semi). Stylistic only; does not change the AST.",
-          "scope": "language-overridable"
-        },
-        "tidy.prettier.singleQuote": {
-          "type": "boolean",
-          "default": false,
-          "description": "Use single quotes instead of double quotes (Prettier singleQuote). Stylistic only.",
-          "scope": "language-overridable"
-        },
-        "tidy.prettier.jsxSingleQuote": {
-          "type": "boolean",
-          "default": false,
-          "description": "Use single quotes in JSX attributes (Prettier jsxSingleQuote). Stylistic only.",
-          "scope": "language-overridable"
-        },
-        "tidy.prettier.trailingComma": {
-          "type": "string",
-          "default": "all",
-          "enum": [
-            "none",
-            "es5",
-            "all"
-          ],
-          "description": "Where trailing commas are printed (Prettier trailingComma). Stylistic only.",
-          "scope": "language-overridable"
-        },
-        "tidy.prettier.bracketSpacing": {
-          "type": "boolean",
-          "default": true,
-          "description": "Print spaces inside object braces, e.g. { a } (Prettier bracketSpacing). Stylistic only.",
-          "scope": "language-overridable"
-        },
-        "tidy.prettier.bracketSameLine": {
-          "type": "boolean",
-          "default": false,
-          "description": "Put the > of a multi-line element on the last attribute line (Prettier bracketSameLine). Stylistic only.",
-          "scope": "language-overridable"
-        },
-        "tidy.prettier.arrowParens": {
-          "type": "string",
-          "default": "always",
-          "enum": [
-            "always",
-            "avoid"
-          ],
-          "description": "Include parentheses around a sole arrow-function parameter (Prettier arrowParens). Stylistic only.",
-          "scope": "language-overridable"
-        },
-        "tidy.maxFileSizeKB": {
-          "type": "integer",
-          "default": 5120,
-          "minimum": 0,
-          "description": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard."
-        },
-        "tidy.editorconfig": {
-          "type": "boolean",
-          "default": true,
-          "description": "Read the project's .editorconfig cascade (honouring root=true) and let it override plain VS Code settings. Disable to ignore .editorconfig entirely. Workspace .editorconfig is always ignored in Restricted Mode."
-        },
-        "tidy.soukformatrc": {
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "description": "Read the project's .soukformatrc file (JSONC) for per-language formatting options and glob overrides, layered above .editorconfig. Disable to ignore .soukformatrc entirely. A workspace .soukformatrc is always ignored in Restricted Mode."
-        },
-        "tidy.respectSoukformatignore": {
-          "type": "boolean",
-          "default": true,
-          "scope": "resource",
-          "description": "Skip formatting files matched by the project's .soukformatignore (gitignore syntax), so Tidy leaves them byte-identical. Disable to format every file regardless. A workspace .soukformatignore is always ignored in Restricted Mode."
-        },
-        "tidy.deferToOtherFormatters": {
-          "type": "string",
-          "default": "notify",
-          "enum": [
-            "notify",
-            "silent-defer",
-            "off"
-          ],
-          "enumDescriptions": [
-            "Show a one-time notification when this workspace already configures another formatter (Prettier, Biome, dprint). Tidy never takes over; your default formatter is unchanged.",
-            "Do not notify, but acknowledge another formatter is configured. Tidy still never disables itself or changes any setting.",
-            "Ignore detection of other formatters entirely (no notification)."
-          ],
-          "description": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification."
+    "configuration": [
+      {
+        "title": "General & Safety",
+        "order": 1,
+        "properties": {
+          "tidy.css.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "description": "Enable Tidy as a formatting provider for CSS.",
+            "markdownDescription": "Enable Tidy as a formatting provider for CSS.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.scss.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 2,
+            "description": "Enable Tidy as a formatting provider for SCSS.",
+            "markdownDescription": "Enable Tidy as a formatting provider for SCSS.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.less.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 3,
+            "description": "Enable Tidy as a formatting provider for LESS.",
+            "markdownDescription": "Enable Tidy as a formatting provider for LESS.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.html.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 4,
+            "description": "Enable Tidy as a formatting provider for HTML.",
+            "markdownDescription": "Enable Tidy as a formatting provider for HTML.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.json.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 5,
+            "description": "Enable Tidy as a formatting provider for JSON.",
+            "markdownDescription": "Enable Tidy as a formatting provider for JSON.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.jsonc.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 6,
+            "description": "Enable Tidy as a formatting provider for JSON with comments.",
+            "markdownDescription": "Enable Tidy as a formatting provider for JSON with comments.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.javascript.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 7,
+            "description": "Enable Tidy as a formatting provider for JavaScript.",
+            "markdownDescription": "Enable Tidy as a formatting provider for JavaScript.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.typescript.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 8,
+            "description": "Enable Tidy as a formatting provider for TypeScript.",
+            "markdownDescription": "Enable Tidy as a formatting provider for TypeScript.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.typescriptreact.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 9,
+            "description": "Enable Tidy as a formatting provider for TSX (TypeScript React).",
+            "markdownDescription": "Enable Tidy as a formatting provider for TSX (TypeScript React).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.javascriptreact.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 10,
+            "description": "Enable Tidy as a formatting provider for JSX (JavaScript React).",
+            "markdownDescription": "Enable Tidy as a formatting provider for JSX (JavaScript React).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.maxFileSizeKB": {
+            "type": "integer",
+            "default": 5120,
+            "minimum": 0,
+            "order": 11,
+            "description": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard.",
+            "markdownDescription": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          }
+        }
+      },
+      {
+        "title": "Indentation & Line Endings",
+        "order": 2,
+        "properties": {
+          "tidy.indent": {
+            "type": "integer",
+            "default": 4,
+            "minimum": 1,
+            "maximum": 16,
+            "scope": "language-overridable",
+            "order": 1,
+            "description": "Indentation size used when neither the editor nor a project config provides one (js-beautify indent_size).",
+            "markdownDescription": "Indentation size used when neither the editor nor a project config provides one (js-beautify indent_size).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.end_of_line": {
+            "type": "string",
+            "default": "lf",
+            "enum": [
+              "lf",
+              "crlf"
+            ],
+            "scope": "language-overridable",
+            "order": 2,
+            "description": "Line-ending style applied to formatted output when no editor/project setting governs (lf or crlf).",
+            "markdownDescription": "Line-ending style applied to formatted output when no editor/project setting governs (lf or crlf).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.preserve_newlines": {
+            "type": "boolean",
+            "default": true,
+            "scope": "language-overridable",
+            "order": 3,
+            "description": "Keep existing blank lines between statements/rules (js-beautify preserve_newlines).",
+            "markdownDescription": "Keep existing blank lines between statements/rules (js-beautify preserve_newlines).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.max_preserve_newlines": {
+            "type": "integer",
+            "default": 10,
+            "minimum": 0,
+            "scope": "language-overridable",
+            "order": 4,
+            "description": "Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines).",
+            "markdownDescription": "Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.indent_empty_lines": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 5,
+            "description": "Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines).",
+            "markdownDescription": "Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.wrap_line_length": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "scope": "language-overridable",
+            "order": 6,
+            "description": "Maximum characters per line before wrapping; 0 disables wrapping (js-beautify wrap_line_length).",
+            "markdownDescription": "Maximum characters per line before wrapping; 0 disables wrapping (js-beautify wrap_line_length).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          }
+        }
+      },
+      {
+        "title": "JavaScript (js-beautify)",
+        "order": 3,
+        "properties": {
+          "tidy.brace_style": {
+            "type": "string",
+            "default": "collapse",
+            "enum": [
+              "collapse",
+              "expand",
+              "end-expand",
+              "none",
+              "collapse-preserve-inline"
+            ],
+            "scope": "language-overridable",
+            "order": 1,
+            "description": "Brace placement style (js-beautify brace_style).",
+            "markdownDescription": "Brace placement style (js-beautify brace_style).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.space_after_anon_function": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 2,
+            "description": "Add a space after an anonymous function keyword (js-beautify space_after_anon_function).",
+            "markdownDescription": "Add a space after an anonymous function keyword (js-beautify space_after_anon_function).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.space_in_paren": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 3,
+            "description": "Add padding spaces inside parentheses, e.g. f( a ) (js-beautify space_in_paren).",
+            "markdownDescription": "Add padding spaces inside parentheses, e.g. f( a ) (js-beautify space_in_paren).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.space_in_empty_paren": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 4,
+            "description": "Keep a space inside an empty parentheses pair, e.g. f( ) (js-beautify space_in_empty_paren).",
+            "markdownDescription": "Keep a space inside an empty parentheses pair, e.g. f( ) (js-beautify space_in_empty_paren).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.break_chained_methods": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 5,
+            "description": "Break chained method calls across lines (js-beautify break_chained_methods).",
+            "markdownDescription": "Break chained method calls across lines (js-beautify break_chained_methods).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.keep_array_indentation": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 6,
+            "description": "Preserve array element indentation as authored (js-beautify keep_array_indentation).",
+            "markdownDescription": "Preserve array element indentation as authored (js-beautify keep_array_indentation).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.comma_first": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 7,
+            "description": "Put commas at the start of the next line rather than the end (js-beautify comma_first).",
+            "markdownDescription": "Put commas at the start of the next line rather than the end (js-beautify comma_first).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.operator_position": {
+            "type": "string",
+            "default": "before-newline",
+            "enum": [
+              "before-newline",
+              "after-newline",
+              "preserve-newline"
+            ],
+            "scope": "language-overridable",
+            "order": 8,
+            "description": "Where line-breaking operators are placed relative to the newline (js-beautify operator_position).",
+            "markdownDescription": "Where line-breaking operators are placed relative to the newline (js-beautify operator_position).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          }
+        }
+      },
+      {
+        "title": "CSS, SCSS & LESS",
+        "order": 4,
+        "properties": {
+          "tidy.selector_separator_newline": {
+            "type": "boolean",
+            "default": true,
+            "scope": "language-overridable",
+            "order": 1,
+            "description": "Put each selector in a comma-separated group on its own line (js-beautify selector_separator_newline).",
+            "markdownDescription": "Put each selector in a comma-separated group on its own line (js-beautify selector_separator_newline).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.newline_between_rules": {
+            "type": "boolean",
+            "default": true,
+            "scope": "language-overridable",
+            "order": 2,
+            "description": "Insert a blank line between CSS rules (js-beautify newline_between_rules).",
+            "markdownDescription": "Insert a blank line between CSS rules (js-beautify newline_between_rules).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.space_around_combinator": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 3,
+            "description": "Put spaces around selector combinators, e.g. a > b (js-beautify space_around_combinator).",
+            "markdownDescription": "Put spaces around selector combinators, e.g. a > b (js-beautify space_around_combinator).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          }
+        }
+      },
+      {
+        "title": "HTML",
+        "order": 5,
+        "properties": {
+          "tidy.wrap_attributes": {
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "force",
+              "force-aligned",
+              "force-expand-multiline",
+              "aligned-multiple",
+              "preserve",
+              "preserve-aligned"
+            ],
+            "scope": "language-overridable",
+            "order": 1,
+            "description": "How HTML attributes are wrapped (js-beautify wrap_attributes).",
+            "markdownDescription": "How HTML attributes are wrapped (js-beautify wrap_attributes).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.wrap_attributes_indent_size": {
+            "type": "integer",
+            "default": 4,
+            "minimum": 0,
+            "scope": "language-overridable",
+            "order": 2,
+            "description": "Indent size for wrapped HTML attributes (js-beautify wrap_attributes_indent_size).",
+            "markdownDescription": "Indent size for wrapped HTML attributes (js-beautify wrap_attributes_indent_size).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.indent_inner_html": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 3,
+            "description": "Indent <head> and <body> sections inside <html> (js-beautify indent_inner_html).",
+            "markdownDescription": "Indent <head> and <body> sections inside <html> (js-beautify indent_inner_html).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.indent_scripts": {
+            "type": "string",
+            "default": "normal",
+            "enum": [
+              "keep",
+              "separate",
+              "normal"
+            ],
+            "scope": "language-overridable",
+            "order": 4,
+            "description": "How <script>/<style> contents are indented inside HTML (js-beautify indent_scripts).",
+            "markdownDescription": "How <script>/<style> contents are indented inside HTML (js-beautify indent_scripts).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          }
+        }
+      },
+      {
+        "title": "TypeScript & JSX (Prettier)",
+        "order": 6,
+        "properties": {
+          "tidy.prettier.printWidth": {
+            "type": "integer",
+            "default": 80,
+            "minimum": 1,
+            "scope": "language-overridable",
+            "order": 1,
+            "description": "Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only.",
+            "markdownDescription": "Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.semi": {
+            "type": "boolean",
+            "default": true,
+            "scope": "language-overridable",
+            "order": 2,
+            "description": "Print semicolons at the end of statements (Prettier semi). Stylistic only; does not change the AST.",
+            "markdownDescription": "Print semicolons at the end of statements (Prettier semi). Stylistic only; does not change the AST.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.singleQuote": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 3,
+            "description": "Use single quotes instead of double quotes (Prettier singleQuote). Stylistic only.",
+            "markdownDescription": "Use single quotes instead of double quotes (Prettier singleQuote). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.jsxSingleQuote": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 4,
+            "description": "Use single quotes in JSX attributes (Prettier jsxSingleQuote). Stylistic only.",
+            "markdownDescription": "Use single quotes in JSX attributes (Prettier jsxSingleQuote). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.trailingComma": {
+            "type": "string",
+            "default": "all",
+            "enum": [
+              "none",
+              "es5",
+              "all"
+            ],
+            "scope": "language-overridable",
+            "order": 5,
+            "description": "Where trailing commas are printed (Prettier trailingComma). Stylistic only.",
+            "markdownDescription": "Where trailing commas are printed (Prettier trailingComma). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.bracketSpacing": {
+            "type": "boolean",
+            "default": true,
+            "scope": "language-overridable",
+            "order": 6,
+            "description": "Print spaces inside object braces, e.g. { a } (Prettier bracketSpacing). Stylistic only.",
+            "markdownDescription": "Print spaces inside object braces, e.g. { a } (Prettier bracketSpacing). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.bracketSameLine": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 7,
+            "description": "Put the > of a multi-line element on the last attribute line (Prettier bracketSameLine). Stylistic only.",
+            "markdownDescription": "Put the > of a multi-line element on the last attribute line (Prettier bracketSameLine). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.arrowParens": {
+            "type": "string",
+            "default": "always",
+            "enum": [
+              "always",
+              "avoid"
+            ],
+            "scope": "language-overridable",
+            "order": 8,
+            "description": "Include parentheses around a sole arrow-function parameter (Prettier arrowParens). Stylistic only.",
+            "markdownDescription": "Include parentheses around a sole arrow-function parameter (Prettier arrowParens). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          }
+        }
+      },
+      {
+        "title": "Project & Coexistence",
+        "order": 7,
+        "properties": {
+          "tidy.editorconfig": {
+            "type": "boolean",
+            "default": true,
+            "order": 1,
+            "description": "Read the project's .editorconfig cascade (honouring root=true) and let it override plain VS Code settings. Disable to ignore .editorconfig entirely. Workspace .editorconfig is always ignored in Restricted Mode.",
+            "markdownDescription": "Read the project's .editorconfig cascade (honouring root=true) and let it override plain VS Code settings. Disable to ignore .editorconfig entirely. Workspace .editorconfig is always ignored in Restricted Mode.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.soukformatrc": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "order": 2,
+            "description": "Read the project's .soukformatrc file (JSONC) for per-language formatting options and glob overrides, layered above .editorconfig. Disable to ignore .soukformatrc entirely. A workspace .soukformatrc is always ignored in Restricted Mode.",
+            "markdownDescription": "Read the project's .soukformatrc file (JSONC) for per-language formatting options and glob overrides, layered above .editorconfig. Disable to ignore .soukformatrc entirely. A workspace .soukformatrc is always ignored in Restricted Mode.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.respectSoukformatignore": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "order": 3,
+            "description": "Skip formatting files matched by the project's .soukformatignore (gitignore syntax), so Tidy leaves them byte-identical. Disable to format every file regardless. A workspace .soukformatignore is always ignored in Restricted Mode.",
+            "markdownDescription": "Skip formatting files matched by the project's .soukformatignore (gitignore syntax), so Tidy leaves them byte-identical. Disable to format every file regardless. A workspace .soukformatignore is always ignored in Restricted Mode.\n\nDocs: [Ignore & coexistence](https://github.com/ced-lab-gh/tidy-formatter#ignore--coexistence)."
+          },
+          "tidy.deferToOtherFormatters": {
+            "type": "string",
+            "default": "notify",
+            "enum": [
+              "notify",
+              "silent-defer",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Show a one-time notification when this workspace already configures another formatter (Prettier, Biome, dprint). Tidy never takes over; your default formatter is unchanged.",
+              "Do not notify, but acknowledge another formatter is configured. Tidy still never disables itself or changes any setting.",
+              "Ignore detection of other formatters entirely (no notification)."
+            ],
+            "order": 4,
+            "description": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification.",
+            "markdownDescription": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification.\n\nDocs: [Deference behavior](https://github.com/ced-lab-gh/tidy-formatter#deference-behavior-coexisting-with-other-formatters)."
+          }
         }
       }
-    }
+    ]
   },
   "scripts": {
     "compile": "node esbuild.js --production",

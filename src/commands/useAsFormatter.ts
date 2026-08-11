@@ -22,6 +22,9 @@ import {
   setDefaultFormatterForLangs,
   type WriteTarget
 } from './setDefaultFormatter';
+// The shared, 'vscode'-free detail sanitizer: a settings-write failure can carry a
+// multi-line payload, which must never reach a notification verbatim.
+import { sanitizeDetail } from '../diagnostics/lastFormat';
 
 /** Command id (registered by extension.ts; this module owns only the constant). */
 export const USE_AS_FORMATTER_COMMAND_ID = 'tidy.useAsFormatter';
@@ -72,8 +75,8 @@ export interface UseAsFormatterPlan {
 
 /** Surfaced verbatim when a chosen Workspace scope is impossible (no folder). */
 export const NO_WORKSPACE_WARNING =
-  'Aucun dossier de travail ouvert : Tidy a ete defini comme formateur par ' +
-  'defaut dans vos parametres utilisateur (User) au lieu du workspace.';
+  'No workspace folder is open : Tidy was set as your default formatter in your ' +
+  'User settings instead of the workspace.';
 
 /**
  * Decide the concrete write plan from the user's raw choices. PURE: no I/O, no
@@ -259,7 +262,7 @@ export async function useAsFormatter(): Promise<void> {
   }
   if (picked.length === 0) {
     void vscode.window.showInformationMessage(
-      'Tidy: aucun langage selectionne : aucun changement effectue.'
+      'Tidy: no language selected : nothing was changed.'
     );
     return;
   }
@@ -277,7 +280,7 @@ export async function useAsFormatter(): Promise<void> {
   // there is nothing to write.
   if (plan.langs.length === 0) {
     void vscode.window.showInformationMessage(
-      'Tidy: aucun langage pris en charge selectionne : aucun changement effectue.'
+      'Tidy: no supported language selected : nothing was changed.'
     );
     return;
   }
@@ -285,9 +288,10 @@ export async function useAsFormatter(): Promise<void> {
   try {
     await applyPlan(vscode, plan);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'unknown error';
+    const detail =
+      error instanceof Error ? sanitizeDetail(error.message) : 'unknown error';
     void vscode.window.showErrorMessage(
-      `Tidy: impossible d'enregistrer le formateur par defaut (${message}).`
+      `Tidy: could not save the default formatter (${detail}).`
     );
     return;
   }

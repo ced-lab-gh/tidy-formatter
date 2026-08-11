@@ -19,9 +19,15 @@ import {
   DEFAULT_DEFERENCE_SETTING,
   DEFERENCE_SETTING_KEY,
   DEFERENCE_PROMPTED_KEY,
+  ESLINT_FIX_NOTE,
   type DeferenceSetting
 } from '../../../src/deference/decide';
-import { FORMATTER_PRETTIER, FORMATTER_BIOME, FORMATTER_DPRINT } from '../../../src/deference/detect';
+import {
+  FORMATTER_PRETTIER,
+  FORMATTER_BIOME,
+  FORMATTER_DPRINT,
+  FORMATTER_ESLINT
+} from '../../../src/deference/detect';
 
 const PRETTIER_ONLY = [FORMATTER_PRETTIER];
 
@@ -138,6 +144,84 @@ describe('deference/decide : formatDeferenceMessage', () => {
     assert.ok(!message.includes('formatonsave'));
     assert.ok(!message.includes('defaultformatter'));
     assert.ok(!message.includes('uninstall'));
+  });
+});
+
+describe('deference/decide : ESLint message (ADD-07)', () => {
+  const ESLINT_ONLY = [FORMATTER_ESLINT];
+
+  it('appends the --fix note verbatim when ESLint is the only detection', () => {
+    const message = formatDeferenceMessage(ESLINT_ONLY);
+    assert.ok(message.includes('ESLint'));
+    assert.ok(message.includes('eslint --fix'));
+    assert.ok(message.includes('default formatter is unchanged'));
+    assert.ok(message.endsWith(ESLINT_FIX_NOTE), 'the note must be the exact tail');
+  });
+
+  it('appends the note when ESLint is detected alongside another formatter', () => {
+    const message = formatDeferenceMessage([FORMATTER_PRETTIER, FORMATTER_ESLINT]);
+    assert.ok(message.includes('Prettier and ESLint'));
+    assert.ok(message.endsWith(ESLINT_FIX_NOTE));
+  });
+
+  it('does NOT mention --fix when ESLint is absent', () => {
+    const detections = [
+      [FORMATTER_PRETTIER],
+      [FORMATTER_PRETTIER, FORMATTER_BIOME, FORMATTER_DPRINT]
+    ];
+    for (const detected of detections) {
+      assert.ok(
+        !formatDeferenceMessage(detected).includes('--fix'),
+        `no --fix note expected for ${detected.join(',')}`
+      );
+    }
+  });
+
+  it('joins four formatters with an Oxford comma, ESLint last', () => {
+    const message = formatDeferenceMessage([
+      FORMATTER_PRETTIER,
+      FORMATTER_BIOME,
+      FORMATTER_DPRINT,
+      FORMATTER_ESLINT
+    ]);
+    assert.ok(message.includes('Prettier, Biome, dprint, and ESLint'));
+  });
+
+  it('says Tidy stays manual and will not impose itself', () => {
+    const message = formatDeferenceMessage(ESLINT_ONLY);
+    assert.ok(message.includes('Tidy stays manual'));
+    assert.ok(message.includes('will not impose itself'));
+  });
+
+  it('never instructs disabling ESLint nor touching defaultFormatter / formatOnSave', () => {
+    const lower = formatDeferenceMessage(ESLINT_ONLY).toLowerCase();
+    assert.ok(!lower.includes('formatonsave'));
+    assert.ok(!lower.includes('defaultformatter'));
+    assert.ok(!lower.includes('uninstall'));
+    assert.ok(!lower.includes('disable eslint'));
+  });
+
+  it('ships no em dash character in the ESLint copy', () => {
+    assert.ok(!formatDeferenceMessage(ESLINT_ONLY).includes('\u2014'));
+    assert.ok(!ESLINT_FIX_NOTE.includes('\u2014'));
+  });
+
+  it('leaves the decide() truth table unchanged for an ESLint-only detection', () => {
+    assert.equal(decide(ESLINT_ONLY, 'notify', false).action, 'notify');
+    assert.deepEqual(decide(ESLINT_ONLY, 'notify', true), { action: 'none' });
+    assert.deepEqual(decide(ESLINT_ONLY, 'silent-defer', false), { action: 'defer' });
+    assert.deepEqual(decide(ESLINT_ONLY, 'off', false), { action: 'none' });
+  });
+
+  it('carries the composed message through decide() and stays one-shot', () => {
+    const first = decide(ESLINT_ONLY, 'notify', false);
+    assert.equal(first.message, formatDeferenceMessage(ESLINT_ONLY));
+    // Anti-nag: the one-shot flag is shared across every detected competitor.
+    assert.deepEqual(decide(ESLINT_ONLY, 'notify', true), { action: 'none' });
+    assert.deepEqual(
+      decide([FORMATTER_PRETTIER, FORMATTER_ESLINT], 'notify', true),
+      { action: 'none' }
+    );
   });
 });
 

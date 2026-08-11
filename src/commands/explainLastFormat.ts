@@ -5,16 +5,44 @@
 // disabled language) and, when Tidy has not run on this file at all, whether another
 // formatter owns the language and how to switch to Tidy.
 //
+// v0.3.0 (ADD-06): every explanation can carry one-click ACTIONS rendered as toast
+// buttons, mapping each status to its remedy (Report an Issue, Open Settings, open
+// the matching .soukformatignore, or the Use Tidy onboarding command). The mapping
+// lives in the PURE builder below: single source of truth, unit-tested without
+// 'vscode'. Every action only ever runs an existing read-only or consent-gated
+// command, so the anti-hijack contract is untouched, and no NEW notification is
+// ever shown: the existing toasts simply gain buttons.
+//
 // Split of concerns (mirrors commands/showConfig.ts): the pure builder
 // (`buildExplanation`) imports NO 'vscode' and is unit-tested; the thin handler
 // gathers host state (active editor, default formatter) and the shared output
 // channel lazily inside itself.
-import { getLastFormat, type LastFormatRecord } from '../diagnostics/lastFormat';
+import {
+  getLastFormat,
+  sanitizeDetail,
+  type LastFormatRecord
+} from '../diagnostics/lastFormat';
 import { SUPPORTED_LANG_IDS } from '../types';
+import { REPORT_ISSUE_COMMAND_ID } from './reportIssue';
+import { USE_AS_FORMATTER_COMMAND_ID } from './useAsFormatter';
 
 export const EXPLAIN_LAST_FORMAT_COMMAND_ID = 'tidy.explainLastFormat';
 
 const TIDY_EXTENSION_ID = 'ced-lab.tidy-formatter';
+
+// VS Code built-in command ids used by actions. 'workbench.action.openSettings'
+// takes a plain search-query string. 'vscode.open' takes a Uri, which the HOST
+// executor builds from the plain path stored in `args`: the pure builder can only
+// carry strings, never a vscode.Uri.
+export const OPEN_SETTINGS_COMMAND_ID = 'workbench.action.openSettings';
+export const OPEN_FILE_COMMAND_ID = 'vscode.open';
+
+// Button captions, exported so the provider toasts and the tests reuse the EXACT
+// same labels (single source of truth, no drift).
+export const ACTION_REPORT_ISSUE_LABEL = 'Report an Issue';
+export const ACTION_OPEN_SETTINGS_LABEL = 'Open Settings';
+export const ACTION_OPEN_IGNORE_FILE_LABEL = 'Open .soukformatignore';
+export const ACTION_USE_TIDY_LABEL = 'Use Tidy as my Formatter';
 
 // Single source of truth lives in ../types so this can never drift from the provider.
 const SUPPORTED_LANGUAGES: ReadonlySet<string> = new Set(SUPPORTED_LANG_IDS);
@@ -29,13 +57,68 @@ export interface ExplainContext {
   readonly defaultFormatter?: string; // editor.defaultFormatter for the active language
 }
 
+/**
+ * A one-click remedy attached to an Explanation, rendered as a button on the
+ * information toast. PURE data: `args` may only carry plain strings; the host
+ * executor translates them (a filesystem path becomes a file Uri for
+ * OPEN_FILE_COMMAND_ID). Labels are the button captions: short, English, stable.
+ */
+export interface ExplanationAction {
+  readonly label: string;
+  readonly commandId: string;
+  readonly args?: readonly string[];
+}
+
 export interface Explanation {
   readonly headline: string;
   readonly lines: readonly string[];
+  /**
+   * Zero-or-more one-click remedies for this outcome, in display order. Absent
+   * when the status has no actionable remedy (applied, already-tidy,
+   * ignored-marker, config-error, cancelled, unsupported, no active editor).
+   */
+  readonly actions?: readonly ExplanationAction[];
 }
 
 function isSupported(languageId: string | undefined): boolean {
   return languageId !== undefined && SUPPORTED_LANGUAGES.has(languageId);
+}
+
+/** The "this is a bug worth telling us about" remedy (guard/engine/restore). */
+function reportIssueAction(): ExplanationAction {
+  return { label: ACTION_REPORT_ISSUE_LABEL, commandId: REPORT_ISSUE_COMMAND_ID };
+}
+
+/** Open the Settings UI filtered down to a single setting key. Never edits it. */
+function openSettingsAction(settingKey: string): ExplanationAction {
+  return {
+    label: ACTION_OPEN_SETTINGS_LABEL,
+    commandId: OPEN_SETTINGS_COMMAND_ID,
+    args: [settingKey]
+  };
+}
+
+/**
+ * Open the .soukformatignore that excluded the file, when a usable path was
+ * recorded. The provider stores the ignore file's ABSOLUTE path in
+ * `record.detail`; sanitizeDetail truncates over-long details with a trailing
+ * "...", in which case the path is not openable and NO action is offered (the
+ * textual explanation still stands on its own). Returns undefined otherwise.
+ */
+function openIgnoreFileActions(
+  record: LastFormatRecord
+): readonly ExplanationAction[] | undefined {
+  const ignorePath = record.detail;
+  if (ignorePath === undefined || ignorePath === '' || ignorePath.endsWith('...')) {
+    return undefined;
+  }
+  return [
+    {
+      label: ACTION_OPEN_IGNORE_FILE_LABEL,
+      commandId: OPEN_FILE_COMMAND_ID,
+      args: [ignorePath]
+    }
+  ];
 }
 
 /** Explain a record that belongs to the active document. Exhaustive over FormatStatus. */
@@ -70,7 +153,8 @@ function explainRecord(record: LastFormatRecord): Explanation {
             : 'Reason: the formatted output would have changed the meaning of your code.',
           'This is the safety guard doing its job, not a bug.',
           'If you believe this input should format cleanly, run "Tidy: Report an Issue" with the smallest snippet that reproduces it.'
-        ]
+        ],
+        actions: [reportIssueAction()]
       };
     case 'engine-error':
       return {
@@ -79,18 +163,22 @@ function explainRecord(record: LastFormatRecord): Explanation {
         lines: [
           record.detail ? `Detail: ${record.detail}.` : 'No further detail available.',
           'Your file is intact. Please run "Tidy: Report an Issue" with a snippet if this persists.'
-        ]
+        ],
+        actions: [reportIssueAction()]
       };
     case 'restore-failed':
       return {
         headline:
           'Tidy aborted to stay safe: an in-source ignore region could not be restored exactly, so no edit was applied.',
-        lines: ['Your file is intact.']
+        lines: [
+          'Your file is intact.',
+          'This points at an engine bug worth reporting: run "Tidy: Report an Issue" with the smallest snippet that reproduces it.'
+        ],
+        actions: [reportIssueAction()]
       };
     case 'config-error':
       return {
-        headline:
-          'Tidy could not resolve its settings for this file, so it did nothing.',
+        headline: 'Tidy could not resolve its settings for this file, so it did nothing.',
         lines: [
           record.detail ? `Detail: ${record.detail}.` : 'No further detail available.',
           'Check your .editorconfig / .soukformatrc for invalid values.'
@@ -104,15 +192,20 @@ function explainRecord(record: LastFormatRecord): Explanation {
             ? `Limit: tidy.maxFileSizeKB is ${record.detail} KB.`
             : 'See tidy.maxFileSizeKB.',
           'Raise the limit, or set tidy.maxFileSizeKB to 0 to disable it.'
-        ]
+        ],
+        actions: [openSettingsAction('tidy.maxFileSizeKB')]
       };
-    case 'ignored-file':
+    case 'ignored-file': {
+      const pathLine = record.detail ? `Ignore file: ${record.detail}.` : undefined;
       return {
         headline: 'Tidy skipped this file: a .soukformatignore rule excludes it.',
         lines: [
+          ...(pathLine ? [pathLine] : []),
           'Remove the matching rule, or set tidy.respectSoukformatignore to false to format it anyway.'
-        ]
+        ],
+        actions: openIgnoreFileActions(record)
       };
+    }
     case 'ignored-marker':
       return {
         headline:
@@ -122,7 +215,8 @@ function explainRecord(record: LastFormatRecord): Explanation {
     case 'disabled':
       return {
         headline: `Tidy is turned off for ${lang}.`,
-        lines: [`Set "tidy.${lang}.enable" to true to re-enable it for this language.`]
+        lines: [`Set "tidy.${lang}.enable" to true to re-enable it for this language.`],
+        actions: [openSettingsAction(`tidy.${lang}.enable`)]
       };
     case 'cancelled':
       return {
@@ -180,7 +274,8 @@ export function buildExplanation(
       lines: [
         `The default formatter for ${lang} is currently "${ctx.defaultFormatter}", not Tidy.`,
         'To use Tidy here, run "Tidy: Use Tidy as my Formatter", or pick it once via "Format Document With… → Tidy Formatter".'
-      ]
+      ],
+      actions: [{ label: ACTION_USE_TIDY_LABEL, commandId: USE_AS_FORMATTER_COMMAND_ID }]
     };
   }
   return {
@@ -197,13 +292,52 @@ function basename(p: string): string {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
+/* -------------------------------------------------------------------------- */
+/* VS Code handler (loads 'vscode' lazily; runs only in the extension host)     */
+/* -------------------------------------------------------------------------- */
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */
+
+/**
+ * Execute one ExplanationAction on the host. The single translation seam between
+ * the pure action data (plain strings) and VS Code:
+ *  - OPEN_FILE_COMMAND_ID expects a Uri, built here from the stored path;
+ *  - every other command receives its plain-string args untouched.
+ * Never throws in a way that reaches the user: any failure surfaces as a
+ * non-blocking English warning, whose detail goes through the shared
+ * `sanitizeDetail` (an engine/host error can embed a multi-line code frame
+ * carrying the user's SOURCE, which must never reach a notification).
+ */
+async function runExplanationAction(
+  vscode: any,
+  action: ExplanationAction
+): Promise<void> {
+  try {
+    if (action.commandId === OPEN_FILE_COMMAND_ID) {
+      const fsPath = action.args?.[0];
+      if (typeof fsPath !== 'string' || fsPath.length === 0) {
+        return;
+      }
+      await vscode.commands.executeCommand(OPEN_FILE_COMMAND_ID, vscode.Uri.file(fsPath));
+      return;
+    }
+    await vscode.commands.executeCommand(action.commandId, ...(action.args ?? []));
+  } catch (error: unknown) {
+    const detail =
+      error instanceof Error ? sanitizeDetail(error.message) : 'unknown error';
+    void vscode.window.showWarningMessage(
+      `Tidy: could not run "${action.label}" (${detail}).`
+    );
+  }
+}
+
 /**
  * Command handler. Gathers active-editor + default-formatter context, builds the
  * explanation, writes it to the shared "Tidy Formatter" output channel, reveals the
- * channel, and shows the headline as a non-blocking information message. Read-only:
- * it changes no file and no setting.
+ * channel, and shows the headline as a non-blocking information message whose
+ * buttons are the explanation's actions. Read-only by itself: it changes no file
+ * and no setting; a clicked button runs an existing read-only or consent-gated
+ * command (see runExplanationAction).
  */
-/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */
 export async function explainLastFormat(): Promise<void> {
   const vscode = require('vscode');
   const { getTidyOutputChannel } = require('../diagnostics/outputChannel');
@@ -225,6 +359,7 @@ export async function explainLastFormat(): Promise<void> {
   };
 
   const explanation = buildExplanation(getLastFormat(), ctx);
+  const actions = explanation.actions ?? [];
 
   const channel = getTidyOutputChannel();
   channel.appendLine('');
@@ -236,7 +371,24 @@ export async function explainLastFormat(): Promise<void> {
   for (const line of explanation.lines) {
     channel.appendLine(`  - ${line}`);
   }
+  for (const action of actions) {
+    channel.appendLine(`  > Suggested action: ${action.label}`);
+  }
   channel.show(true);
 
-  void vscode.window.showInformationMessage(explanation.headline);
+  // Fire-and-forget (idiom of useAsFormatter's announceSuccess): the command must
+  // resolve immediately so a headless host or an integration test never hangs on
+  // an unclicked toast. A click runs the mapped remedy; dismissal does nothing.
+  void vscode.window
+    .showInformationMessage(explanation.headline, ...actions.map((a) => a.label))
+    .then((picked: string | undefined) => {
+      if (picked === undefined) {
+        return;
+      }
+      const action = actions.find((a) => a.label === picked);
+      if (action) {
+        void runExplanationAction(vscode, action);
+      }
+    });
 }
+/* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */

@@ -45,6 +45,39 @@ describe('commands/previewFormat : constants', () => {
   });
 });
 
+// Audit #16 (v0.3.0 string migration): every user-facing string this module can
+// surface must be English. These constants are the only ones the pure planner
+// emits; the handler's own toasts are covered by the source scan in
+// test/unit/commands/englishStrings.test.ts.
+describe('commands/previewFormat : user-facing strings are English', () => {
+  const FRENCH_TOKENS =
+    /\b(aucun|aucune|apercu|le document|deja|formate|casse|la sortie|impossible|ouvrez|pris en charge)\b/i;
+
+  it('GUARD_REJECTED_REASON is English and mentions the equivalence failure', () => {
+    assert.doesNotMatch(GUARD_REJECTED_REASON, FRENCH_TOKENS);
+    assert.match(GUARD_REJECTED_REASON, /no change applied/i);
+    assert.match(GUARD_REJECTED_REASON, /equivalent/i);
+  });
+
+  it('NO_CHANGE_REASON is English and says the document is already formatted', () => {
+    assert.doesNotMatch(NO_CHANGE_REASON, FRENCH_TOKENS);
+    assert.match(NO_CHANGE_REASON, /already formatted/i);
+  });
+
+  it('no user-facing constant contains an em dash or a non-ASCII character', () => {
+    for (const text of [GUARD_REJECTED_REASON, NO_CHANGE_REASON, APPLY_BUTTON_LABEL]) {
+      assert.ok(!text.includes('\u2014'), `em dash in: ${text}`);
+      // Accented characters are the tell-tale of a leftover French string.
+      assert.match(text, /^[\x20-\x7E]*$/, `non-ASCII character in: ${text}`);
+    }
+  });
+
+  it('a composed rejection reason stays English end to end', () => {
+    const plan = buildPreviewPlan('a', 'b', rejected('AST structure changed after formatting'));
+    assert.doesNotMatch(plan.reason as string, FRENCH_TOKENS);
+  });
+});
+
 describe('commands/previewFormat : buildPreviewPlan guard rejection', () => {
   it('non-equivalent verdict => canApply:false with the broken-syntax message', () => {
     const plan = buildPreviewPlan('a', 'b', rejected('AST structure changed after formatting'));

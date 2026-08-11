@@ -39,6 +39,12 @@ import {
   type FormatScope,
   type LastFormatRecord
 } from '../diagnostics/lastFormat';
+import {
+  EXPLAIN_LAST_FORMAT_COMMAND_ID,
+  OPEN_SETTINGS_COMMAND_ID,
+  ACTION_OPEN_SETTINGS_LABEL
+} from '../commands/explainLastFormat';
+import { REPORT_ISSUE_COMMAND_ID } from '../commands/reportIssue';
 
 /**
  * Supported document selectors (one languageId each) for registration.
@@ -68,11 +74,17 @@ const REGION_MASKING_LANGUAGES: ReadonlySet<LangId> = new Set<LangId>([
 ]);
 
 /**
- * Exact, user-facing message shown when the guard rejects a format. Kept as a
- * constant so the wording stays consistent (and matches the product spec).
+ * Exact, user-facing message shown when a format is aborted (guard rejection,
+ * engine error, or a failed ignore-region restore). Kept as a constant so the
+ * wording stays consistent (and matches the product spec). English per the
+ * v0.3.0 string migration (ADD-06); no em dash, ever.
  */
 const ABORT_WARNING_MESSAGE =
-  'Formatage annule: la sortie aurait casse la syntaxe, fichier intact';
+  'Tidy did not apply the format: the result could not be proven equivalent to your original. Your file is intact.';
+
+/** Button captions on the abort toast (exact labels from the ADD-06 spec). */
+const ABORT_ACTION_EXPLAIN = 'Explain';
+const ABORT_ACTION_REPORT_ISSUE = 'Report Issue';
 
 /**
  * Narrow a raw VS Code languageId to a supported LangId, or return undefined if
@@ -358,8 +370,24 @@ function outcomeToEdits(
         engineId,
         detail: reason
       });
-      // Non-blocking, non-modal: the file is intact, we just inform.
-      void vscode.window.showWarningMessage(ABORT_WARNING_MESSAGE);
+      // Non-blocking, non-modal: the file is intact, we just inform. Same toast
+      // frequency as before (guard-rejected / engine-error / restore-failed);
+      // ADD-06 only adds one-click remedies. recordOutcome ran just above, so
+      // 'Explain' explains exactly THIS abort. Fire-and-forget: never blocks the
+      // provider, never hangs a headless host.
+      void vscode.window
+        .showWarningMessage(
+          ABORT_WARNING_MESSAGE,
+          ABORT_ACTION_EXPLAIN,
+          ABORT_ACTION_REPORT_ISSUE
+        )
+        .then((picked: string | undefined) => {
+          if (picked === ABORT_ACTION_EXPLAIN) {
+            void vscode.commands.executeCommand(EXPLAIN_LAST_FORMAT_COMMAND_ID);
+          } else if (picked === ABORT_ACTION_REPORT_ISSUE) {
+            void vscode.commands.executeCommand(REPORT_ISSUE_COMMAND_ID);
+          }
+        });
     }
     return [];
   }
@@ -409,8 +437,14 @@ async function provideEdits(
   //       tidy-ignore / prettier-ignore) is present -> leave the file verbatim.
   // Both return [] so VS Code applies no edit and the file is byte-identical.
   // (REGION-level ignore is handled later, around the engine call, via masking.)
-  if (resolveDocumentIgnore(document).ignored) {
-    recordOutcome(document, languageId, scope, 'ignored-file');
+  // Capture the lookup so the record carries WHICH .soukformatignore excluded the
+  // file: "Explain last format" turns that into a one-click "Open" action. Same
+  // call, same position in the pipeline: the formatting decision is unchanged.
+  const ignoreLookup = resolveDocumentIgnore(document);
+  if (ignoreLookup.ignored) {
+    recordOutcome(document, languageId, scope, 'ignored-file', {
+      detail: ignoreLookup.path
+    });
     return [];
   }
   if (scanMarkers(fullText, languageId).ignoreFile) {
@@ -425,9 +459,21 @@ async function provideEdits(
       engineId: pickEngine(languageId).id,
       detail: String(maxKb)
     });
-    void vscode.window.showInformationMessage(
-      `Tidy: fichier ignore (au-dela de ${maxKb} KB). Ajustez tidy.maxFileSizeKB si besoin.`
-    );
+    // English per the v0.3.0 string migration; the button opens the Settings UI
+    // filtered to the size limit (opens UI only, never writes the setting).
+    void vscode.window
+      .showInformationMessage(
+        `Tidy skipped this file: it is larger than ${maxKb} KB (tidy.maxFileSizeKB).`,
+        ACTION_OPEN_SETTINGS_LABEL
+      )
+      .then((picked: string | undefined) => {
+        if (picked === ACTION_OPEN_SETTINGS_LABEL) {
+          void vscode.commands.executeCommand(
+            OPEN_SETTINGS_COMMAND_ID,
+            'tidy.maxFileSizeKB'
+          );
+        }
+      });
     return [];
   }
 
@@ -435,10 +481,11 @@ async function provideEdits(
   try {
     options = readResolvedOptions(document, languageId, formattingOptions);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'unknown error';
+    // Same content-free discipline as the engine/guard paths: keep the first line
+    // only, so a multi-line payload can never reach the record or the channel.
     recordOutcome(document, languageId, scope, 'config-error', {
       engineId: 'config',
-      detail: message
+      detail: firstLineOf(error)
     });
     // Cannot safely format without resolved options: leave the file intact.
     return [];

@@ -80,7 +80,7 @@ describe('diagnostics/lastFormat : formatChannelLine', () => {
     assert.ok(line.includes('[css]'), line);
     assert.ok(line.includes('js-beautify'), line);
     assert.ok(line.includes('applied'), line);
-    assert.ok(!line.includes('—'), 'no em dash');
+    assert.ok(!line.includes('\u2014'), 'no em dash');
   });
 
   it('marks selection scope and appends the detail', () => {

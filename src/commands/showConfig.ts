@@ -21,6 +21,10 @@ import {
   type CatalogLang,
   type OptionEntry
 } from '../config/optionCatalog';
+// The shared, 'vscode'-free detail sanitizer: a resolver/parser error can embed a
+// multi-line payload carrying the user's own content, which must never reach a
+// notification. Every error surfaced below goes through it.
+import { sanitizeDetail } from '../diagnostics/lastFormat';
 
 export const SHOW_CONFIG_COMMAND_ID = 'tidy.showEffectiveConfiguration';
 
@@ -409,7 +413,7 @@ export async function showEffectiveConfiguration(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     void vscode.window.showInformationMessage(
-      'Tidy: ouvrez un fichier pour afficher sa configuration effective.'
+      'Tidy: open a file to show its effective configuration.'
     );
     return;
   }
@@ -418,7 +422,7 @@ export async function showEffectiveConfiguration(): Promise<void> {
   const languageId = toSupportedLangId(document.languageId);
   if (!languageId) {
     void vscode.window.showInformationMessage(
-      `Tidy: le langage "${document.languageId}" n'est pas pris en charge.`
+      `Tidy: the language "${document.languageId}" is not supported.`
     );
     return;
   }
@@ -445,9 +449,10 @@ export async function showEffectiveConfiguration(): Promise<void> {
     soukformatrcPath = diag.soukformatrcPath;
     warnings = diag.warnings;
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'unknown error';
+    const detail =
+      error instanceof Error ? sanitizeDetail(error.message) : 'unknown error';
     void vscode.window.showErrorMessage(
-      `Tidy: impossible de resoudre la configuration (${message}).`
+      `Tidy: could not resolve the configuration (${detail}).`
     );
     return;
   }

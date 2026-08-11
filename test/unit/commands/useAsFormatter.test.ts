@@ -31,6 +31,18 @@ describe('commands/useAsFormatter : constants', () => {
   });
 });
 
+// Audit #16 (v0.3.0 string migration): the only user-facing string the pure
+// planner emits is the no-workspace fallback warning; it must be English.
+describe('commands/useAsFormatter : user-facing strings are English', () => {
+  it('NO_WORKSPACE_WARNING is English, ASCII-only and em-dash-free', () => {
+    assert.match(NO_WORKSPACE_WARNING, /no workspace folder is open/i);
+    assert.match(NO_WORKSPACE_WARNING, /User settings/);
+    assert.doesNotMatch(NO_WORKSPACE_WARNING, /\b(aucun|dossier|parametres|defaut)\b/i);
+    assert.ok(!NO_WORKSPACE_WARNING.includes('\u2014'), 'no em dash');
+    assert.match(NO_WORKSPACE_WARNING, /^[\x20-\x7E]*$/, 'ASCII only');
+  });
+});
+
 describe('commands/useAsFormatter : planUseAsFormatter scope selection', () => {
   it('requested Workspace with a workspace open => workspace, no warning', () => {
     const plan = planUseAsFormatter(['css'], true, 'workspace');

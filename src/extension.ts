@@ -54,8 +54,31 @@ import {
   DEFERENCE_SETTING_KEY,
   DEFERENCE_PROMPTED_KEY
 } from './deference/decide';
+import { SUPPORTED_LANG_IDS } from './types';
+
+/**
+ * Context key published via `setContext` at activation (ADD-10). The manifest's
+ * command `enablement` and the "Tidy" editor context submenu `when` clauses read
+ * it as `editorLangId in tidy.supportedLanguages`, so palette entries and menus
+ * only light up on languages Tidy actually handles. Volatile UI state only : it
+ * is NOT a user setting, it writes no file, and it is reset on every window
+ * reload.
+ */
+export const SUPPORTED_LANGUAGES_CONTEXT_KEY = 'tidy.supportedLanguages';
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Publish the supported-language list as volatile UI state so the manifest's
+  // `enablement` clauses and the "Tidy" editor context submenu can gate
+  // themselves on it. setContext writes NO user setting and NO file (anti-hijack
+  // safe, ARCH-02 untouched). Fire-and-forget : a failure would only hide UI
+  // entries, never break activation or formatting. The shared constant is copied
+  // by spread so it is never handed to a host API by reference.
+  void vscode.commands.executeCommand(
+    'setContext',
+    SUPPORTED_LANGUAGES_CONTEXT_KEY,
+    [...SUPPORTED_LANG_IDS]
+  );
+
   const documentProvider = new TidyDocumentFormattingProvider();
   const rangeProvider = new TidyRangeFormattingProvider();
 

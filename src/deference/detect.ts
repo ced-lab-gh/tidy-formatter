@@ -15,7 +15,8 @@
 //
 // CFG-07: a `.prettierignore` on its own DOES NOT imply Prettier is configured as a
 // formatter (it only narrows what Prettier would touch IF it were configured), so it
-// never activates deference by itself.
+// never activates deference by itself. Same rule for `.eslintignore` (ADD-07): an
+// ignore file alone never activates ESLint deference.
 
 /**
  * Canonical labels for the competing formatters Tidy recognises. Stable strings
@@ -25,6 +26,7 @@
 export const FORMATTER_PRETTIER = 'Prettier';
 export const FORMATTER_BIOME = 'Biome';
 export const FORMATTER_DPRINT = 'dprint';
+export const FORMATTER_ESLINT = 'ESLint';
 
 /**
  * Recognised Prettier config filenames (the variants Prettier itself honours).
@@ -65,30 +67,59 @@ const DPRINT_CONFIG_FILES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Recognised ESLint config filenames (ADD-07): the legacy `.eslintrc*` forms the
+ * eslintrc resolver honours, plus every flat-config `eslint.config.*` variant the
+ * ESLint docs list (including the TypeScript forms supported since v9).
+ * Deliberately ABSENT: `.eslintignore` (same rule as CFG-07 for `.prettierignore`:
+ * an ignore file alone does not configure ESLint), `.eslintrc.json5` and
+ * `eslint.config.json` (ESLint reads neither), and `.eslintrc.mjs` (never
+ * supported by the legacy resolver).
+ */
+const ESLINT_CONFIG_FILES: ReadonlySet<string> = new Set([
+  '.eslintrc',
+  '.eslintrc.json',
+  '.eslintrc.js',
+  '.eslintrc.cjs',
+  '.eslintrc.yaml',
+  '.eslintrc.yml',
+  'eslint.config.js',
+  'eslint.config.mjs',
+  'eslint.config.cjs',
+  'eslint.config.ts',
+  'eslint.config.mts',
+  'eslint.config.cts'
+]);
+
+/**
  * The conventional name of a package manifest whose `prettier` key (when present)
- * also configures Prettier as a formatter, exactly like a `.prettierrc*` file.
+ * configures Prettier exactly like a `.prettierrc*` file, and whose `eslintConfig`
+ * key (when present) configures ESLint exactly like an `.eslintrc*` file (ADD-07).
  */
 export const PACKAGE_JSON_FILENAME = 'package.json';
 
 /**
  * PURE detection: given the list of entry names found at a workspace-folder root
  * (filenames only, not full paths), return the distinct competing formatters they
- * imply, in a stable order (Prettier, Biome, dprint).
+ * imply, in a stable order (Prettier, Biome, dprint, ESLint).
  *
  * No 'vscode', no I/O, no throw. Unknown / unrelated names are ignored. A
- * `.prettierignore` alone yields nothing (CFG-07). Inputs that are not strings are
- * skipped defensively so a malformed directory listing can never break detection.
+ * `.prettierignore` or `.eslintignore` alone yields nothing (CFG-07 and its
+ * ESLint parallel). Inputs that are not strings are skipped defensively so a
+ * malformed directory listing can never break detection.
  *
- * The `package.json` `prettier` key is detected separately by the host (it requires
- * reading the file), and merged in via `mergeDetected`; pass `packageJsonHasPrettier`
- * to fold that signal into a single sorted result here.
+ * The `package.json` `prettier` and `eslintConfig` keys are detected separately
+ * by the host (they require reading the file), and merged in via `mergeDetected`;
+ * pass `packageJsonHasPrettier` / `packageJsonHasEslintConfig` to fold those
+ * signals into a single sorted result here.
  *
- * @param filenames               entry names at one or more workspace roots.
- * @param packageJsonHasPrettier  whether a package.json declares a `prettier` key.
+ * @param filenames                   entry names at one or more workspace roots.
+ * @param packageJsonHasPrettier      whether a package.json declares a `prettier` key.
+ * @param packageJsonHasEslintConfig  whether a package.json declares an `eslintConfig` key.
  */
 export function detectFromFilenames(
   filenames: readonly string[],
-  packageJsonHasPrettier = false
+  packageJsonHasPrettier = false,
+  packageJsonHasEslintConfig = false
 ): string[] {
   const found = new Set<string>();
 
@@ -104,12 +135,17 @@ export function detectFromFilenames(
         found.add(FORMATTER_BIOME);
       } else if (DPRINT_CONFIG_FILES.has(name)) {
         found.add(FORMATTER_DPRINT);
+      } else if (ESLINT_CONFIG_FILES.has(name)) {
+        found.add(FORMATTER_ESLINT);
       }
     }
   }
 
   if (packageJsonHasPrettier === true) {
     found.add(FORMATTER_PRETTIER);
+  }
+  if (packageJsonHasEslintConfig === true) {
+    found.add(FORMATTER_ESLINT);
   }
 
   return sortDetected(found);
@@ -120,7 +156,7 @@ export function detectFromFilenames(
  * Keeps notifications deterministic regardless of filesystem listing order.
  */
 function sortDetected(found: ReadonlySet<string>): string[] {
-  const order = [FORMATTER_PRETTIER, FORMATTER_BIOME, FORMATTER_DPRINT];
+  const order = [FORMATTER_PRETTIER, FORMATTER_BIOME, FORMATTER_DPRINT, FORMATTER_ESLINT];
   return order.filter((label) => found.has(label));
 }
 
@@ -144,17 +180,37 @@ export function mergeDetected(...results: ReadonlyArray<readonly string[]>): str
 }
 
 /**
+ * Whether an already-parsed package.json object declares the given top-level key.
+ * PURE, fail-soft: any non-object input yields false. Shared by the `prettier`
+ * and `eslintConfig` detectors so their semantics can never drift apart.
+ */
+function declaresTopLevelKey(parsed: unknown, key: string): boolean {
+  return (
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    Object.prototype.hasOwnProperty.call(parsed, key)
+  );
+}
+
+/**
  * Whether a parsed package.json object declares a top-level `prettier` key (the
  * inline Prettier config form). PURE: takes already-parsed JSON, no I/O. Any
  * non-object input yields false (fail-soft).
  */
 export function packageJsonDeclaresPrettier(parsed: unknown): boolean {
-  return (
-    parsed !== null &&
-    typeof parsed === 'object' &&
-    !Array.isArray(parsed) &&
-    Object.prototype.hasOwnProperty.call(parsed, 'prettier')
-  );
+  return declaresTopLevelKey(parsed, 'prettier');
+}
+
+/**
+ * Whether a parsed package.json object declares a top-level `eslintConfig` key
+ * (the inline ESLint config form honoured by the legacy resolver) (ADD-07).
+ * PURE: takes already-parsed JSON, no I/O. Any non-object input yields false
+ * (fail-soft). Key presence is the signal, exactly like `prettier`: even a null
+ * value means "the key is declared".
+ */
+export function packageJsonDeclaresEslintConfig(parsed: unknown): boolean {
+  return declaresTopLevelKey(parsed, 'eslintConfig');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -171,19 +227,39 @@ function isWorkspaceTrusted(vscode: any): boolean {
   return vscode.workspace.isTrusted !== false;
 }
 
+/** The two package.json signals deference cares about (one read serves both). */
+interface PackageJsonSignals {
+  readonly prettier: boolean;
+  readonly eslintConfig: boolean;
+}
+
+/** All-false signals: the fail-soft result for any read/parse failure. */
+const NO_PACKAGE_JSON_SIGNALS: PackageJsonSignals = {
+  prettier: false,
+  eslintConfig: false
+};
+
 /**
- * Best-effort: does a package.json at this folder root declare a `prettier` key?
- * Reads + parses the file; any failure (absent / unreadable / malformed JSON)
- * yields false so detection never throws and never blocks activation.
+ * Best-effort: does a package.json at this folder root declare a `prettier`
+ * and/or an `eslintConfig` key (ADD-07)? A single read + parse yields both
+ * signals; any failure (absent / unreadable / malformed JSON) yields all-false
+ * so detection never throws and never blocks activation.
  */
-async function rootPackageJsonHasPrettier(vscode: any, folderUri: any): Promise<boolean> {
+async function rootPackageJsonSignals(
+  vscode: any,
+  folderUri: any
+): Promise<PackageJsonSignals> {
   try {
     const uri = vscode.Uri.joinPath(folderUri, PACKAGE_JSON_FILENAME);
     const bytes = await vscode.workspace.fs.readFile(uri);
     const text = Buffer.from(bytes).toString('utf8');
-    return packageJsonDeclaresPrettier(JSON.parse(text));
+    const parsed: unknown = JSON.parse(text);
+    return {
+      prettier: packageJsonDeclaresPrettier(parsed),
+      eslintConfig: packageJsonDeclaresEslintConfig(parsed)
+    };
   } catch {
-    return false;
+    return NO_PACKAGE_JSON_SIGNALS;
   }
 }
 
@@ -206,8 +282,8 @@ async function listRootEntries(vscode: any, folderUri: any): Promise<string[]> {
  * return the distinct formatters detected, stably ordered. Workspace-Trust gated
  * (Restricted Mode => [], no reads). Never throws: any failure yields [].
  *
- * Reads only directory listings + (best-effort) package.json `prettier` keys; it
- * executes no workspace code and writes nothing.
+ * Reads only directory listings + (best-effort) the package.json `prettier` and
+ * `eslintConfig` keys; it executes no workspace code and writes nothing.
  */
 export async function detectCompetingFormatters(): Promise<string[]> {
   try {
@@ -222,8 +298,8 @@ export async function detectCompetingFormatters(): Promise<string[]> {
     const perFolder: string[][] = [];
     for (const folder of folders) {
       const names = await listRootEntries(vscode, folder.uri);
-      const hasPrettierKey = await rootPackageJsonHasPrettier(vscode, folder.uri);
-      perFolder.push(detectFromFilenames(names, hasPrettierKey));
+      const signals = await rootPackageJsonSignals(vscode, folder.uri);
+      perFolder.push(detectFromFilenames(names, signals.prettier, signals.eslintConfig));
     }
     return mergeDetected(...perFolder);
   } catch {

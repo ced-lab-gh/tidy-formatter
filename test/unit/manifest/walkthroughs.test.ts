@@ -66,7 +66,7 @@ describe('manifest : onboarding commands (1.T6)', () => {
 
   it('declares tidy.useAsFormatter with category Tidy', () => {
     const cmd = find('tidy.useAsFormatter');
-    assert.equal(cmd.title, 'Use Tidy as my Formatter');
+    assert.equal(cmd.title, 'Use Tidy as My Formatter');
     assert.equal(cmd.category, 'Tidy');
   });
 

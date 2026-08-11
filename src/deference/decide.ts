@@ -16,6 +16,8 @@
 //
 // PURE: no 'vscode', no I/O, no throw. Fully unit-testable under mocha+tsx.
 
+import { FORMATTER_ESLINT } from './detect';
+
 /**
  * The user-facing preference (the `tidy.deferToOtherFormatters` enum, added to
  * package.json later in integration; the values are owned here so they cannot
@@ -91,18 +93,30 @@ function listFormatters(detected: readonly string[]): string {
 }
 
 /**
+ * The ESLint-specific tail of the deference notification (ADD-07). ESLint is not
+ * an `editor.defaultFormatter` competitor: it rewrites files through explicit
+ * `eslint --fix` runs, so the message says exactly that instead of implying a
+ * formatter-slot conflict. Exported so tests assert the shipped copy verbatim.
+ */
+export const ESLINT_FIX_NOTE =
+  'ESLint applies its changes through its own "eslint --fix" runs. ' +
+  'Tidy stays manual: it formats only when you invoke it and will not impose itself.';
+
+/**
  * Compose the one-shot deference notification message. PURE. States that a
  * competitor is configured, that Tidy is NOT taking over, and that the user can
  * step Tidy back per language : making the anti-hijack contract explicit.
+ * When ESLint is among the detections, {@link ESLINT_FIX_NOTE} is appended so
+ * the message never misrepresents ESLint as a formatter-slot competitor (ADD-07).
  */
 export function formatDeferenceMessage(detected: readonly string[]): string {
   const names = listFormatters(detected);
-  return (
+  const base =
     `This workspace already configures ${names}. ` +
     'Tidy will not take over : your default formatter is unchanged. ' +
     'You can disable Tidy per language for this workspace if you prefer to ' +
-    `let ${names} handle formatting.`
-  );
+    `let ${names} handle formatting.`;
+  return detected.includes(FORMATTER_ESLINT) ? `${base} ${ESLINT_FIX_NOTE}` : base;
 }
 
 /**
