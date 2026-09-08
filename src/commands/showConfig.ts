@@ -70,6 +70,17 @@ export interface ReportInput {
   readonly soukformatrcPath?: string;
   /** Non-fatal .soukformatrc warnings to surface (never throws). */
   readonly warnings: readonly string[];
+  /** Absolute path of the Prettier project config that contributed, if any. */
+  readonly prettierrcPath?: string;
+  /** Non-fatal .prettierrc warnings to surface (never throws). */
+  readonly prettierrcWarnings?: readonly string[];
+  /**
+   * Non-fatal .editorconfig warnings, i.e. the one case where the layer is
+   * ABSENT rather than empty: its parser could not be loaded, so a project's
+   * .editorconfig is being ignored wholesale. The user cannot see that from the
+   * option table (the values simply come from a lower layer), so it is stated.
+   */
+  readonly editorconfigWarnings?: readonly string[];
   /**
    * Effective per-family size cap for this document (ADD-08): the resolved
    * tidy.json.maxFileSizeKB / tidy.maxFileSizeKB winner. Optional so pure
@@ -239,6 +250,7 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
   lines.push(`Language : ${languageId}`);
   lines.push(`Resolved : ${input.now ?? new Date().toISOString()}`);
   lines.push(`.soukformatrc : ${input.soukformatrcPath ?? '(none found)'}`);
+  lines.push(`.prettierrc : ${input.prettierrcPath ?? '(none found)'}`);
   lines.push(
     `Size limit : ${
       input.sizeLimit ? describeSizeLimit(input.sizeLimit) : '(not resolved)'
@@ -317,6 +329,26 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
     lines.push('.soukformatrc warnings (non-fatal)');
     lines.push('----------------------------------');
     for (const warning of input.warnings) {
+      lines.push(`  • ${warning}`);
+    }
+  }
+
+  const prettierrcWarnings = input.prettierrcWarnings ?? [];
+  if (prettierrcWarnings.length > 0) {
+    lines.push('');
+    lines.push('.prettierrc warnings (non-fatal)');
+    lines.push('--------------------------------');
+    for (const warning of prettierrcWarnings) {
+      lines.push(`  • ${warning}`);
+    }
+  }
+
+  const editorconfigWarnings = input.editorconfigWarnings ?? [];
+  if (editorconfigWarnings.length > 0) {
+    lines.push('');
+    lines.push('.editorconfig warnings (non-fatal)');
+    lines.push('----------------------------------');
+    for (const warning of editorconfigWarnings) {
       lines.push(`  • ${warning}`);
     }
   }
@@ -452,6 +484,9 @@ export async function showEffectiveConfiguration(): Promise<void> {
   let options: ResolvedOptions;
   let soukformatrcPath: string | undefined;
   let warnings: string[] = [];
+  let prettierrcPath: string | undefined;
+  let prettierrcWarnings: string[] = [];
+  let editorconfigWarnings: string[] = [];
   try {
     const diag = readResolvedOptionsWithDiagnostics(
       document,
@@ -461,6 +496,9 @@ export async function showEffectiveConfiguration(): Promise<void> {
     options = diag.options;
     soukformatrcPath = diag.soukformatrcPath;
     warnings = diag.warnings;
+    prettierrcPath = diag.prettierrcPath;
+    prettierrcWarnings = diag.prettierrcWarnings ?? [];
+    editorconfigWarnings = diag.editorconfigWarnings ?? [];
   } catch (error: unknown) {
     const detail =
       error instanceof Error ? sanitizeDetail(error.message) : 'unknown error';
@@ -511,6 +549,9 @@ export async function showEffectiveConfiguration(): Promise<void> {
     options,
     soukformatrcPath,
     warnings,
+    prettierrcPath,
+    prettierrcWarnings,
+    editorconfigWarnings,
     ignoreStatus,
     sizeLimit
   });

@@ -7,9 +7,9 @@
 //   2. readSoukformatrcLayers / findSoukformatrc: on-disk discovery up the tree
 //      against real temporary files, with glob overrides keyed off the file path.
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import {
   parseSoukformatrc,
   readSoukformatrcLayers,
@@ -187,6 +187,179 @@ describe('config/soukformatrc : glob overrides (layer 5)', () => {
   });
 });
 
+// The upward walk is BOUNDED to the workspace folder. An unbounded walk reads a
+// .soukformatrc the user never opened (a parent checkout, a shared drive root,
+// the home directory) and lets it silently change how their code is formatted:
+// the same defect the .prettierrc layer was built not to reproduce. These tests
+// pin the bound and, above all, the ESCAPE cases, because a bound that fails
+// open is worse than none: it looks correct until the day it matters.
+describe('config/soukformatrc : on-disk discovery is bounded to the workspace', () => {
+  let tmp: string;
+  let ws: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'souk-'));
+    ws = join(tmp, 'ws');
+    mkdirSync(ws, { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  /** Create a file (and its parents) and return its path. */
+  function write(path: string, content: string): string {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+    return path;
+  }
+
+  const CONFIG = '{ "css": { "indent": 6 } }';
+  const OUTSIDE_CONFIG = '{ "css": { "indent": 3 } }';
+
+  it('finds the nearest .soukformatrc walking up, inside the workspace', () => {
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    const file = write(join(ws, 'a', 'b', 'style.css'), '.x{}');
+
+    assert.equal(
+      findSoukformatrc(file, ws),
+      join(ws, SOUKFORMATRC_FILENAME)
+    );
+
+    const result = readSoukformatrcLayers(file, 'css', ws);
+    assert.equal(result.path, join(ws, SOUKFORMATRC_FILENAME));
+    assert.equal(result.layers[0].values.indent_size, 6);
+  });
+
+  it('the workspace root itself IS searched (the bound is inclusive)', () => {
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    const file = write(join(ws, 'style.css'), '.x{}');
+    assert.equal(findSoukformatrc(file, ws), join(ws, SOUKFORMATRC_FILENAME));
+  });
+
+  it('the nearest config wins over one higher in the SAME workspace', () => {
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    write(join(ws, 'src', SOUKFORMATRC_FILENAME), '{ "css": { "indent": 8 } }');
+    const file = write(join(ws, 'src', 'a.css'), '.x{}');
+
+    const result = readSoukformatrcLayers(file, 'css', ws);
+    assert.equal(result.path, join(ws, 'src', SOUKFORMATRC_FILENAME));
+    assert.equal(result.layers[0].values.indent_size, 8);
+  });
+
+  // THE defect: a .soukformatrc one level ABOVE the opened folder used to be
+  // found and applied, all the way up to the filesystem root.
+  it('a .soukformatrc ABOVE the workspace folder is never read', () => {
+    write(join(tmp, SOUKFORMATRC_FILENAME), OUTSIDE_CONFIG);
+    const file = write(join(ws, 'a', 'style.css'), '.x{}');
+
+    assert.equal(findSoukformatrc(file, ws), undefined);
+
+    const result = readSoukformatrcLayers(file, 'css', ws);
+    assert.equal(result.path, undefined);
+    assert.deepEqual(result.layers, []);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  it('a config INSIDE the workspace still wins while one above is ignored', () => {
+    write(join(tmp, SOUKFORMATRC_FILENAME), OUTSIDE_CONFIG);
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    const file = write(join(ws, 'a', 'style.css'), '.x{}');
+
+    const result = readSoukformatrcLayers(file, 'css', ws);
+    assert.equal(result.path, join(ws, SOUKFORMATRC_FILENAME));
+    assert.equal(result.layers[0].values.indent_size, 6);
+  });
+
+  it('a document OUTSIDE the workspace reads nothing at all', () => {
+    write(join(tmp, SOUKFORMATRC_FILENAME), OUTSIDE_CONFIG);
+    const file = write(join(tmp, 'elsewhere', 'style.css'), '.x{}');
+    assert.equal(findSoukformatrc(file, ws), undefined);
+    assert.deepEqual(readSoukformatrcLayers(file, 'css', ws).layers, []);
+  });
+
+  // Containment, not string equality: every one of these used to be a way for a
+  // string-equality bound to MISS the workspace root and keep walking.
+  it('a trailing separator on the workspace path still bounds the walk', () => {
+    write(join(tmp, SOUKFORMATRC_FILENAME), OUTSIDE_CONFIG);
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    const file = write(join(ws, 'a', 'style.css'), '.x{}');
+
+    assert.equal(
+      findSoukformatrc(file, `${ws}${sep}`),
+      join(ws, SOUKFORMATRC_FILENAME)
+    );
+    // And it does not let the walk escape either.
+    const above = write(join(tmp, 'outside', 'style.css'), '.x{}');
+    assert.equal(findSoukformatrc(above, `${ws}${sep}`), undefined);
+  });
+
+  it('a "." / ".." dressed-up workspace path still bounds the walk', () => {
+    write(join(tmp, SOUKFORMATRC_FILENAME), OUTSIDE_CONFIG);
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    const file = write(join(ws, 'a', 'style.css'), '.x{}');
+    const dressed = join(ws, 'a', '..', '.', '');
+
+    assert.equal(findSoukformatrc(file, dressed), join(ws, SOUKFORMATRC_FILENAME));
+    const above = write(join(tmp, 'style.css'), '.x{}');
+    assert.equal(findSoukformatrc(above, dressed), undefined);
+  });
+
+  it('a sibling folder whose name merely STARTS with the workspace name is outside', () => {
+    // 'ws-extra' string-prefixes 'ws': a prefix test would wrongly call it inside.
+    const sibling = join(tmp, 'ws-extra');
+    write(join(sibling, SOUKFORMATRC_FILENAME), OUTSIDE_CONFIG);
+    const file = write(join(sibling, 'style.css'), '.x{}');
+    assert.equal(findSoukformatrc(file, ws), undefined);
+  });
+
+  it('on win32 a case-mismatched workspace path is still the same workspace', function () {
+    if (process.platform !== 'win32') {
+      this.skip();
+      return;
+    }
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    const file = write(join(ws, 'a', 'style.css'), '.x{}');
+    assert.equal(
+      findSoukformatrc(file, ws.toUpperCase()),
+      join(ws, SOUKFORMATRC_FILENAME)
+    );
+  });
+
+  it('on win32 a workspace path with FORWARD slashes still bounds the walk', function () {
+    // The module claims a mixed separator cannot let the walk escape. A host
+    // that hands back 'C:/proj' rather than 'C:\\proj' is exactly the
+    // normalisation mismatch a string-equality bound fails open on.
+    if (process.platform !== 'win32') {
+      this.skip();
+      return;
+    }
+    write(join(tmp, SOUKFORMATRC_FILENAME), OUTSIDE_CONFIG);
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    const file = write(join(ws, 'a', 'style.css'), '.x{}');
+    const posixStyle = ws.split(sep).join('/');
+
+    assert.equal(
+      findSoukformatrc(file, posixStyle),
+      join(ws, SOUKFORMATRC_FILENAME)
+    );
+    // And a document above it is still outside.
+    const above = write(join(tmp, 'style.css'), '.x{}');
+    assert.equal(findSoukformatrc(above, posixStyle), undefined);
+  });
+
+  it('an absent or blank workspace bound searches NOTHING (fail-closed)', () => {
+    write(join(ws, SOUKFORMATRC_FILENAME), CONFIG);
+    const file = write(join(ws, 'style.css'), '.x{}');
+    assert.equal(findSoukformatrc(file, ''), undefined);
+    assert.equal(findSoukformatrc(file, '   '), undefined);
+    assert.deepEqual(readSoukformatrcLayers(file, 'css', '').layers, []);
+    assert.deepEqual(
+      readSoukformatrcLayers(file, 'css', undefined as unknown as string).layers,
+      []
+    );
+  });
+});
+
 describe('config/soukformatrc : on-disk discovery (fail-soft)', () => {
   let root: string;
 
@@ -197,33 +370,25 @@ describe('config/soukformatrc : on-disk discovery (fail-soft)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('finds the nearest .soukformatrc walking up the tree', () => {
-    writeFileSync(join(root, SOUKFORMATRC_FILENAME), '{ "css": { "indent": 6 } }');
-    const deep = join(root, 'a', 'b');
-    mkdirSync(deep, { recursive: true });
-    const file = join(deep, 'style.css');
-    writeFileSync(file, '.x{}');
-
-    const found = findSoukformatrc(file);
-    assert.equal(found, join(root, SOUKFORMATRC_FILENAME));
-
-    const result = readSoukformatrcLayers(file, 'css');
-    assert.equal(result.path, join(root, SOUKFORMATRC_FILENAME));
-    assert.equal(result.layers[0].values.indent_size, 6);
-  });
-
   it('returns no layer (and no throw) when no file exists', () => {
     const file = join(root, 'orphan.css');
     writeFileSync(file, '.x{}');
-    const result = readSoukformatrcLayers(file, 'css');
+    const result = readSoukformatrcLayers(file, 'css', root);
     assert.equal(result.path, undefined);
     assert.equal(result.layers.length, 0);
     assert.equal(result.warnings.length, 0);
   });
 
   it('an empty / whitespace fsPath yields no layer', () => {
-    assert.equal(readSoukformatrcLayers('', 'css').layers.length, 0);
-    assert.equal(readSoukformatrcLayers('   ', 'css').layers.length, 0);
+    assert.equal(readSoukformatrcLayers('', 'css', root).layers.length, 0);
+    assert.equal(readSoukformatrcLayers('   ', 'css', root).layers.length, 0);
+  });
+
+  it('a directory named .soukformatrc is not a config file', () => {
+    mkdirSync(join(root, SOUKFORMATRC_FILENAME), { recursive: true });
+    const file = join(root, 'style.css');
+    writeFileSync(file, '.x{}');
+    assert.equal(findSoukformatrc(file, root), undefined);
   });
 
   it('resolves glob overrides relative to the config file directory', () => {
@@ -236,8 +401,64 @@ describe('config/soukformatrc : on-disk discovery (fail-soft)', () => {
     const file = join(src, 'a.css');
     writeFileSync(file, '.x{}');
 
-    const result = readSoukformatrcLayers(file, 'css');
+    const result = readSoukformatrcLayers(file, 'css', root);
     const r = resolveOptions({ languageId: 'css', layers: result.layers });
     assert.equal(r.tabSize, 8);
+  });
+});
+
+// The bound is only real if the HOST passes it. src/config/vscodeConfig.ts is
+// the single caller and it imports 'vscode', so mocha cannot load it: the walk
+// could be handed dirname(file), or '', or nothing at all, and every test above
+// would still pass while the shipped extension read configs from outside the
+// workspace again. These checks read that source from disk (same idiom as
+// lazyBoundary.test.ts) so the wiring cannot be dropped silently.
+describe('config/soukformatrc : the host really passes the workspace bound', () => {
+  const source = readFileSync(
+    join(__dirname, '../../../src/config/vscodeConfig.ts'),
+    'utf8'
+  );
+
+  it('passes the containing workspace folder as the stop directory', () => {
+    assert.match(
+      source,
+      /readSoukformatrcLayers\(\s*document\.uri\.fsPath,[^)]*folder\.uri\.fsPath\s*\)/,
+      'the walk bound must be the workspace folder, never a directory derived ' +
+        'from the document itself'
+    );
+    assert.match(source, /getWorkspaceFolder\(document\.uri\)/);
+  });
+
+  it('reads NOTHING, and says so, for a document outside every folder', () => {
+    // Fail-closed plus honesty: silence here would leave "no config found"
+    // indistinguishable from "config deliberately not read".
+    assert.match(
+      source,
+      /if\s*\(!folder[^)]*\)\s*\{\s*return\s*\{\s*layers:\s*\[\],\s*warnings:\s*\[\s*SOUKFORMATRC_NO_WORKSPACE_WARNING/,
+      'a document with no workspace folder must get no layer and one warning'
+    );
+    assert.match(source, /const SOUKFORMATRC_NO_WORKSPACE_WARNING\s*=/);
+    assert.match(source, /bounded to the/);
+  });
+
+  it('keeps the Workspace Trust gate on the layer', () => {
+    // A .soukformatrc is workspace-authored content: Restricted Mode must not
+    // honour it, bounded walk or not. Read the gate's OWN body: a match
+    // anywhere in the file would be satisfied by another layer's trust check.
+    const start = source.indexOf('function shouldReadSoukformatrc');
+    assert.ok(start > 0, 'the .soukformatrc gate must exist');
+    const end = source.indexOf('\n}', start);
+    const body = source.slice(start, end);
+
+    assert.match(
+      body,
+      /vscode\.workspace\.isTrusted === false/,
+      'shouldReadSoukformatrc must still refuse an untrusted workspace'
+    );
+    assert.match(
+      body,
+      /document\.uri\.scheme !== 'file'/,
+      'and still require a real on-disk document'
+    );
   });
 });

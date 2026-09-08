@@ -95,9 +95,10 @@ export function playgroundErrorMessage(detail: string): string {
  * Handler for "Tidy: Open Playground".
  *
  * Flow: open each playground document as UNTITLED (nothing on disk), show the
- * first one focused and the rest beside it (preserveFocus), then surface a
- * non-blocking "what next" toast. Never throws: any host failure is surfaced as
- * a non-blocking error message (first line only, never a code frame).
+ * first one focused and every later one in the group BESIDE it without taking
+ * focus, then surface a non-blocking "what next" toast. Never throws: any host
+ * failure is surfaced as a non-blocking error message (first line only, never a
+ * code frame).
  */
 export async function openPlayground(): Promise<void> {
   const vscode = require('vscode');
@@ -108,10 +109,24 @@ export async function openPlayground(): Promise<void> {
         language: sample.languageId,
         content: sample.content
       });
-      await vscode.window.showTextDocument(document, {
-        preview: false,
-        preserveFocus: firstEditorShown
-      });
+      // The FIRST sample takes the active group and the focus. Every later
+      // sample opens BESIDE it and must not steal that focus.
+      //
+      // `preserveFocus` alone is not enough: without an explicit viewColumn the
+      // later document is shown in the SAME editor group, where it becomes that
+      // group's active editor regardless of preserveFocus. The CSS tab then
+      // silently loses focus and the very next "Preview Format (Diff)" runs on
+      // the TSX sample instead : exactly the opposite of what this command and
+      // the "Try it now" walkthrough step promise. ViewColumn.Beside puts the
+      // later sample in its own group, so preserveFocus can actually hold.
+      const showOptions = firstEditorShown
+        ? {
+            preview: false,
+            preserveFocus: true,
+            viewColumn: vscode.ViewColumn.Beside
+          }
+        : { preview: false, preserveFocus: false };
+      await vscode.window.showTextDocument(document, showOptions);
       firstEditorShown = true;
     }
     void vscode.window.showInformationMessage(PLAYGROUND_READY_MESSAGE);

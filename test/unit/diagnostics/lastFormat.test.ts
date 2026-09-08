@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import {
   recordLastFormat,
   getLastFormat,
+  getLastFormatFor,
+  getHistory,
   clearLastFormat,
   formatChannelLine,
   sanitizeDetail,
   setLastFormatListener,
+  HISTORY_LIMIT,
   type LastFormatRecord
 } from '../../../src/diagnostics/lastFormat';
 
@@ -139,5 +142,140 @@ describe('diagnostics/lastFormat : listener (status bar feed, ADD-05)', () => {
     setLastFormatListener(undefined);
     recordLastFormat(rec());
     assert.equal(calls, 1);
+  });
+});
+
+// ADD-14: the single slot became a bounded, immutable ring buffer, so an
+// explanation survives the next file being formatted. These suites lock the
+// per-file lookup, the FIFO window and the immutability of the store.
+describe('diagnostics/lastFormat : per-file store (ADD-14)', () => {
+  beforeEach(() => clearLastFormat());
+
+  it('getLastFormatFor returns the record for THAT uri even after another file was formatted', () => {
+    recordLastFormat(
+      rec({
+        uri: 'file:///w/a.css',
+        fileName: 'a.css',
+        status: 'guard-rejected',
+        detail: 'r'
+      })
+    );
+    recordLastFormat(
+      rec({ uri: 'file:///w/b.css', fileName: 'b.css', status: 'applied' })
+    );
+    assert.equal(getLastFormatFor('file:///w/a.css')?.status, 'guard-rejected');
+    assert.equal(getLastFormatFor('file:///w/a.css')?.detail, 'r');
+    assert.equal(getLastFormatFor('file:///w/b.css')?.status, 'applied');
+  });
+
+  it('a newer attempt on the same uri replaces its per-file record', () => {
+    recordLastFormat(rec({ status: 'guard-rejected', detail: 'x' }));
+    recordLastFormat(rec({ status: 'applied' }));
+    assert.equal(getLastFormatFor('file:///w/a.css')?.status, 'applied');
+  });
+
+  it('returns undefined for a uri never formatted this session', () => {
+    recordLastFormat(rec());
+    assert.equal(getLastFormatFor('file:///w/never.css'), undefined);
+  });
+});
+
+describe('diagnostics/lastFormat : bounded history (FIFO eviction)', () => {
+  beforeEach(() => clearLastFormat());
+
+  function recAt(i: number): LastFormatRecord {
+    return rec({
+      uri: `file:///w/f${i}.css`,
+      fileName: `f${i}.css`,
+      at: new Date(Date.UTC(2026, 6, 29, 0, 0, i)).toISOString()
+    });
+  }
+
+  it('keeps at most HISTORY_LIMIT entries, evicting the oldest first', () => {
+    for (let i = 0; i < HISTORY_LIMIT + 5; i++) recordLastFormat(recAt(i));
+    const history = getHistory();
+    assert.equal(history.length, HISTORY_LIMIT);
+    // Newest first: index 0 is the very last write; the 5 oldest are gone.
+    assert.equal(history[0].fileName, `f${HISTORY_LIMIT + 4}.css`);
+    assert.equal(history[HISTORY_LIMIT - 1].fileName, 'f5.css');
+  });
+
+  it('an evicted uri with no newer attempt also leaves the per-file index', () => {
+    for (let i = 0; i < HISTORY_LIMIT + 5; i++) recordLastFormat(recAt(i));
+    assert.equal(getLastFormatFor('file:///w/f0.css'), undefined);
+    assert.equal(getLastFormatFor('file:///w/f4.css'), undefined);
+    assert.ok(
+      getLastFormatFor('file:///w/f5.css'),
+      'first retained entry stays indexed'
+    );
+  });
+
+  it('getHistory is newest first and getLastFormat stays the most recent overall', () => {
+    recordLastFormat(recAt(1));
+    recordLastFormat(recAt(2));
+    const history = getHistory();
+    assert.equal(history[0].fileName, 'f2.css');
+    assert.equal(history[1].fileName, 'f1.css');
+    assert.deepEqual(getLastFormat(), history[0]);
+  });
+
+  it('multiple attempts on the SAME uri occupy multiple history rows (no dedup)', () => {
+    recordLastFormat(rec({ status: 'guard-rejected', detail: 'x' }));
+    recordLastFormat(rec({ status: 'applied' }));
+    assert.equal(getHistory().length, 2);
+    assert.equal(getHistory()[0].status, 'applied');
+    assert.equal(getHistory()[1].status, 'guard-rejected');
+  });
+});
+
+describe('diagnostics/lastFormat : store purity (immutability)', () => {
+  beforeEach(() => clearLastFormat());
+
+  it('mutating the caller record AFTER recording does not alter the store', () => {
+    const mine = rec() as { fileName: string };
+    recordLastFormat(mine as unknown as LastFormatRecord);
+    mine.fileName = 'HACKED.css';
+    assert.equal(getLastFormat()?.fileName, 'a.css');
+    assert.equal(getLastFormatFor('file:///w/a.css')?.fileName, 'a.css');
+  });
+
+  it('stored records and the returned history array are frozen', () => {
+    recordLastFormat(rec());
+    const history = getHistory();
+    assert.ok(Object.isFrozen(history), 'history array must be frozen');
+    assert.ok(Object.isFrozen(history[0]), 'stored records must be frozen');
+  });
+
+  it('each getHistory call returns a fresh array with equal content', () => {
+    recordLastFormat(rec());
+    const a = getHistory();
+    const b = getHistory();
+    assert.notEqual(a, b, 'no shared mutable reference');
+    assert.deepEqual(a, b);
+  });
+});
+
+// The ADD-05 status bar feed must survive the ring buffer: recordLastFormat
+// still notifies its observer with the SANITIZED, frozen record it stored.
+describe('diagnostics/lastFormat : listener still fed by the ring buffer (ADD-05 x ADD-14)', () => {
+  afterEach(() => {
+    setLastFormatListener(undefined);
+    clearLastFormat();
+  });
+
+  it('notifies with the record that was actually stored, on every write', () => {
+    clearLastFormat();
+    const seen: LastFormatRecord[] = [];
+    setLastFormatListener((r) => {
+      seen.push(r);
+    });
+    recordLastFormat(rec({ uri: 'file:///w/a.css', fileName: 'a.css' }));
+    recordLastFormat(
+      rec({ uri: 'file:///w/b.css', fileName: 'b.css', status: 'guard-rejected' })
+    );
+    assert.equal(seen.length, 2);
+    assert.equal(seen[1].fileName, 'b.css');
+    assert.ok(Object.isFrozen(seen[1]), 'the observed record is the frozen one');
+    assert.deepEqual(seen[1], getLastFormat());
   });
 });

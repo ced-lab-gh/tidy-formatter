@@ -5,12 +5,17 @@
 //   - every image a page embeds is a SIBLING PNG that exists (walkthrough
 //     markdown cannot reliably resolve '../' escapes, and the Marketplace
 //     rejects a renamed SVG: PNG magic bytes are checked);
+//   - every PNG ON DISK is referenced by a page: an ORPHAN asset is a failure;
 //   - every walkthrough PNG stays under the 400 KB budget;
 //   - no shipped page carries an em dash (U+2014).
 //
-// The image assertions are written against whatever the pages REFERENCE, so
-// they keep holding as the real captures land (the placeholder PNGs currently
-// in the directory are not referenced by any page yet).
+// The reference check runs in BOTH directions on purpose. `.vscodeignore` ships
+// media/walkthrough wholesale, so any file left in this directory is downloaded
+// by every user: four generated placeholder PNGs were riding along in the VSIX
+// while no page embedded them. A missing referenced image breaks a page; an
+// orphan silently inflates the download. Both are packaging defects, so both
+// fail here. The assertions stay written against whatever the pages REFERENCE,
+// so they keep holding unchanged as the real captures land.
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -39,6 +44,22 @@ function walkthroughFiles(extension: string): string[] {
   return fs
     .readdirSync(WALKTHROUGH_DIR)
     .filter((name) => name.endsWith(extension));
+}
+
+/**
+ * Every image path embedded by a shipped walkthrough page, as written in the
+ * markdown. Paths are sibling filenames (the sibling rule is asserted below), so
+ * these compare directly against the directory listing.
+ */
+function referencedImages(): Set<string> {
+  const referenced = new Set<string>();
+  for (const name of walkthroughFiles('.md')) {
+    const body = fs.readFileSync(path.join(WALKTHROUGH_DIR, name), 'utf8');
+    for (const match of body.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
+      referenced.add(match[1]);
+    }
+  }
+  return referenced;
 }
 
 describe('manifest : walkthrough assets (ADD-03)', () => {
@@ -83,6 +104,37 @@ describe('manifest : walkthrough assets (ADD-03)', () => {
         );
       }
     }
+  });
+
+  it('every PNG on disk is REFERENCED by a page (no orphan ships in the VSIX)', () => {
+    const referenced = referencedImages();
+    const orphans = walkthroughFiles('.png').filter(
+      (name) => !referenced.has(name)
+    );
+    assert.deepEqual(
+      orphans,
+      [],
+      `media/walkthrough ships ${orphans.length} unreferenced PNG(s): ` +
+        `${orphans.join(', ')}. Every file in this directory is packaged and ` +
+        `downloaded by every user, so either embed it from a walkthrough page ` +
+        `or delete it.`
+    );
+  });
+
+  it('no unexpected file type ships inside media/walkthrough', () => {
+    // Belt and braces around the orphan check: that one only polices PNGs and
+    // the SVG check only polices SVGs, so any OTHER file type could still ride
+    // along. .mjs is the one exception: .vscodeignore excludes media/**/*.mjs,
+    // so the placeholder generator stays in the repo without shipping.
+    const ALLOWED = /\.(md|png|mjs)$/;
+    const unexpected = fs
+      .readdirSync(WALKTHROUGH_DIR)
+      .filter((name) => !ALLOWED.test(name));
+    assert.deepEqual(
+      unexpected,
+      [],
+      `unexpected file(s) in media/walkthrough: ${unexpected.join(', ')}`
+    );
   });
 
   it('every walkthrough PNG is a REAL PNG (magic bytes), not a renamed SVG', () => {

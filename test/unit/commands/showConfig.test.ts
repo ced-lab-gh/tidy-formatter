@@ -409,3 +409,91 @@ describe('commands/showConfig : renderLine + purity', () => {
     assert.equal(JSON.stringify(options), snapshot);
   });
 });
+
+describe('commands/showConfig : .prettierrc layer (ADD-13)', () => {
+  const baseOptions = resolveOptions({
+    languageId: 'typescript',
+    layers: [
+      {
+        source: '.prettierrc',
+        values: { 'prettier.singleQuote': true, tabSize: 2 }
+      }
+    ]
+  });
+
+  it('header shows the resolved Prettier project config path', () => {
+    const report = buildEffectiveConfigReport({
+      documentPath: '/p/a.ts',
+      languageId: 'typescript',
+      options: baseOptions,
+      warnings: [],
+      prettierrcPath: '/p/.prettierrc.json',
+      now: FIXED_NOW
+    });
+    assert.match(report, /^\.prettierrc : \/p\/\.prettierrc\.json$/m);
+  });
+
+  it('header shows "(none found)" when no Prettier config contributed', () => {
+    const report = buildEffectiveConfigReport({
+      documentPath: '/p/a.ts',
+      languageId: 'typescript',
+      options: baseOptions,
+      warnings: [],
+      now: FIXED_NOW
+    });
+    assert.match(report, /^\.prettierrc : \(none found\)$/m);
+  });
+
+  it('attributes values resolved from the rc layer to the ".prettierrc" source', () => {
+    const report = buildEffectiveConfigReport({
+      documentPath: '/p/a.ts',
+      languageId: 'typescript',
+      options: baseOptions,
+      warnings: [],
+      prettierrcPath: '/p/.prettierrc.json',
+      now: FIXED_NOW
+    });
+    assert.match(report, /tidy\.prettier\.singleQuote = true\s+← \.prettierrc/);
+    assert.match(report, /tabSize = 2\s+← \.prettierrc/);
+  });
+
+  it('surfaces non-fatal .prettierrc warnings in their own section', () => {
+    const report = buildEffectiveConfigReport({
+      documentPath: '/p/a.ts',
+      languageId: 'typescript',
+      options: baseOptions,
+      warnings: [],
+      prettierrcWarnings: [
+        '.prettierrc at /p/.prettierrc: key "proseWrap" is unknown or not AST-safe for Tidy; ignored.'
+      ],
+      now: FIXED_NOW
+    });
+    assert.match(report, /\.prettierrc warnings \(non-fatal\)/);
+    assert.match(report, /proseWrap/);
+  });
+
+  it('keeps the .soukformatrc and .prettierrc warning sections distinct', () => {
+    const report = buildEffectiveConfigReport({
+      documentPath: '/p/a.ts',
+      languageId: 'typescript',
+      options: baseOptions,
+      warnings: ['.soukformatrc[typescript]: unknown option "bogus" ignored.'],
+      prettierrcWarnings: ['.prettierrc at /p/.prettierrc: skipped.'],
+      now: FIXED_NOW
+    });
+    assert.match(report, /\.soukformatrc warnings \(non-fatal\)/);
+    assert.match(report, /\.prettierrc warnings \(non-fatal\)/);
+  });
+
+  it('omits the .prettierrc warnings section when the list is empty or absent', () => {
+    const empty = buildEffectiveConfigReport({
+      documentPath: '/p/a.ts',
+      languageId: 'typescript',
+      options: baseOptions,
+      warnings: [],
+      prettierrcWarnings: [],
+      now: FIXED_NOW
+    });
+    assert.ok(!empty.includes('warnings (non-fatal)'));
+  });
+});

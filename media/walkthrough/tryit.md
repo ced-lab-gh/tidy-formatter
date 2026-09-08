@@ -10,6 +10,9 @@ Then see Tidy work, without committing to anything:
 
 Try the TSX tab too: the JSX stays valid, `?.` and `??` survive, and the result is verified for **semantic equivalence** before anything can be applied. If a format ever failed that check, Tidy would show you the refusal instead of writing a broken file.
 
-> The playground goes through the exact same pipeline as your real files: the
-> per-language enable settings, the size guard, the ignore rules, the engine,
-> and the equivalence guard. What you see here is what Format Document does.
+> The playground goes through the same pipeline as your real files: the
+> per-language enable settings, the size guard, in-source `tidy-ignore` markers,
+> the engine, and the equivalence guard. What you see here is what Format
+> Document does. One gate genuinely cannot apply: a `.soukformatignore` is never
+> consulted for an untitled buffer, because there is no file on disk to walk up
+> from. On a real file that check runs too.

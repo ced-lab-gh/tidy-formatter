@@ -4,6 +4,68 @@ All notable changes to **Tidy Formatter : JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-09-08
+
+The release that makes Tidy start fast, read your project's Prettier config, and
+tell you what it did. It is also the release in which the safety guard was
+audited adversarially, end to end, for the first time: nine independent passes
+found eleven cases where Tidy could write output that was NOT equivalent to your
+original, every one of them present in 0.3.0 and earlier. All eleven are closed
+below, each with a test that fails against the previous code.
+
+### Added
+
+- **Tidy reads your project's Prettier config.** On the TypeScript/TSX/JSX path (and a `.js` file containing JSX, which Prettier prints too), Tidy now honours the data variants of your Prettier configuration: `.prettierrc`, `.prettierrc.json`/`.json5`/`.yaml`/`.yml`/`.toml`, or the `prettier` key of `package.json`, found in Prettier's own search order (nearest wins, `package.json` first) but never above your workspace folder. Exactly ten AST-safe stylistic keys are read (`printWidth`, `tabWidth`, `useTabs`, `semi`, `singleQuote`, `jsxSingleQuote`, `trailingComma`, `bracketSpacing`, `bracketSameLine`, `arrowParens`); everything else, including `parser`, `plugins` and per-glob `overrides`, is ignored and listed in *Show Effective Configuration*.
+  - **Code-based configs are never executed.** When the nearest config is `.prettierrc.js`, `prettier.config.mjs` or any other executable form, Tidy skips the layer entirely rather than guessing, and says so. Running a workspace file to decide how to format it would be arbitrary code execution from a folder you only opened.
+  - The layer sits between `.editorconfig` and `.soukformatrc`, so your `.soukformatrc` still has the last word. Opt out with `tidy.prettier.respectProjectConfig: false`. Always ignored in Restricted Mode.
+- **`Tidy: Show Format History`.** A chronological view of this session's format attempts (the fifty most recent, newest first, across all files): status icon, file, language and age. Picking an entry writes the full explanation to the **Tidy Formatter** output channel. In memory only, content-free, read-only, and cleared when the window reloads.
+- **The output channel now names the engine that actually ran.** JSON and JSONC are formatted by jsonc-parser, not js-beautify, and a `.js` file containing JSX is printed by Prettier; both were previously reported under the wrong engine in the status bar, the channel and *Explain Last Format*.
+
+### Changed
+
+- **The bundle no longer loads at startup.** The Prettier printer and the three parsers backing the safety guard now ship as four on-demand chunks. Opening a file loads only the host bundle: **399 876 bytes instead of 2 818 641**, a cold `require` median of **22 ms instead of 44 ms**, and **1.3 MB retained instead of 11.2 MB**. Each engine loads the first time it is genuinely needed, and an idle preloader, five seconds after activation, warms only the chunks the languages you actually have open will need: a session with only stylesheets open never loads the TypeScript printer at all. Verified on the packaged VSIX, not just in development: zero chunks are in the module cache after `activate()`.
+  - **The guard is never lazier than the write.** The verifier is always loaded before any edit is produced. If a chunk fails to load, that format is abandoned with zero edits and is reported as an engine failure, never as a rejection of your code.
+- **Setting `editor.defaultFormatter` now shows you the exact keys first.** *Tidy: Use Tidy as my Formatter* previously wrote it after two quick picks. It now shows a modal listing the exact keys and values it would write, the target scope, what it would replace, and the line "Nothing has been changed yet"; only the confirm button writes, and cancelling writes nothing. This matches what the README had been promising and what the format-on-save path already did.
+- `.soukformatrc` is no longer read from outside your workspace folder. The upward search previously ran to the filesystem root, so a file you never opened could govern how your code was formatted.
+
+### Fixed : the safety guard
+
+Every item below is a case where Tidy could WRITE output that differs from your
+original. Each is closed with a test that fails against the previous code.
+
+- **JSON verdicts depended on the size of the document.** Above 262 144 characters the guard switched to native `JSON.parse`, which keeps only the last member of a duplicated key, while smaller documents were parsed with jsonc-parser, which keeps them all. Deleting a duplicate member from a large document was therefore accepted as equivalent, and a large document that legitimately kept its duplicates was rejected. The fast path is gone; the verdict is now the same at every size, proven by a differential oracle of 1 200 pairs against an independent reference implementation.
+- **`<xmp>`, `<listing>` and `<plaintext>` were reflowed.** The guard knew only `<pre>` and `<textarea>`, so a tab inside these three could be rewritten as spaces and accepted, changing the rendered text.
+- **A selection was judged out of context.** *Format Selection* over text inside a `<pre>`, `<textarea>` or `<pre><code>` collapsed its whitespace and was accepted, while the identical change was correctly rejected on the whole document. Selections are now spliced back into their document before the guard is asked, so the verdict no longer depends on how much of the file you selected.
+- **HTML front matter was unprotected in a selection.** The leading `---` block was masked at document scope only, so *Format Selection* (and `editor.formatOnSaveMode: "modifications"`, which formats ranges) reflowed the YAML: nested keys were promoted to the top level and block scalars were destroyed.
+- **Template islands were unprotected in a selection.** An island whose delimiters straddled the selection boundary was never masked, so its interior was reflowed: a statement could be pulled onto a `//` comment line, after which the template emitted nothing, and string literals lost runs of spaces.
+- **`xml:space="preserve"` was ignored.** SVG draws every space character under it, so `<text xml:space="preserve">A  B</text>` was silently rewritten to a single space.
+- **CSS `white-space` was ignored.** An element carrying `white-space: pre`, `pre-wrap`, `pre-line` or `break-spaces` had its drawn whitespace reflowed and accepted: column-aligned tables, indented code samples and pre-wrap prose all lost their layout. Whitespace significance is now one model with three sources (the preformatted tags, `xml:space` and CSS `white-space`), inherited down the tree the way the cascade inherits it. Because deciding which elements an embedded stylesheet applies to would require matching CSS selectors against the tree, a document whose `<style>` sets a preserving value anywhere is now **refused with the file untouched** rather than reflowed on the bet that the rule matches nothing.
+- **The CSS guard treated twenty non-CSS code points as whitespace.** It used JavaScript's `\s` class while the printer rewrites U+00A0, U+2000 and eighteen others to an ordinary space. A no-break space inside a selector therefore turned one class into a **descendant combinator**, changing which elements the rule matches, and the guard folded both sides so it could not see it. A sweep of 2 635 probes across nine languages found 519 such cases; all are now refused, and 514 of them are rescued outright by the PostCSS fallback, which preserves the code point.
+- **A failed chunk load was reported as a rejection of your code.** On the HTML path it surfaced as "could not be proven equivalent" instead of an engine failure. Zero edits either way, but the message accused your file of something the verifier had simply not run to check.
+- **A malformed engine chunk could make the guard answer vacuously.** The loader validated only the type of each export, so a chunk exporting callable but degenerate parsers loaded cleanly and made every comparison trivially true. Each guard chunk now runs a behavioural canary at load (0.09 to 0.20 ms once per session) and a chunk that fails it is never cached.
+- **`Preview Format (Diff)` could overwrite an edit made while the diff was open.** *Apply* wrote text verified before the preview, over a range recomputed from the current document, with no version check. It now re-checks the document version and its full text immediately before writing, and refuses with zero edits if the buffer moved.
+
+### Fixed
+
+- **Formatting a file with `tidy-ignore` markers is idempotent again.** In HTML every format added two more spaces before `<!-- tidy-ignore-start -->`, without bound; in CSS, SCSS and LESS the newline after `/* tidy-ignore-end */` was eaten and the next selector glued onto the marker line. The repository's idempotence corpus had no marker fixtures, which is why it was never caught; it now has thirty-six, across six languages and CRLF.
+- **`Format Selection` no longer stops halfway.** When a selection contained a masked span, the range handed to the engine was expressed in the wrong coordinate space, so the tail of the selection came back unformatted, and in some cases nothing was formatted at all.
+- **`tidy-ignore` regions are honoured in a selection**, and on the Prettier path, where they cannot be honoured, their presence is now reported instead of silently ignored.
+- **A missing or quarantined `one_ini_bg.wasm` no longer breaks all formatting.** The EditorConfig parser is loaded lazily behind a guarded call: if the asset is unavailable, the `.editorconfig` layer is skipped, formatting continues, and the reason is stated once in the output channel and in *Show Effective Configuration*.
+- **`<template>` elements no longer break HTML formatting.** Every document containing one was permanently rejected with a warning, which affected web components, Vue, Alpine and htmx alike.
+- The status bar and *Explain Last Format* no longer disagree about the same file.
+
+### Documentation
+
+- **Every user review quoted in the README was verified against its source.** Two had no source at all and were removed (one attributed a quote to an issue that does not contain it), four were altered rather than merely shortened and have been restored to their exact wording, and one was credited to an issue whose title is about something else entirely.
+- **The README's central claim about the incumbent was backwards and has been corrected.** It said most one-star reviews were about a formatter acting without consent. Counting the corpus: of 85 one-star reviews, **53 are about broken or corrupted output** and **26 are about acting without consent** (10 are both, 16 neither). Broken output dominates, which is what the equivalence guard exists to answer. The figures for the incumbent are now dated and measured (3 969 079 installs, 1.69 stars over 241 ratings, last updated 2017-03-31, as of 2026-09-07).
+- Several other claims that were not literally true have been corrected, including the size of the exposed option surface, which options are language-overridable, what the output channel records, and what `.soukformatignore` cascading actually does. A test suite now pins each documented claim to the code that makes it true.
+
+### Known limitations
+
+- A line-scoped directive comment (`// @ts-expect-error`, `// eslint-disable-next-line`) can end up governing a different line when reflow splits the statement it covered. Comments are compared as a position-free multiset, so the guard does not see it. Runtime semantics are unchanged; only what the type checker or linter suppresses moves.
+- `// prettier-ignore` is not honoured during *Format Selection* on the TypeScript path, because Prettier is handed only the selected span and cannot see a directive that sits outside it.
+- A `tidy-ignore` region in a CSS file disables the second-chance PostCSS fallback for that file.
+
 ## [0.3.0] - 2026-08-11
 
 The release that makes Tidy explain itself, format more of what you actually
@@ -36,7 +98,7 @@ ones below, and Tidy still never hooks the save event.
 
 ### Changed
 
-- **Settings are now grouped into seven titled sections** (general and safety, indentation and line endings, JavaScript, CSS/SCSS/LESS, HTML, TypeScript and JSX, project and coexistence) with ordering and richer descriptions. **No setting was renamed or removed**: all 44 `tidy.*` identifiers are unchanged, so existing configurations keep working exactly as before.
+- **Settings are now grouped into seven titled sections** (general and safety, indentation and line endings, JavaScript, CSS/SCSS/LESS, HTML, TypeScript and JSX, project and coexistence) with ordering and richer descriptions. **No setting was renamed or removed**: all 46 `tidy.*` setting identifiers are unchanged, so existing configurations keep working exactly as before.
 - **Commands no longer appear for unsupported languages.** `Preview Format`, `Explain Last Format` and `Show Effective Configuration` are now gated on the active language, instead of appearing in the palette and failing when run.
 - Command titles are consistently Title Case.
 - **`Tidy: Preview Format (Diff)` now honours the full formatting pipeline.** Before doing any work, the preview applies the same pre-checks as *Format Document*, in the same order: `tidy.<lang>.enable`, the effective size cap (`tidy.json.maxFileSizeKB` for JSON/JSONC, `tidy.maxFileSizeKB` otherwise), `.soukformatignore`, and top-of-file ignore markers. When a check refuses, Tidy says which one in a non-blocking message and opens no diff, so the preview can never offer a change that a real format would refuse to produce. The preview stays read-only: it records nothing, so `Explain last format` keeps describing your last real format.

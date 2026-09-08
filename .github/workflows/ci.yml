@@ -89,6 +89,12 @@ jobs:
       - name: Bundle size budgets
         run: npm run check:bundle
 
+      # ADD-11: the chunk layout is a structural invariant of the shipped VSIX.
+      # A host bundle that silently re-absorbed an engine, or a chunk missing
+      # next to extension.js, would leave the guard unable to run at all.
+      - name: Chunk layout + size ceilings
+        run: npm run check:chunks
+
       - name: Package (.vsix)
         run: npm run package
 

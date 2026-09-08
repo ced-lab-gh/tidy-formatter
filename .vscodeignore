@@ -23,6 +23,10 @@ tsconfig.json
 coverage/**
 .github/**
 dist/meta.json
+dist/meta.chunk-prettier.json
+dist/meta.chunk-guard-js.json
+dist/meta.chunk-guard-css.json
+dist/meta.chunk-guard-html.json
 
 # ── Dev-only assets & scripts (the .png/.md they PRODUCE are shipped) ──
 samples/**

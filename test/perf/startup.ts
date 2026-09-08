@@ -17,12 +17,16 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
+  ACTIVATION_BUDGET,
   STARTUP_BUDGET,
   STARTUP_SAMPLES,
+  collectActivationViolations,
   collectStartupViolations,
   summarize,
+  type ActivationSample,
   type StartupSample,
-  type StartupSummary
+  type StartupSummary,
+  type Violation
 } from './startupBudgets';
 import {
   RESULTS_PATH,
@@ -43,6 +47,10 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const BUNDLE_PATH = path.join(DIST_DIR, 'extension.js');
 const STUB_PATH = path.join(__dirname, 'vscodeStub.cjs');
 const CHILD_PATH = path.join(__dirname, 'startupChild.cjs');
+// ADD-11: the second scenario needs a FUNCTIONAL vscode stub (activate() really
+// runs and formats), so it uses its own preload and its own child.
+const ACTIVATION_STUB_PATH = path.join(__dirname, 'vscodeActivationStub.cjs');
+const ACTIVATION_CHILD_PATH = path.join(__dirname, 'activationChild.cjs');
 
 function assertSampleShape(value: unknown, rawStdout: string): StartupSample {
   const sample = value as StartupSample;
@@ -79,6 +87,53 @@ function runChildOnce(): StartupSample {
 
 function distHasChunks(): boolean {
   return fs.readdirSync(DIST_DIR).some((name) => /^chunk-.+\.js$/.test(name));
+}
+
+/**
+ * ADD-11 scenario: require + activate + three real formats against the BUILT
+ * bundle. One run, not STARTUP_SAMPLES: everything it asserts is structural
+ * (which chunk loaded when, how many edits came back), and the two wall-clock
+ * rules have order-of-magnitude headroom, so repeating it would only cost time.
+ */
+function runActivationChild(): ActivationSample {
+  const stdout = execFileSync(
+    process.execPath,
+    ['--require', ACTIVATION_STUB_PATH, ACTIVATION_CHILD_PATH, BUNDLE_PATH],
+    { encoding: 'utf8', timeout: 120_000 }
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error(`activation child printed non-JSON output: ${stdout}`);
+  }
+  const sample = parsed as ActivationSample;
+  if (
+    typeof sample?.activateMs !== 'number' ||
+    !Array.isArray(sample?.chunksAfterActivate) ||
+    typeof sample?.typescript?.editCount !== 'number'
+  ) {
+    throw new Error(`activation child printed an unexpected payload: ${stdout}`);
+  }
+  return sample;
+}
+
+function printActivationSummary(sample: ActivationSample): void {
+  const list = (chunks: readonly string[]): string =>
+    chunks.length === 0 ? 'none' : chunks.join(', ');
+  // eslint-disable-next-line no-console
+  console.log(
+    '\nactivation + first formats against the built bundle:\n' +
+      `  activate()       ${sample.activateMs.toFixed(1)} ms ` +
+      `(budget < ${ACTIVATION_BUDGET.activateMs * TIME_MULTIPLIER} ms), ` +
+      `${sample.providerCount} provider(s) registered\n` +
+      `  chunks loaded    after activate: ${list(sample.chunksAfterActivate)}\n` +
+      `  first ts format  ${sample.typescript.elapsedMs.toFixed(0)} ms ` +
+      `(budget < ${ACTIVATION_BUDGET.firstTsFormatMs * TIME_MULTIPLIER} ms, no preload), ` +
+      `${sample.typescript.editCount} edit(s); chunks: ${list(sample.chunksAfterTypescript)}\n` +
+      `  json format      ${sample.json.editCount} edit(s); chunks: ${list(sample.chunksAfterJson)}\n` +
+      `  css format       ${sample.css.editCount} edit(s); chunks: ${list(sample.chunksAfterCss)}`
+  );
 }
 
 function printSummary(summary: StartupSummary): void {
@@ -143,13 +198,26 @@ function main(): number {
   printSummary(summary);
   persistScenario(summary);
 
-  const violations = collectStartupViolations(
+  const violations: Violation[] = collectStartupViolations(
     samples,
     summary,
     STARTUP_BUDGET,
     TIME_MULTIPLIER,
     distHasChunks()
   );
+
+  // ADD-11: the activation + format scenario. Skipped only when dist/ has no
+  // chunks at all (a pre-ADD-11 bundle); once the split exists this is the gate
+  // that proves the packaged loader can actually reach its chunks, which no
+  // unit test can prove.
+  if (distHasChunks()) {
+    const activation = runActivationChild();
+    printActivationSummary(activation);
+    writeResults(mergeScenario(readResults(), 'activation', activation));
+    violations.push(
+      ...collectActivationViolations(activation, ACTIVATION_BUDGET, TIME_MULTIPLIER)
+    );
+  }
 
   // eslint-disable-next-line no-console
   console.log('');

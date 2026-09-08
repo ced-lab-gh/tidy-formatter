@@ -16,6 +16,14 @@
 //   - Applying happens ONLY on an explicit "Apply" click, via a single
 //     applyEdit(WorkspaceEdit) so one Ctrl+Z fully reverts it. No save hook, no
 //     auto-apply, no defaultFormatter write.
+//   - The text offered by "Apply" was proven equivalent to the buffer AS IT WAS
+//     when the preview was computed. The diff is read-only, but the ORIGINAL
+//     document is not: the user can keep typing in it while the diff is open.
+//     Applying then would overwrite their edits with text the guard never
+//     compared against the current buffer. So the document's version + text are
+//     captured with the preview and re-checked at the very last moment before
+//     the write (evaluateApplyGate): on ANY mismatch we write NOTHING and ask
+//     for a fresh preview.
 //
 // Split of concerns (so the decision logic is unit-testable without an Electron
 // host): this module's TOP LEVEL imports NO 'vscode' : neither directly nor
@@ -224,6 +232,62 @@ export function buildPreviewPlan(
   return { canApply: true };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Pure staleness gate: the last check before ANY write                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Surfaced verbatim when the document moved on while the read-only diff was
+ * open. Nothing is written in that case: the safe action is a fresh preview of
+ * the text as it is now.
+ */
+export const STALE_PREVIEW_MESSAGE =
+  'Tidy: the document changed while the preview was open, so nothing was applied. Run the preview again to check and apply a diff of the current text.';
+
+/** What the preview captured, and what the document looks like at Apply time. */
+export interface PreviewApplyGateInput {
+  /** document.version when the preview was computed (undefined if unavailable). */
+  readonly previewVersion: number | undefined;
+  /** document.version at the moment "Apply" was clicked. */
+  readonly currentVersion: number | undefined;
+  /** The exact text the guard proved the formatted output equivalent to. */
+  readonly previewInput: string;
+  /** The document's text at the moment "Apply" was clicked. */
+  readonly currentText: string;
+}
+
+/** ok, or a refusal carrying the user-facing reason. */
+export type PreviewApplyDecision =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Decide whether the previewed text may still be written. PURE: no I/O, no
+ * 'vscode' import, fully unit-testable.
+ *
+ * The guard proved `formatted` equivalent to `previewInput`, NOT to whatever the
+ * buffer holds now. So this gate refuses unless BOTH still hold:
+ *   1. the version counter is unchanged (VS Code's authoritative "did this
+ *      document change" signal, which also catches an edit that was typed and
+ *      undone), and
+ *   2. the text is byte-identical to what was verified (belt and braces: it
+ *      stands on its own if a host ever reports no version at all, in which case
+ *      both versions are undefined and only the text comparison speaks).
+ *
+ * A refusal means ZERO edits. Never a partial write, never a "best effort".
+ */
+export function evaluateApplyGate(
+  input: PreviewApplyGateInput
+): PreviewApplyDecision {
+  if (input.previewVersion !== input.currentVersion) {
+    return { ok: false, reason: STALE_PREVIEW_MESSAGE };
+  }
+  if (input.previewInput !== input.currentText) {
+    return { ok: false, reason: STALE_PREVIEW_MESSAGE };
+  }
+  return { ok: true };
+}
+
 /**
  * Compose the user-facing rejection message. The guard's `reason` is a short,
  * code-free summary (the guard never embeds source); we prepend a stable,
@@ -315,18 +379,34 @@ function ensurePreviewProvider(vscode: any): PreviewContentProvider {
 }
 
 /**
+ * Read a document's version counter defensively. VS Code always provides a
+ * number; anything else becomes undefined so the gate falls back to comparing
+ * the text rather than silently trusting a bogus value.
+ */
+function readDocumentVersion(document: any): number | undefined {
+  return typeof document?.version === 'number' ? document.version : undefined;
+}
+
+/**
  * Apply the formatted text to the document as a SINGLE undo entry: one
  * WorkspaceEdit replacing the whole document range. One Ctrl+Z fully reverts it.
  * Returns whether the edit was applied.
+ *
+ * `verifiedInput` is the text the caller has just re-proved the document still
+ * holds (evaluateApplyGate). The replaced range is derived from ITS length, not
+ * from a fresh read of the document, so the span written is exactly the span
+ * that was verified. There is no await between the gate and this call, so no
+ * edit can interleave.
  */
 async function applyFormatted(
   vscode: any,
   document: any,
+  verifiedInput: string,
   formatted: string
 ): Promise<boolean> {
   const fullRange = new vscode.Range(
     document.positionAt(0),
-    document.positionAt(document.getText().length)
+    document.positionAt(verifiedInput.length)
   );
   const edit = new vscode.WorkspaceEdit();
   edit.replace(document.uri, fullRange, formatted);
@@ -342,7 +422,9 @@ async function showDiffAndOfferApply(
   vscode: any,
   document: any,
   languageId: LangId,
-  formatted: string
+  input: string,
+  formatted: string,
+  previewVersion: number | undefined
 ): Promise<void> {
   const provider = ensurePreviewProvider(vscode);
 
@@ -373,9 +455,25 @@ async function showDiffAndOfferApply(
     return; // dismissed : nothing written, file intact.
   }
 
+  // LAST CHECK BEFORE ANY WRITE. The diff is read-only, the ORIGINAL document is
+  // not: the user may have kept typing while it was open. `formatted` was proven
+  // equivalent to `input`, so applying it over a buffer that has moved on would
+  // destroy their edits with text the guard never validated against it. On any
+  // mismatch we write NOTHING and ask for a fresh preview.
+  const gate = evaluateApplyGate({
+    previewVersion,
+    currentVersion: readDocumentVersion(document),
+    previewInput: input,
+    currentText: document.getText()
+  });
+  if (!gate.ok) {
+    void vscode.window.showWarningMessage(gate.reason);
+    return; // ZERO edits.
+  }
+
   let applied = false;
   try {
-    applied = await applyFormatted(vscode, document, formatted);
+    applied = await applyFormatted(vscode, document, input, formatted);
   } catch (error: unknown) {
     const detail =
       error instanceof Error ? sanitizeDetail(error.message) : 'unknown error';
@@ -410,7 +508,9 @@ function basenameOf(path: string): string {
  *   3. run the safety guard and the pure `buildPreviewPlan`;
  *   4. if not applicable (guard rejected or no change) -> non-blocking message;
  *   5. otherwise open a read-only diff + offer a single "Apply" button writing
- *      one WorkspaceEdit (one undo entry).
+ *      one WorkspaceEdit (one undo entry), AFTER re-checking that the document
+ *      is still exactly the text the guard validated; if it moved on, nothing
+ *      is written and the user is asked to preview again.
  *
  * Never throws: any engine/guard/config failure is surfaced as a non-blocking
  * message so the command can't break the editor and the file stays intact.
@@ -448,6 +548,9 @@ export async function previewFormat(): Promise<void> {
   // attempt, so nothing is recorded (overwriting the lastFormat record would
   // falsify "Explain last format") and nothing is written.
   const input = document.getText();
+  // Captured TOGETHER with `input`: the pair (version, text) is what the guard's
+  // verdict is about, and what evaluateApplyGate re-checks just before writing.
+  const previewVersion = readDocumentVersion(document);
   const tidyConfig = vscode.workspace.getConfiguration('tidy', document.uri);
   const precondition = evaluatePreviewPreconditions({
     languageId,
@@ -526,6 +629,13 @@ export async function previewFormat(): Promise<void> {
     return;
   }
 
-  await showDiffAndOfferApply(vscode, document, languageId, formatted);
+  await showDiffAndOfferApply(
+    vscode,
+    document,
+    languageId,
+    input,
+    formatted,
+    previewVersion
+  );
 }
 /* eslint-enable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */

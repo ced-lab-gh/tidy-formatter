@@ -14,7 +14,18 @@
 // Covers CFG-03 (#31,#34,#62,#88): indent_style / indent_size / tab_width /
 // end_of_line / charset / insert_final_newline / trim_trailing_whitespace /
 // max_line_length.
-import { parseSync, type KnownProps, type Props } from 'editorconfig';
+//
+// FAIL-SAFE LOADING: the `editorconfig` package pulls in @one-ini/wasm, whose
+// CommonJS entry does a bare readFileSync of a SIBLING `one_ini_bg.wasm` at
+// MODULE INITIALISATION time. A static `import` of 'editorconfig' would make
+// that read part of THIS module's own initialisation, which the bundler hoists
+// ABOVE any try/catch written inside a function: a quarantined or partially
+// installed asset would then throw while the extension bundle is merely being
+// loaded, killing activation and every format, even in a workspace with no
+// .editorconfig at all. The package is therefore loaded LAZILY and GUARDED (see
+// loadBundledParseSync) so an unavailable or corrupt asset degrades to "no
+// .editorconfig layer" instead of breaking the extension.
+import type { KnownProps, Props } from 'editorconfig';
 import type { ConfigLayer } from './resolver';
 
 /** Origin label surfaced verbatim in "Show Effective Configuration". */
@@ -138,6 +149,68 @@ export function mapEditorConfigLayer(
   return { source: SOURCE_EDITORCONFIG, values };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Fail-safe loading of the `editorconfig` package                              */
+/* -------------------------------------------------------------------------- */
+
+/** The single entry point this module needs from the `editorconfig` package. */
+export type ParseSyncFn = (fsPath: string) => Props;
+
+/**
+ * Resolves {@link ParseSyncFn}, or returns undefined when the parser cannot be
+ * used at all (asset missing, wasm refused to instantiate, package shape
+ * changed). A loader is allowed to throw: callers must treat a throw exactly
+ * like an undefined result.
+ */
+export type ParseSyncLoader = () => ParseSyncFn | undefined;
+
+/**
+ * Wrap a loader so it runs AT MOST ONCE. Two reasons, both load-bearing:
+ *   - a working parser is resolved once instead of on every format;
+ *   - a BROKEN one is not retried on every format either. Node evicts a module
+ *     that threw during load from its cache, so an unguarded retry would redo
+ *     the failing filesystem read (and rebuild the wasm module) once per
+ *     formatted document.
+ *
+ * A loader that throws is remembered as "permanently unavailable"; the wrapper
+ * itself never throws. PURE: no I/O of its own, so the memo semantics are
+ * unit-testable with a synthetic loader.
+ */
+export function memoizeParseSyncLoader(load: ParseSyncLoader): ParseSyncLoader {
+  // `undefined` = not attempted yet; `null` = attempted and unusable.
+  let cached: ParseSyncFn | null | undefined;
+  return (): ParseSyncFn | undefined => {
+    if (cached === undefined) {
+      try {
+        const resolved = load();
+        cached = typeof resolved === 'function' ? resolved : null;
+      } catch {
+        cached = null;
+      }
+    }
+    return cached ?? undefined;
+  };
+}
+
+/**
+ * Load `editorconfig`'s parseSync. The require lives INSIDE a function so the
+ * @one-ini/wasm asset read happens on the first .editorconfig lookup rather
+ * than while the extension bundle is initialising: a failure is then a caught
+ * exception on one code path instead of an unhandled error that breaks
+ * activation and every format.
+ */
+const requireParseSync: ParseSyncLoader = (): ParseSyncFn | undefined => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const mod = require('editorconfig') as { parseSync?: unknown } | undefined;
+  return typeof mod?.parseSync === 'function'
+    ? (mod.parseSync as ParseSyncFn)
+    : undefined;
+};
+
+/** The production loader: the bundled package, loaded lazily, resolved once. */
+export const loadBundledParseSync: ParseSyncLoader =
+  memoizeParseSyncLoader(requireParseSync);
+
 /**
  * Read the EditorConfig cascade for an on-disk file path and map it to a
  * ConfigLayer. Synchronous so it can slot into the existing synchronous
@@ -147,20 +220,38 @@ export function mapEditorConfigLayer(
  * `fsPath` MUST be a real absolute filesystem path (e.g. document.uri.fsPath);
  * a virtual/untitled document has none and must not reach this function.
  *
- * Never throws: any parse/IO failure yields undefined so formatting falls back
- * to the lower precedence layers rather than aborting (fail-safe, CFG-06).
+ * Never throws, and that claim now covers the WHOLE dependency: loading the
+ * parser, parsing and mapping all sit inside one try/catch, so a missing or
+ * corrupt @one-ini/wasm asset, a broken .editorconfig or an unreadable
+ * directory all yield undefined and formatting simply falls back to the lower
+ * precedence layers (fail-safe, CFG-06).
+ *
+ * @param fsPath        absolute path of the document being formatted.
+ * @param loadParseSync seam for tests; defaults to the bundled package.
  */
-export function readEditorConfigLayer(fsPath: string): ConfigLayer | undefined {
+export function readEditorConfigLayer(
+  fsPath: string,
+  loadParseSync: ParseSyncLoader = loadBundledParseSync
+): ConfigLayer | undefined {
   if (typeof fsPath !== 'string' || fsPath.trim() === '') {
     return undefined;
   }
-  let props: Props;
   try {
-    props = parseSync(fsPath);
+    const parseSync = loadParseSync();
+    if (typeof parseSync !== 'function') {
+      // The .editorconfig layer is simply unavailable: skip it silently and let
+      // the lower layers govern. Refusing to format would be far worse than
+      // ignoring a config layer the user may not even have.
+      return undefined;
+    }
+    const props = parseSync(fsPath);
+    if (props === null || typeof props !== 'object') {
+      return undefined;
+    }
+    return mapEditorConfigLayer(props);
   } catch {
-    // A broken or unreadable .editorconfig must not break formatting; ignore it
-    // and let the lower layers govern.
+    // A broken or unreadable .editorconfig, or an unusable parser, must not
+    // break formatting; ignore it and let the lower layers govern.
     return undefined;
   }
-  return mapEditorConfigLayer(props);
 }

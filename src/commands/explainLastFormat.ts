@@ -1,9 +1,10 @@
 // Command: "Tidy: Explain last format".
 // The antidote to "I installed Tidy and Format Document does nothing". For the
-// active file it reports what the most recent Tidy format attempt did, or WHY it did
-// nothing (guard rejection, .soukformatignore, size limit, an ignore marker, a
-// disabled language) and, when Tidy has not run on this file at all, whether another
-// formatter owns the language and how to switch to Tidy.
+// active file it reports what Tidy's most recent format attempt ON THAT FILE did
+// (per-file lookup via getLastFormatFor, ADD-14: exact however many files are
+// open), or WHY it did nothing (guard rejection, .soukformatignore, size limit,
+// an ignore marker, a disabled language) and, when Tidy has not run on this file
+// at all, whether another formatter owns the language and how to switch to Tidy.
 //
 // v0.3.0 (ADD-06): every explanation can carry one-click ACTIONS rendered as toast
 // buttons, mapping each status to its remedy (Report an Issue, Open Settings, open
@@ -18,7 +19,7 @@
 // gathers host state (active editor, default formatter) and the shared output
 // channel lazily inside itself.
 import {
-  getLastFormat,
+  getLastFormatFor,
   sanitizeDetail,
   type LastFormatRecord
 } from '../diagnostics/lastFormat';
@@ -369,7 +370,12 @@ export async function explainLastFormat(): Promise<void> {
     defaultFormatter
   };
 
-  const explanation = buildExplanation(getLastFormat(), ctx);
+  // Per-file lookup (ADD-14): the record shown is the ACTIVE file's, never the
+  // globally-last one, so formatting file B can no longer make Tidy claim it
+  // "has not formatted" file A.
+  const record =
+    ctx.activeUri !== undefined ? getLastFormatFor(ctx.activeUri) : undefined;
+  const explanation = buildExplanation(record, ctx);
   const actions = explanation.actions ?? [];
 
   const channel = getTidyOutputChannel();

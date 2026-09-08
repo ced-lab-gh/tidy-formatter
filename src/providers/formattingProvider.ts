@@ -9,15 +9,20 @@
 //      an in-source FILE-ignore marker is present -> [] (Tidy does nothing here);
 //   4. read the resolved options via vscodeConfig (precedence layers);
 //   5. dispatch the format off the UI thread : for the js-beautify path, in-source
-//      ignore REGIONS are protected with mask/restore, and for HTML, TEMPLATE
-//      ISLANDS ({{ }}, {% %}, <% %>, head front matter '---') are masked too so
-//      the engine can never reflow inside them (CFG-04); every protected byte is
-//      put back VERBATIM, with a checked restore (a dropped or duplicated
-//      placeholder aborts with zero edits); for the Prettier path, Prettier
-//      honours `// prettier-ignore` natively, so no region masking is needed;
+//      ignore REGIONS are protected with mask/restore (whole document AND
+//      selection), and for HTML, TEMPLATE ISLANDS ({{ }}, {% %}, <% %>, head
+//      front matter '---') are masked too so the engine can never reflow inside
+//      them (CFG-04); every protected byte is put back VERBATIM, with a checked
+//      restore (a dropped or duplicated placeholder aborts with zero edits); for
+//      the Prettier path, Prettier honours `// prettier-ignore` natively, so no
+//      region masking is done, and a tidy-ignore marker found there is REPORTED
+//      to the user (output channel + Explain) instead of being ignored silently;
 //   6. run the safety Guard (semantic equivalence modulo whitespace) on the
 //      ORIGINAL input vs the (restored) output : so neither a region splice nor
-//      an island restore can ever slip a non-equivalent result through;
+//      an island restore can ever slip a non-equivalent result through. A
+//      SELECTION is spliced back into its document first, so the guard judges
+//      the edit with the ancestors it really sits under and a verdict cannot
+//      depend on how much of the file the user happened to select;
 //   6b. for css/scss/less ONLY, a guard REJECTION triggers one independent
 //      second attempt through Prettier's postcss parser, whose output is put
 //      through the same restore and the same fresh guard check (ADD-01). Any
@@ -35,6 +40,7 @@ import { SUPPORTED_LANG_IDS } from '../types';
 import {
   dispatchFormat,
   pickEngine,
+  resolveEngineIdForSource,
   dispatchCssFallback,
   CSS_FALLBACK_LANGS
 } from '../engine/dispatcher';
@@ -42,7 +48,16 @@ import { guard } from '../safety/guard';
 import { readResolvedOptions, readSizeLimit } from '../config/vscodeConfig';
 import { describeSizeLimit } from '../config/sizeLimit';
 import { scanMarkers } from '../ignore/markers';
-import { buildMaskPlan, type EngineMask } from '../engine/maskPlan';
+import {
+  buildMaskPlan,
+  engineSpanFor,
+  engineTextFor,
+  type EngineMask
+} from '../engine/maskPlan';
+import {
+  JS_BEAUTIFY_ENGINE_ID,
+  reportedEngineIdFor
+} from '../engine/jsbeautify';
 import { resolveDocumentIgnore } from '../ignore/ignoreGate';
 import { getTidyOutputChannel } from '../diagnostics/outputChannel';
 import {
@@ -171,6 +186,117 @@ function recordOutcome(
 }
 
 /**
+ * Turn the adapter id that will really print into the id to SHOW the user: the
+ * js-beautify adapter routes json/jsonc to the jsonc-parser printer, so its
+ * adapter id would name a library that never ran. Reporting only: routing still
+ * compares the adapter's own `id`.
+ */
+function displayNameForEngine(engineId: string, languageId: LangId): string {
+  return engineId === JS_BEAUTIFY_ENGINE_ID
+    ? reportedEngineIdFor(languageId)
+    : engineId;
+}
+
+/**
+ * The engine id to SHOW the user for a language AND the exact source the engine
+ * will be handed.
+ *
+ * Content matters: `pickEngine` is content-blind and always answers js-beautify
+ * for `javascript`, but a .js file containing JSX is re-routed to Prettier by
+ * the dispatcher, so the status bar, the output channel and "Explain Last
+ * Format" all named an engine that did not run. `resolveEngineIdForSource` is
+ * the dispatcher's OWN routing answer, so the reported name and the printer that
+ * really runs cannot drift.
+ *
+ * `code` must be the very text handed to the engine (masked text for a masked
+ * format, the selection for a selection): the dispatcher routes on that string,
+ * so reporting from anything else would re-open the same gap.
+ *
+ * Known cost, accepted deliberately: for a .js whose content must be inspected,
+ * the JSX detector's parse runs here and again inside dispatchFormat (measured
+ * at ~12-21 % on top of a JSX .js format, and at nothing at all for every other
+ * language, where the answer is O(1)). Naming an engine that did not run is the
+ * worse defect of the two. Removing the second parse means memoising the
+ * detection inside the dispatcher, which owns that routing.
+ */
+function reportedEngineId(languageId: LangId, code: string): string {
+  return displayNameForEngine(
+    resolveEngineIdForSource(languageId, code),
+    languageId
+  );
+}
+
+/**
+ * The engine id to SHOW when the source must NOT be inspected: the only caller
+ * is the too-large branch, where Tidy has just declined to process the file
+ * BECAUSE of its size. Routing a multi-megabyte file through the JSX detector's
+ * full Babel parse there, purely to label a format that will not happen, would
+ * spend exactly the work the size cap exists to refuse. No engine runs on that
+ * path, so the language's default adapter is the honest answer.
+ */
+function reportedEngineIdForLanguage(languageId: LangId): string {
+  return displayNameForEngine(pickEngine(languageId).id, languageId);
+}
+
+/**
+ * The text surrounding the span being formatted, inside the document it lives
+ * in. Empty on both sides for a whole-document format.
+ *
+ * This exists because a verdict must not depend on how much of the file the user
+ * happened to select. `htmlShape` starts its walk with "not inside a verbatim
+ * element", which is true of a document root and FALSE of a selection sitting
+ * inside <pre>, <textarea> or <pre><code>: judged as a context-free fragment,
+ * a collapse of rendered whitespace looked like insignificant whitespace, the
+ * guard said equivalent, and the edit was applied. The very same textual change
+ * was correctly rejected when the whole document was formatted.
+ *
+ * Splicing the candidate back into its document before the guard runs restores
+ * the context the ancestors provide, so document scope and selection scope ask
+ * the guard the SAME question and can only get the same answer. It is never
+ * weaker than the fragment comparison: the fragment's own tree is still fully
+ * compared, with the ancestors added on top.
+ */
+interface GuardContext {
+  readonly prefix: string;
+  readonly suffix: string;
+}
+
+/** Context of a whole-document format: the span already IS the document. */
+const WHOLE_DOCUMENT_CONTEXT: GuardContext = { prefix: '', suffix: '' };
+
+/** Place a candidate span back into the document it will be written into. */
+function inDocumentContext(context: GuardContext, span: string): string {
+  return context.prefix + span + context.suffix;
+}
+
+/**
+ * Append a content-free notice line to the Tidy output channel, in the same
+ * shape as a format record line. Used when a documented directive present in the
+ * text is NOT applied by the active path: staying silent there would be the
+ * defect, so this is written whatever the format outcome turns out to be.
+ */
+function appendChannelNotice(
+  document: vscode.TextDocument,
+  languageId: string,
+  notice: string
+): void {
+  getTidyOutputChannel().appendLine(
+    `[${new Date().toISOString()}] ${basenameFromPath(document.uri.path)} ` +
+      `[${languageId}] notice: ${sanitizeDetail(notice)}`
+  );
+}
+
+/** Combine two content-free details into one single-line string. */
+function joinDetail(
+  first: string | undefined,
+  second: string | undefined
+): string | undefined {
+  if (first === undefined) return second;
+  if (second === undefined) return first;
+  return `${first}; ${second}`;
+}
+
+/**
  * Map an aborted FormatOutcome's reason (produced in runFormat, this file) to a
  * FormatStatus. Kept beside runFormat so the two never drift.
  */
@@ -197,6 +323,18 @@ function statusFromReason(reason: string): FormatStatus {
  * output is restored verbatim via `mask.restore` BEFORE the guard runs : so a
  * region splice can never apply a non-equivalent or non-parsable result.
  *
+ * `scope` decides whether the engine is given a RANGE. A selection is formatted
+ * as a range covering the whole engine-facing text (which keeps the engines'
+ * "not the end of the document" rules, e.g. no final-newline policy). Both the
+ * text and the range are derived HERE from the same (input, mask) pair, so the
+ * engine can never be handed a range expressed in a different string's
+ * coordinate space (see engineSpanFor).
+ *
+ * `guardContext` carries the text on either side of the span inside the real
+ * document, so the guard judges the EDIT in the document it lands in rather than
+ * an out-of-context fragment (see GuardContext). It is empty for a whole
+ * document, where the span already is the document.
+ *
  * Never throws: any engine/guard failure is captured and reported as a
  * non-applied outcome so VS Code leaves the file untouched.
  */
@@ -204,19 +342,26 @@ async function runFormat(
   languageId: LangId,
   input: string,
   options: ResolvedOptions,
-  range: { startOffset: number; endOffset: number } | undefined,
+  scope: FormatScope,
   token: vscode.CancellationToken,
+  guardContext: GuardContext,
   mask?: EngineMask
 ): Promise<FormatOutcome> {
-  const engineId = pickEngine(languageId).id;
+  // The engine routes on the text it is handed, so the reported name is derived
+  // from that same text and never from the language alone.
+  const engineText = engineTextFor(input, mask);
+  const engineId = reportedEngineId(languageId, engineText);
 
   if (token.isCancellationRequested) {
     return { applied: false, aborted: true, reason: 'cancelled', engineId };
   }
 
+  const range =
+    scope === 'selection' ? engineSpanFor(input, mask) : undefined;
+
   const request: FormatRequest = {
     languageId,
-    code: mask ? mask.engineInput : input,
+    code: engineText,
     options,
     range
   };
@@ -274,9 +419,15 @@ async function runFormat(
   // Safety guard: never apply output that is not semantically equivalent to the
   // ORIGINAL input (modulo whitespace/style). This is the product's core promise,
   // and it validates the restored output : corruption is therefore impossible.
+  // Both sides are put back into the surrounding document first, so a selection
+  // is judged with the ancestors it really sits under (GuardContext).
   let verdict;
   try {
-    verdict = guard.check(languageId, input, output);
+    verdict = guard.check(
+      languageId,
+      inDocumentContext(guardContext, input),
+      inDocumentContext(guardContext, output)
+    );
   } catch (error: unknown) {
     return {
       applied: false,
@@ -296,8 +447,9 @@ async function runFormat(
       languageId,
       input,
       options,
-      range,
+      scope,
       token,
+      guardContext,
       mask
     );
     if (fallback) {
@@ -337,8 +489,9 @@ async function tryCssFallback(
   languageId: LangId,
   input: string,
   options: ResolvedOptions,
-  range: { startOffset: number; endOffset: number } | undefined,
+  scope: FormatScope,
   token: vscode.CancellationToken,
+  guardContext: GuardContext,
   mask?: EngineMask
 ): Promise<FormatOutcome | undefined> {
   if (!CSS_FALLBACK_LANGS.has(languageId)) {
@@ -355,11 +508,13 @@ async function tryCssFallback(
 
   let rawOutput: string;
   try {
+    // Same coordinate-space rule as runFormat: the range is derived from the
+    // very text handed to the fallback engine, never from the caller's input.
     rawOutput = await dispatchCssFallback({
       languageId,
-      code: mask ? mask.engineInput : input,
+      code: engineTextFor(input, mask),
       options,
-      range
+      range: scope === 'selection' ? engineSpanFor(input, mask) : undefined
     });
   } catch {
     return undefined;
@@ -394,7 +549,13 @@ async function tryCssFallback(
 
   let verdict;
   try {
-    verdict = guard.check(languageId, input, output);
+    // Same document context as the primary check: the second candidate is asked
+    // exactly the same question, never a laxer one.
+    verdict = guard.check(
+      languageId,
+      inDocumentContext(guardContext, input),
+      inDocumentContext(guardContext, output)
+    );
   } catch {
     return undefined;
   }
@@ -514,7 +675,7 @@ async function provideEdits(
     byteLength(fullText) > sizeLimit.limitBytes
   ) {
     recordOutcome(document, languageId, scope, 'too-large', {
-      engineId: pickEngine(languageId).id,
+      engineId: reportedEngineIdForLanguage(languageId),
       detail: describeSizeLimit(sizeLimit)
     });
     // English per the v0.3.0 string migration; the button opens the Settings UI
@@ -552,7 +713,12 @@ async function provideEdits(
     });
     return [];
   }
-  if (scanMarkers(fullText, languageId).ignoreFile) {
+  // ONE marker scan per attempt, over the WHOLE document: it answers the
+  // file-level question here and is handed to the mask plan below, so a
+  // selection sees the region markers that live outside it and no document is
+  // ever scanned twice.
+  const markerScan = scanMarkers(fullText, languageId);
+  if (markerScan.ignoreFile) {
     recordOutcome(document, languageId, scope, 'ignored-marker');
     return [];
   }
@@ -576,35 +742,67 @@ async function provideEdits(
   const endOffset = range ? document.offsetAt(range.end) : fullText.length;
   const input = range ? document.getText(range) : fullText;
 
-  const requestRange = range
-    ? { startOffset: 0, endOffset: input.length }
-    : undefined;
-
   // Build the protect-and-restore plan:
-  //   - in-source ignore REGIONS: full-document js-beautify path only (range
-  //     formatting keeps its pre-existing no-region-masking behaviour: region
-  //     semantics are ambiguous inside a user selection);
-  //   - HTML TEMPLATE ISLANDS ({{ }}, {% %}, <% %>, head front matter): both
-  //     scopes, because an engine reflow INSIDE an island is whitespace-only in
-  //     a text node and therefore invisible to the guard (CFG-04).
+  //   - in-source ignore REGIONS: the js-beautify path, BOTH scopes. The marker
+  //     ranges come from the document scan above and are clipped to the span
+  //     being formatted, so a selection is protected by the same mechanic as a
+  //     whole document (a region opened above the selection still protects the
+  //     part of it that reaches inside);
+  //   - HTML TEMPLATE ISLANDS ({{ }}, {% %}, <% %>) and the head FRONT MATTER
+  //     block: both scopes, because an engine reflow INSIDE an island is
+  //     whitespace-only in a text node and therefore invisible to the guard
+  //     (CFG-04). BOTH are located in the DOCUMENT and clipped to the span
+  //     exactly like a region range: an island is only self-delimiting while
+  //     both delimiters are visible, so a selection cutting between `<%` and
+  //     `%>` used to find nothing and let the engine reflow the interior, and
+  //     the guard accepted it. Passing `fullText` here is what makes the promise
+  //     scope-invariant, so Format Selection and formatOnSaveMode
+  //     "modifications" protect exactly what Format Document protects.
   // A placeholder collision means no clean restore can be guaranteed, so the
   // only safe move is to decline formatting entirely (zero edits, file intact).
-  const plan = buildMaskPlan(languageId, input, range ? 'selection' : 'document');
+  const plan = buildMaskPlan(languageId, input, scope, {
+    markerScan,
+    inputOffset: startOffset,
+    documentText: fullText
+  });
+
+  // A tidy-ignore marker the active path cannot apply is reported, never passed
+  // over in silence: the channel line lands whatever the outcome below is, and
+  // the same sentence is carried into the record so "Explain Last Format" and
+  // "Show Format History" repeat it.
+  if (plan.unhonouredIgnore !== undefined) {
+    appendChannelNotice(document, languageId, plan.unhonouredIgnore);
+  }
+
   if (plan.abortReason !== undefined) {
     return outcomeToEdits(document, languageId, scope, startOffset, endOffset, {
       applied: false,
       aborted: true,
       reason: plan.abortReason,
-      engineId: pickEngine(languageId).id
+      // The mask could not be built, so the engine text does not exist: the span
+      // the user asked for is the closest honest basis for the routing answer.
+      engineId: reportedEngineId(languageId, input)
     });
   }
+
+  // A selection is judged inside its document, never as a free-standing fragment
+  // (GuardContext). For a whole document both sides are empty, so the guard is
+  // handed byte-for-byte what it was handed before.
+  const guardContext: GuardContext =
+    range === undefined
+      ? WHOLE_DOCUMENT_CONTEXT
+      : {
+          prefix: fullText.slice(0, startOffset),
+          suffix: fullText.slice(endOffset)
+        };
 
   const outcome = await runFormat(
     languageId,
     input,
     options,
-    requestRange,
+    scope,
     token,
+    guardContext,
     plan.mask
   );
 
@@ -615,7 +813,13 @@ async function provideEdits(
     return [];
   }
 
-  return outcomeToEdits(document, languageId, scope, startOffset, endOffset, outcome);
+  // New object, never a mutation of the outcome the pipeline returned.
+  const reported: FormatOutcome =
+    plan.unhonouredIgnore === undefined
+      ? outcome
+      : { ...outcome, detail: joinDetail(outcome.detail, plan.unhonouredIgnore) };
+
+  return outcomeToEdits(document, languageId, scope, startOffset, endOffset, reported);
 }
 
 /**

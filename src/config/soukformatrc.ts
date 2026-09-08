@@ -18,12 +18,30 @@
 //     ]
 //   }
 //
+// BOUNDED WALK: the upward search stops at the workspace folder root (stopDir,
+// inclusive). A .soukformatrc ABOVE the trusted workspace, in a parent
+// directory, a shared checkout root, the user's home directory or the
+// filesystem root, is a file the user never opened; letting it govern would
+// silently change how their code is formatted on the strength of content they
+// never chose to trust. The bound is real PATH CONTAINMENT (isWithinDir, shared
+// with the .prettierrc layer), never string equality: a case-mismatched drive
+// letter, a trailing separator, a mixed separator or a '..' segment must not be
+// able to let the walk escape. `stopDir` is REQUIRED: without a trusted
+// boundary there is nothing to walk within, so the layer is simply absent.
+//
 // FAIL-SOFT: a missing file yields no layer; a malformed file yields no layer
 // plus a warning (never a throw) so formatting falls back to the lower layers.
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { parse as parseJsonc, type ParseError, printParseErrorCode } from 'jsonc-parser';
 import type { ConfigLayer } from './resolver';
+// Path containment, REUSED from the .prettierrc layer rather than reinvented:
+// one implementation of the workspace bound means one place where it has to be
+// proven correct (drive-letter case, trailing separators, mixed separators,
+// '..' segments, UNC shares) and no way for the two project-config walks to
+// disagree about where the trusted workspace ends. Both modules are pure (no
+// 'vscode'), so this adds no host coupling and no import cycle.
+import { comparableDir, isWithinDir } from './prettierrc';
 import {
   OPTION_CATALOG,
   appliesToLanguage,
@@ -32,8 +50,18 @@ import {
   type OptionEntry
 } from './optionCatalog';
 
-/** The on-disk filename Tidy looks for, walking from a file up to the FS root. */
+/**
+ * The on-disk filename Tidy looks for, walking from a file up to (and
+ * including) the workspace folder root, never beyond it.
+ */
 export const SOUKFORMATRC_FILENAME = '.soukformatrc';
+
+/**
+ * Upper bound on the upward walk, mirroring findPrettierConfig's bound. It is a
+ * belt-and-braces stop against a pathological path or a symlink loop; the real
+ * bound is the workspace containment test.
+ */
+const MAX_WALK_DEPTH = 64;
 
 /** Origin label prefix surfaced verbatim in "Show Effective Configuration". */
 export const SOURCE_SOUKFORMATRC = '.soukformatrc';
@@ -304,26 +332,64 @@ export function parseSoukformatrc(
   return { layers, warnings };
 }
 
+/** Whether a path exists and is a regular file; stat errors are fail-soft. */
+function isFile(candidate: string): boolean {
+  try {
+    return statSync(candidate, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Walk up from a file's directory looking for the nearest .soukformatrc.
- * Returns its absolute path, or undefined if none exists up to the FS root.
- * Bounded: stops at the filesystem root (parent === current).
+ * Walk up from a file's directory to the workspace root (`stopDir`, INCLUSIVE)
+ * looking for the nearest .soukformatrc. Returns its absolute path, or
+ * undefined when there is none inside the bound.
+ *
+ * The walk NEVER crosses stopDir: a .soukformatrc above the trusted workspace
+ * is invisible, so a file the user never opened cannot change how their code is
+ * formatted. The bound is checked THREE ways, all of them fail-CLOSED:
+ *   1. the starting directory must be contained in stopDir, else nothing is
+ *      searched at all (a document outside the workspace has no trusted
+ *      boundary to walk within);
+ *   2. the walk stops after searching stopDir itself;
+ *   3. every step upward must stay contained, so even if (2) failed to
+ *      recognise the root the walk still cannot leave the workspace.
+ *
+ * A missing or blank `stopDir` searches NOTHING, for the same reason: the
+ * absence of a boundary is not a licence to read the whole filesystem.
  */
-export function findSoukformatrc(startFsPath: string): string | undefined {
-  let dir = dirname(startFsPath);
+export function findSoukformatrc(
+  startFsPath: string,
+  stopDir: string
+): string | undefined {
+  if (typeof startFsPath !== 'string' || startFsPath.trim() === '') {
+    return undefined;
+  }
+  if (typeof stopDir !== 'string' || stopDir.trim() === '') {
+    return undefined;
+  }
+
+  let dir = dirname(resolve(startFsPath));
+  if (!isWithinDir(dir, stopDir)) {
+    return undefined; // the document is not inside the trusted workspace.
+  }
+
   // Guard against pathological inputs / symlink loops with a generous bound.
-  for (let depth = 0; depth < 64; depth += 1) {
+  for (let depth = 0; depth < MAX_WALK_DEPTH; depth += 1) {
     const candidate = join(dir, SOUKFORMATRC_FILENAME);
-    try {
-      if (existsSync(candidate) && statSync(candidate).isFile()) {
-        return candidate;
-      }
-    } catch {
-      // Ignore stat/permission errors and keep walking up (fail-soft).
+    if (isFile(candidate)) {
+      return candidate;
+    }
+    if (comparableDir(dir) === comparableDir(stopDir)) {
+      return undefined; // workspace root reached (and searched): stop.
     }
     const parent = dirname(dir);
     if (parent === dir) {
-      return undefined;
+      return undefined; // filesystem root
+    }
+    if (!isWithinDir(parent, stopDir)) {
+      return undefined; // one step further would leave the workspace.
     }
     dir = parent;
   }
@@ -336,14 +402,21 @@ export function findSoukformatrc(startFsPath: string): string | undefined {
  * yields no layer plus a warning so the lower precedence layers still govern
  * (fail-soft, CFG-06).
  *
- * `fsPath` MUST be a real absolute filesystem path (e.g. document.uri.fsPath).
+ * `fsPath` MUST be a real absolute filesystem path (e.g. document.uri.fsPath)
+ * and `stopDir` MUST be the containing workspace folder's fsPath: the caller
+ * (vscodeConfig) resolves and gates both. The walk never leaves `stopDir`, so a
+ * .soukformatrc outside the trusted workspace can never govern.
  */
-export function readSoukformatrcLayers(fsPath: string, lang: CatalogLang): SoukReadResult {
+export function readSoukformatrcLayers(
+  fsPath: string,
+  lang: CatalogLang,
+  stopDir: string
+): SoukReadResult {
   if (typeof fsPath !== 'string' || fsPath.trim() === '') {
     return { layers: [], warnings: [] };
   }
 
-  const configPath = findSoukformatrc(fsPath);
+  const configPath = findSoukformatrc(fsPath, stopDir);
   if (configPath === undefined) {
     return { layers: [], warnings: [] };
   }

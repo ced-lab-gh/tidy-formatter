@@ -1,14 +1,30 @@
 {
-  "//": "FROZEN dist/ size budgets (ADD-09). Every shipped executable (.js/.wasm) in dist/ MUST have an entry; scripts/check-bundle-size.mjs fails on any file over budget, any budgeted file missing from dist/, and any unbudgeted executable appearing in dist/. Raising a maxBytes is a deliberate, reviewed decision. ADD-11 adds one entry per lazy chunk.",
+  "//": "FROZEN dist/ size budgets (ADD-09). Every shipped executable (.js/.wasm) in dist/ MUST have an entry; scripts/check-bundle-size.mjs fails on any file over budget, any budgeted file missing from dist/, and any unbudgeted executable appearing in dist/. Raising a maxBytes is a deliberate, reviewed decision. ADD-11 split the single bundle into a host plus four lazy chunks: the four chunk ceilings below are mirrored in scripts/check-chunks.mjs, which FAILS if the two tables ever drift apart.",
   "schemaVersion": 1,
   "files": {
     "extension.js": {
-      "maxBytes": 2900000,
-      "//": "measured 2818641 bytes on the v0.3.0 branch (production build, after ADD-01..ADD-08); ~2.9% headroom"
+      "maxBytes": 440320,
+      "//": "measured 381694 bytes after ADD-11 (production build), frozen at measured + 15% rounded up to 10 KiB. Down from 2 923 286 because ADD-11 moved prettier, @babel/parser, @babel/types, postcss (+scss/less) and parse5 out of the host bundle into lazy chunks. The host keeps js-beautify, jsonc-parser, editorconfig and the prettierrc data parsers (js-yaml, json5, smol-toml) added by ADD-13. scripts/check-chunks.mjs enforces a second, architectural ceiling of 700 KiB on this same file."
+    },
+    "chunk-prettier.js": {
+      "maxBytes": 1925120,
+      "//": "measured 1 672 763 bytes; prettier/standalone plus the babel, estree, typescript and postcss plugins. Loaded on the first ts/tsx/jsx format and by the ADD-01 CSS fallback."
+    },
+    "chunk-guard-js.js": {
+      "maxBytes": 675840,
+      "//": "measured 579 169 bytes; @babel/parser + @babel/types. Loaded by the JS-family guard, by the dispatcher's JSX detection, and by the HTML guard for executable <script> bodies."
+    },
+    "chunk-guard-css.js": {
+      "maxBytes": 122880,
+      "//": "measured 98 561 bytes; postcss + postcss-scss + postcss-less. Loaded by the CSS-family guard and by the HTML guard for <style> bodies."
+    },
+    "chunk-guard-html.js": {
+      "maxBytes": 215040,
+      "//": "measured 178 755 bytes; parse5. Loaded by the HTML guard only."
     },
     "one_ini_bg.wasm": {
       "maxBytes": 120000,
-      "//": "measured 89224 bytes; @one-ini/wasm runtime needed by the editorconfig dependency, must keep shipping"
+      "//": "measured 89 224 bytes; @one-ini/wasm runtime needed by the editorconfig dependency, must keep shipping. esbuild cannot see it (the package reads it with a runtime readFileSync), so esbuild.js copies it into dist/ explicitly."
     }
   }
 }

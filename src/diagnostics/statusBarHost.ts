@@ -26,8 +26,11 @@ import {
   type PassiveFileState,
   type StatusBarView
 } from './statusBar';
+// ONE STORE, ONE ANSWER (ADD-14): the bar reads the record of the ACTIVE file
+// through the same per-uri lookup "Tidy: Explain Last Format" uses, so the
+// tooltip and the command can never disagree about the same document.
 import {
-  getLastFormat,
+  getLastFormatFor,
   setLastFormatListener,
   type LastFormatRecord
 } from './lastFormat';
@@ -92,14 +95,16 @@ function gatherPassiveState(document: vscode.TextDocument): PassiveFileState {
     defaultFormatter
   });
 
-  const last = getLastFormat();
+  // Per-uri lookup, NOT "the newest record anywhere then filter": formatting a
+  // second file must never blank out the first file's tooltip verdict.
+  const lastRecord = getLastFormatFor(document.uri.toString());
   return {
     kind,
     languageId,
     maxFileSizeKB: sizeLimit.limitKB,
     sizeLimitSettingKey: sizeLimit.settingKey,
     otherFormatterId: kind === 'other-default' ? defaultFormatter : undefined,
-    lastRecord: last && last.uri === document.uri.toString() ? last : undefined
+    lastRecord
   };
 }
 

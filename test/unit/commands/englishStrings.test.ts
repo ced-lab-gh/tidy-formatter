@@ -26,7 +26,12 @@ const SCANNED_SOURCES: readonly string[] = [
   'src/commands/openPlayground.ts',
   'src/commands/statusBarMenu.ts',
   'src/diagnostics/statusBar.ts',
-  'src/diagnostics/statusBarHost.ts'
+  'src/diagnostics/statusBarHost.ts',
+  // ADD-13: every .prettierrc warning it builds is surfaced verbatim by
+  // "Show Effective Configuration", so its strings are user-facing too.
+  'src/config/prettierrc.ts',
+  // ADD-14: every string it builds lands in a QuickPick or the output channel.
+  'src/commands/showFormatHistory.ts'
 ];
 
 /**

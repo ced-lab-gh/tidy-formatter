@@ -16,6 +16,7 @@
 import { css as cssBeautify, html as htmlBeautify, js as jsBeautify } from 'js-beautify';
 import type { CSSBeautifyOptions, HTMLBeautifyOptions, JSBeautifyOptions } from 'js-beautify';
 import type { Engine, FormatRequest, LangId, ResolvedOptions } from '../types';
+import { htmlPreformattedTags } from '../safety/htmlPreformatted';
 import { formatJson } from './jsonFormatter';
 
 const SUPPORTED: ReadonlySet<LangId> = new Set<LangId>([
@@ -237,6 +238,18 @@ function mapHtmlOptions(resolved: ResolvedOptions): HTMLBeautifyOptions {
   const engine = resolved.engineOptions;
   const options: HTMLBeautifyOptions = mapCoreOptions(resolved);
 
+  // SAFETY, not style: js-beautify's own default for `content_unformatted` is
+  // ['pre', 'textarea'], so it REFLOWS <xmp>, <listing> and <plaintext> even
+  // though the HTML Rendering spec renders all five with `white-space: pre`.
+  // A tab inside <xmp> came back as four spaces, which changes what the reader
+  // sees. The printer is therefore handed the guard's OWN list (one module, one
+  // source of truth: src/safety/htmlPreformatted.ts), so it can never reflow
+  // inside a tag the guard compares verbatim.
+  //
+  // Deliberately NOT a user setting: `content_unformatted` stays out of the
+  // option catalogue precisely because shrinking it would re-open that hole.
+  options.content_unformatted = htmlPreformattedTags();
+
   const wrapAttributes = readString(engine, 'wrap_attributes');
   if (wrapAttributes !== undefined && HTML_WRAP_ATTRIBUTES.has(wrapAttributes)) {
     options.wrap_attributes = wrapAttributes as HTMLBeautifyOptions['wrap_attributes'];
@@ -263,6 +276,30 @@ function mapHtmlOptions(resolved: ResolvedOptions): HTMLBeautifyOptions {
   }
 
   return options;
+}
+
+/**
+ * The engine id this adapter reports as an Engine: it is the js-beautify family
+ * adapter, and the dispatcher / config layers key off this exact string
+ * ('js-beautify' vs 'prettier'), so it must stay stable.
+ */
+export const JS_BEAUTIFY_ENGINE_ID = 'js-beautify';
+
+/**
+ * The id of the printer that ACTUALLY runs for json/jsonc. Those two are routed
+ * to src/engine/jsonFormatter.ts (jsonc-parser), not to js-beautify, so naming
+ * js-beautify in the status bar, the output channel and "Explain Last Format"
+ * was a mislabel: it named a library that never ran.
+ */
+export const JSON_ENGINE_ID = 'jsonc-parser';
+
+/**
+ * The engine id to REPORT to the user for a language handled by this adapter.
+ * Reporting only: the Engine.id above (and therefore every routing/config check
+ * that compares it) is deliberately left alone.
+ */
+export function reportedEngineIdFor(lang: LangId): string {
+  return FAMILY_BY_LANG[lang] === 'json' ? JSON_ENGINE_ID : JS_BEAUTIFY_ENGINE_ID;
 }
 
 function familyFor(lang: LangId): Family {
@@ -354,7 +391,7 @@ function normaliseRange(
 }
 
 export class JsBeautifyEngine implements Engine {
-  public readonly id = 'js-beautify';
+  public readonly id = JS_BEAUTIFY_ENGINE_ID;
 
   public supports(lang: LangId): boolean {
     return SUPPORTED.has(lang);

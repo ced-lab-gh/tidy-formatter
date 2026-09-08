@@ -11,6 +11,14 @@
 // four PNGs byte-for-byte.
 //
 // Usage (from the extension root):  node media/walkthrough/build-placeholders.mjs
+//
+// The four PNGs it writes are NOT committed: every file left in this directory
+// is packaged into the VSIX and downloaded by every user, and no walkthrough
+// page embeds them today. test/unit/manifest/walkthroughAssets.test.ts fails on
+// such an ORPHAN asset, so after running this script either embed the image
+// from a page (![alt](name.png), sibling path, PNG only, < 400 KB) or delete it
+// again. This generator is kept as the dependency-free fallback for producing
+// stand-in art; it is excluded from the VSIX by .vscodeignore (media/**/*.mjs).
 import { deflateSync } from 'node:zlib';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

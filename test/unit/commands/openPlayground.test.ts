@@ -124,12 +124,25 @@ interface OpenedDocument {
   readonly content: string;
 }
 
+/** The subset of ShowTextDocumentOptions the playground is allowed to use. */
+interface ShowOptions {
+  readonly preview?: boolean;
+  readonly preserveFocus?: boolean;
+  readonly viewColumn?: number;
+}
+
 interface FakeHost {
   readonly opened: OpenedDocument[];
-  readonly shown: { doc: unknown; options: { preserveFocus?: boolean } }[];
+  readonly shown: { doc: unknown; options: ShowOptions }[];
   readonly info: string[];
   readonly errors: string[];
 }
+
+/**
+ * The only ViewColumn member the handler may use. VS Code numbers Beside as -2;
+ * the fake mirrors that so a wrong member (Active, One, ...) is visible here.
+ */
+const FAKE_VIEW_COLUMN = { Beside: -2, Active: -1, One: 1 } as const;
 
 /** Install a fake 'vscode' for the duration of `run`, and report what it saw. */
 async function withFakeVscode(
@@ -138,6 +151,7 @@ async function withFakeVscode(
 ): Promise<FakeHost> {
   const host: FakeHost = { opened: [], shown: [], info: [], errors: [] };
   const fake = {
+    ViewColumn: FAKE_VIEW_COLUMN,
     workspace: {
       openTextDocument: async (opts: OpenedDocument) => {
         if (options.failOnOpen) {
@@ -148,7 +162,7 @@ async function withFakeVscode(
       }
     },
     window: {
-      showTextDocument: async (doc: unknown, opts: { preserveFocus?: boolean }) => {
+      showTextDocument: async (doc: unknown, opts: ShowOptions) => {
         host.shown.push({ doc, options: opts });
         return undefined;
       },
@@ -252,6 +266,31 @@ describe('commands/openPlayground : handler (fake host, no disk)', () => {
     assert.equal(host!.shown.length, 2);
     assert.equal(host!.shown[0].options.preserveFocus, false);
     assert.equal(host!.shown[1].options.preserveFocus, true);
+  });
+
+  it('opens the second sample BESIDE the first so the CSS tab keeps focus', async () => {
+    // Regression lock (integration failure "the CSS tab must be focused"):
+    // preserveFocus alone does NOT keep focus when the second document lands in
+    // the SAME editor group : it just becomes that group's active editor. Only
+    // an explicit ViewColumn.Beside gives preserveFocus something to preserve.
+    let host: FakeHost | undefined;
+    await withNoDiskWrites(async () => {
+      host = await withFakeVscode(() => openPlayground());
+    });
+
+    assert.equal(
+      host!.shown[0].options.viewColumn,
+      undefined,
+      'the first sample must open in the active group (no explicit column)'
+    );
+    assert.equal(
+      host!.shown[1].options.viewColumn,
+      FAKE_VIEW_COLUMN.Beside,
+      'every later sample must open in the group BESIDE the focused one'
+    );
+    // Both are opened as real (non-preview) tabs so neither replaces the other.
+    assert.equal(host!.shown[0].options.preview, false);
+    assert.equal(host!.shown[1].options.preview, false);
   });
 
   it('writes nothing to disk and surfaces the ready toast', async () => {

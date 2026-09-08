@@ -87,6 +87,12 @@ describe('manifest : onboarding commands (1.T6)', () => {
     assert.equal(cmd.category, 'Tidy');
   });
 
+  it('declares tidy.showFormatHistory with category Tidy (ADD-14)', () => {
+    const cmd = find('tidy.showFormatHistory');
+    assert.equal(cmd.title, 'Show Format History');
+    assert.equal(cmd.category, 'Tidy');
+  });
+
   it('leaves tidy.openPlayground palette-available on any language', () => {
     // The playground opens its OWN scratch buffers, so gating it on the active
     // editor's language would hide it exactly when the user has nothing open :

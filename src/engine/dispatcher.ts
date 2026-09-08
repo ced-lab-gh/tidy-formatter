@@ -4,8 +4,12 @@
 // 'javascript') contains JSX that js-beautify would break, this dispatcher
 // switches to the prettier engine instead (SPEC §4 note).
 // MUST NOT import 'vscode' (testable under mocha + tsx).
-import { parse, type ParserPlugin } from '@babel/parser';
-import { traverseFast, type Node } from '@babel/types';
+import type { ParserPlugin } from '@babel/parser';
+import type { Node } from '@babel/types';
+// ADD-11: the babel toolchain lives in dist/chunk-guard-js.js, the SAME chunk
+// the JS-family safety guard uses, so JSX detection and verification share one
+// load. Type-only imports above are erased at compile time.
+import { requireGuardJsChunk } from '../chunks/loader';
 import type { Engine, FormatRequest, LangId } from '../types';
 import { JsBeautifyEngine } from './jsbeautify';
 import { PrettierEngine } from './prettier';
@@ -107,6 +111,13 @@ function containsJsx(code: string): boolean {
   // rather than trusting the regex, so `x < y > z` or `Array<Foo>` do not
   // mis-route plain JS to the prettier engine. parse() returns a File node,
   // which is itself a @babel/types Node accepted by traverseFast.
+  //
+  // ADD-11: the chunk load sits OUTSIDE the try/catch below ON PURPOSE. A PARSE
+  // failure means "not provably JSX" (fall back to the default route; the guard
+  // still protects the file), but a chunk LOAD failure must PROPAGATE so the
+  // provider aborts explicitly: answering `false` there would silently re-route
+  // real JSX to js-beautify, which provably corrupts it.
+  const { parse, traverseFast } = requireGuardJsChunk();
   let ast: Node;
   try {
     ast = parse(code, {
@@ -159,4 +170,26 @@ function resolveEngine(lang: LangId, code: string): Engine {
     return prettierEngine;
   }
   return pickEngine(lang);
+}
+
+/**
+ * The id of the engine that WILL print this language + source, without
+ * formatting anything. This dispatcher stays the single source of truth for
+ * routing: the .prettierrc layer needs the answer (a Prettier config's
+ * indentation keys may only govern a file Prettier really prints, and a warning
+ * about a dropped key must name the engine that really ran), and duplicating
+ * the JSX rule in the config module would let the two drift apart.
+ *
+ * Same conservatism as resolveEngine, plus one difference that matters at the
+ * call site: a chunk LOAD failure is answered with the default engine here
+ * rather than propagated. Config resolution must not fail on it; the format
+ * itself still hits the same load through resolveEngine and aborts explicitly
+ * there, with the file left intact.
+ */
+export function resolveEngineIdForSource(lang: LangId, code: string): string {
+  try {
+    return resolveEngine(lang, code).id;
+  } catch {
+    return pickEngine(lang).id;
+  }
 }

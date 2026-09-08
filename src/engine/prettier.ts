@@ -4,19 +4,13 @@
 // would corrupt. dprint-ts is the swappable alternative tracked for later (§13).
 // MUST NOT import 'vscode' (testable under mocha + tsx).
 import type { Options as PrettierOptions } from 'prettier';
-// Use prettier's STANDALONE build + EXPLICIT plugins so esbuild can bundle the
-// extension into a single file. The full 'prettier' entry lazy-loads its parser
-// plugins via runtime dynamic import; once bundled, those imports fail to
-// resolve, the parser silently doesn't load, and the engine no-ops on every
-// TS/JSX file (caught in a real VS Code host). Standalone takes the plugins
-// explicitly, so static imports bundle cleanly and the parser is always present.
-import { format as prettierFormat } from 'prettier/standalone';
-import * as prettierBabel from 'prettier/plugins/babel';
-import * as prettierEstree from 'prettier/plugins/estree';
-import * as prettierTypescript from 'prettier/plugins/typescript';
-// CSS family fallback parsers (ADD-01). Same standalone/static-import pattern as
-// the babel/typescript plugins above so esbuild bundles them cleanly.
-import * as prettierPostcss from 'prettier/plugins/postcss';
+// ADD-11: prettier's STANDALONE build and its EXPLICIT plugins now live in
+// dist/chunk-prettier.js, loaded on demand through the memoized chunk loader
+// (see src/chunks/prettierChunk.ts for why standalone + explicit plugins is the
+// only shape that survives bundling). Nothing here is evaluated at activation.
+// A load failure is surfaced as a typed engine error: the provider aborts and
+// the file stays intact; the engine NEVER degrades to a partial printer.
+import { loadPrettierChunk, type PrettierChunkModule } from '../chunks/loader';
 import type { Engine, FormatRequest, LangId, ResolvedOptions } from '../types';
 import { postProcess } from './postProcess';
 
@@ -242,6 +236,21 @@ export class PrettierEngine implements Engine {
     return SUPPORTED.has(lang);
   }
 
+  /**
+   * Acquire the lazily loaded prettier chunk (ADD-11), normalizing any load
+   * failure into a typed engine error. Shared by both format paths so the
+   * failure wording is identical wherever the printer is unavailable; the
+   * provider turns it into an abort with the file left byte-identical.
+   */
+  private async loadChunk(): Promise<PrettierChunkModule> {
+    try {
+      return await loadPrettierChunk();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`prettier engine unavailable: ${message}`);
+    }
+  }
+
   public async format(req: FormatRequest): Promise<string> {
     const cssParser = CSS_PARSER_BY_LANG[req.languageId];
     if (cssParser) {
@@ -259,16 +268,21 @@ export class PrettierEngine implements Engine {
 
     const prettierOptions = buildPrettierOptions(req, parser);
 
+    // Lazy, memoized chunk load (ADD-11). The chunk carries prettier's
+    // standalone format plus the exact plugin modules; failure to load MUST
+    // abort the format (file intact), never degrade to a partial engine.
+    const chunk = await this.loadChunk();
+
     // Provide parser + printer plugins explicitly (standalone build):
     // 'typescript' parser -> typescript plugin; 'babel' parser -> babel plugin;
     // both require the estree printer.
     const plugins =
       parser === 'typescript'
-        ? [prettierTypescript, prettierEstree]
-        : [prettierBabel, prettierEstree];
+        ? [chunk.pluginTypescript, chunk.pluginEstree]
+        : [chunk.pluginBabel, chunk.pluginEstree];
 
     try {
-      return await prettierFormat(req.code, { ...prettierOptions, plugins });
+      return await chunk.format(req.code, { ...prettierOptions, plugins });
     } catch (error: unknown) {
       // Never swallow: surface a typed error so the provider can abort with a
       // file-intact outcome and log to the OutputChannel (never the code itself).
@@ -291,11 +305,15 @@ export class PrettierEngine implements Engine {
   ): Promise<string> {
     const prettierOptions = buildCssPrettierOptions(req, parser);
 
+    // Same lazy chunk as the TS/JSX path (ADD-11): the postcss PRINTER ships
+    // with the prettier chunk, not with the guard's postcss PARSERS.
+    const chunk = await this.loadChunk();
+
     let raw: string;
     try {
-      raw = await prettierFormat(req.code, {
+      raw = await chunk.format(req.code, {
         ...prettierOptions,
-        plugins: [prettierPostcss]
+        plugins: [chunk.pluginPostcss]
       });
     } catch (error: unknown) {
       // Never swallow: surface a typed error so the provider keeps the primary

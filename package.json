@@ -2,7 +2,7 @@
   "name": "tidy-formatter",
   "displayName": "Tidy: JS/CSS/HTML Formatter & Beautifier",
   "description": "Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON. A safe, config-respecting replacement for JS-CSS-HTML Formatter that never touches your files unless you ask.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "ced-lab",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -98,6 +98,11 @@
         "title": "Explain Last Format",
         "category": "Tidy",
         "enablement": "editorLangId in tidy.supportedLanguages"
+      },
+      {
+        "command": "tidy.showFormatHistory",
+        "title": "Show Format History",
+        "category": "Tidy"
       }
     ],
     "submenus": [
@@ -134,7 +139,7 @@
           {
             "id": "tidy.gettingStarted.safety",
             "title": "Safety first",
-            "description": "Tidy never writes a file that fails an equivalence check against your original. File corruption is impossible by design.",
+            "description": "Tidy never writes a file that fails an equivalence check against your original. When it cannot prove the output equivalent, it makes zero edits and your file is left byte-identical.",
             "media": {
               "markdown": "media/walkthrough/safety.md"
             }
@@ -597,11 +602,19 @@
             "description": "Read the project's .editorconfig cascade (honouring root=true) and let it override plain VS Code settings. Disable to ignore .editorconfig entirely. Workspace .editorconfig is always ignored in Restricted Mode.",
             "markdownDescription": "Read the project's .editorconfig cascade (honouring root=true) and let it override plain VS Code settings. Disable to ignore .editorconfig entirely. Workspace .editorconfig is always ignored in Restricted Mode.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
-          "tidy.soukformatrc": {
+          "tidy.prettier.respectProjectConfig": {
             "type": "boolean",
             "default": true,
             "scope": "resource",
             "order": 2,
+            "description": "Read the project's Prettier config (.prettierrc, .prettierrc.json/.json5/.yaml/.yml/.toml, or the \"prettier\" key in package.json) as a data-only layer for the files Prettier prints (TypeScript, TSX, JSX, and a plain .js file that turns out to contain JSX), layered between .editorconfig and .soukformatrc. Only AST-safe stylistic keys are honoured; .prettierrc.js and other code-based configs are never executed. Always ignored in Restricted Mode.",
+            "markdownDescription": "Read the project's Prettier config (.prettierrc, .prettierrc.json/.json5/.yaml/.yml/.toml, or the \"prettier\" key in package.json) as a data-only layer for the files Prettier prints (TypeScript, TSX, JSX, and a plain .js file that turns out to contain JSX), layered between .editorconfig and .soukformatrc. Only AST-safe stylistic keys are honoured; .prettierrc.js and other code-based configs are never executed. Always ignored in Restricted Mode.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.soukformatrc": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "order": 3,
             "description": "Read the project's .soukformatrc file (JSONC) for per-language formatting options and glob overrides, layered above .editorconfig. Disable to ignore .soukformatrc entirely. A workspace .soukformatrc is always ignored in Restricted Mode.",
             "markdownDescription": "Read the project's .soukformatrc file (JSONC) for per-language formatting options and glob overrides, layered above .editorconfig. Disable to ignore .soukformatrc entirely. A workspace .soukformatrc is always ignored in Restricted Mode.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
@@ -609,7 +622,7 @@
             "type": "boolean",
             "default": true,
             "scope": "resource",
-            "order": 3,
+            "order": 4,
             "description": "Skip formatting files matched by the project's .soukformatignore (gitignore syntax), so Tidy leaves them byte-identical. Disable to format every file regardless. A workspace .soukformatignore is always ignored in Restricted Mode.",
             "markdownDescription": "Skip formatting files matched by the project's .soukformatignore (gitignore syntax), so Tidy leaves them byte-identical. Disable to format every file regardless. A workspace .soukformatignore is always ignored in Restricted Mode.\n\nDocs: [Ignore & coexistence](https://github.com/ced-lab-gh/tidy-formatter#ignore--coexistence)."
           },
@@ -622,18 +635,18 @@
               "off"
             ],
             "enumDescriptions": [
-              "Show a one-time notification when this workspace already configures another formatter (Prettier, Biome, dprint). Tidy never takes over; your default formatter is unchanged.",
+              "Show a one-time notification when this workspace already configures another formatter or fixer (Prettier, Biome, dprint, ESLint). Tidy never takes over; your default formatter is unchanged.",
               "Do not notify, but acknowledge another formatter is configured. Tidy still never disables itself or changes any setting.",
               "Ignore detection of other formatters entirely (no notification)."
             ],
-            "order": 4,
-            "description": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification.",
-            "markdownDescription": "How Tidy reacts when another formatter (Prettier, Biome, dprint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification.\n\nDocs: [Deference behavior](https://github.com/ced-lab-gh/tidy-formatter#deference-behavior-coexisting-with-other-formatters)."
+            "order": 5,
+            "description": "How Tidy reacts when another formatter or fixer (Prettier, Biome, dprint, ESLint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification.",
+            "markdownDescription": "How Tidy reacts when another formatter or fixer (Prettier, Biome, dprint, ESLint) is already configured in the workspace. Tidy NEVER changes editor.defaultFormatter or disables itself automatically; this only controls a one-time, informational notification.\n\nDocs: [Deference behavior](https://github.com/ced-lab-gh/tidy-formatter#deference-behavior-coexisting-with-other-formatters)."
           },
           "tidy.statusBar.enable": {
             "type": "boolean",
             "default": true,
-            "order": 5,
+            "order": 6,
             "description": "Show the Tidy status bar item: the passive state of the active file plus a short transient result after each format attempt. Purely observational; disabling it changes no formatting behavior.",
             "markdownDescription": "Show the Tidy status bar item: the passive state of the active file plus a short transient result after each format attempt. Purely observational; disabling it changes no formatting behavior.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
@@ -646,6 +659,7 @@
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc --noEmit",
     "check:changelog": "node scripts/check-changelog.mjs",
+    "check:chunks": "node scripts/check-chunks.mjs",
     "lint": "eslint src --ext ts",
     "test": "npm run test:unit",
     "test:unit": "mocha --require tsx 'test/unit/**/*.test.ts'",
@@ -661,23 +675,27 @@
     "package": "vsce package --no-dependencies",
     "publish:vsce": "vsce publish",
     "publish:ovsx": "ovsx publish",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile && npm run check:chunks"
   },
   "dependencies": {
     "@babel/parser": "^7.24.0",
     "@babel/types": "^7.24.0",
     "editorconfig": "^3.0.2",
     "js-beautify": "^1.15.1",
+    "js-yaml": "^4.1.0",
+    "json5": "^2.2.3",
     "jsonc-parser": "^3.2.0",
     "parse5": "^7.1.2",
     "postcss": "^8.4.35",
     "postcss-less": "^6.0.0",
     "postcss-scss": "^4.0.9",
-    "prettier": "^3.2.0"
+    "prettier": "^3.2.0",
+    "smol-toml": "^1.3.1"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "@types/js-beautify": "^1.14.3",
+    "@types/js-yaml": "^4.0.9",
     "@types/mocha": "^10.0.6",
     "@types/node": "^18.19.0",
     "@types/vscode": "^1.84.0",

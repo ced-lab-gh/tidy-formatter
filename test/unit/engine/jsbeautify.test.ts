@@ -2,8 +2,14 @@
 // Verifies the option mapping (tabSize/insertSpaces -> indentation, EOL,
 // final-newline, trim) and range formatting, without a VS Code host.
 import assert from 'node:assert/strict';
-import { JsBeautifyEngine } from '../../../src/engine/jsbeautify';
+import {
+  JsBeautifyEngine,
+  JS_BEAUTIFY_ENGINE_ID,
+  JSON_ENGINE_ID,
+  reportedEngineIdFor
+} from '../../../src/engine/jsbeautify';
 import { guard } from '../../../src/safety/guard';
+import { HTML_PREFORMATTED_TAGS } from '../../../src/safety/htmlPreformatted';
 import { resolved } from '../../helpers/options';
 import type { LangId } from '../../../src/types';
 
@@ -413,5 +419,74 @@ describe('engine/jsbeautify : engineOptions effect + guard equivalence (Axe 3.T2
     assert.ok(out.includes('function f()\n{'), 'brace_style=expand applied');
     assert.ok(out.includes('\n\treturn 1;'), 'tab indentation still applied');
     assert.equal(guard.check('javascript', code, out).equivalent, true);
+  });
+});
+
+describe('engine/jsbeautify : the REPORTED engine id names the printer that ran', () => {
+  it('json/jsonc report jsonc-parser, the printer that actually runs', () => {
+    // json/jsonc are routed to src/engine/jsonFormatter.ts (jsonc-parser), never
+    // to js-beautify. Naming js-beautify in the status bar, the output channel
+    // and "Explain Last Format" named a library that never ran.
+    assert.equal(JSON_ENGINE_ID, 'jsonc-parser');
+    assert.equal(reportedEngineIdFor('json'), JSON_ENGINE_ID);
+    assert.equal(reportedEngineIdFor('jsonc'), JSON_ENGINE_ID);
+  });
+
+  it('every other family this adapter prints still reports js-beautify', () => {
+    for (const lang of ['css', 'scss', 'less', 'html', 'javascript'] as const) {
+      assert.equal(reportedEngineIdFor(lang), JS_BEAUTIFY_ENGINE_ID);
+    }
+  });
+
+  it('the adapter\'s own Engine.id is unchanged (routing and config key off it)', () => {
+    // src/config/prettierrc.ts and src/engine/dispatcher.ts compare this exact
+    // string, so the reporting fix must not move it.
+    assert.equal(engine.id, 'js-beautify');
+    assert.equal(JS_BEAUTIFY_ENGINE_ID, 'js-beautify');
+  });
+});
+
+describe('engine/jsbeautify : preformatted HTML is never reflowed', () => {
+  // js-beautify's own default for content_unformatted is ['pre', 'textarea'],
+  // so it reflowed <xmp>, <listing> and <plaintext>, which the HTML Rendering
+  // spec renders with the same `white-space: pre`. The adapter now hands it the
+  // safety layer's list (src/safety/htmlPreformatted.ts), which is the same list
+  // the guard compares verbatim: neither side can be widened alone.
+  const BODY = 'alpha\n\tTABBED\n    spaced';
+
+  for (const tag of HTML_PREFORMATTED_TAGS) {
+    it(`keeps every byte inside <${tag}>`, async () => {
+      // <plaintext> consumes the rest of the file, so it takes no closing tag.
+      const code =
+        tag === 'plaintext'
+          ? `<div>\n<plaintext>${BODY}`
+          : `<div>\n<${tag}>${BODY}</${tag}>\n</div>`;
+      const out = await engine.format({
+        languageId: 'html',
+        code,
+        options: resolved({ tabSize: 2, insertSpaces: true })
+      });
+      assert.ok(
+        out.includes(BODY),
+        `js-beautify reflowed inside <${tag}>: ${JSON.stringify(out)}`
+      );
+      assert.equal(guard.check('html', code, out).equivalent, true);
+    });
+  }
+
+  it('a user engineOptions blob cannot shrink the protection', async () => {
+    // content_unformatted is deliberately NOT in the option catalogue: it is a
+    // safety alignment with the guard, not a style choice. A layer that tries to
+    // set it anyway must be ignored, or the false accept comes straight back.
+    const code = '<div>\n<xmp>alpha\n\tTABBED</xmp>\n</div>';
+    const out = await engine.format({
+      languageId: 'html',
+      code,
+      options: resolved({
+        engineOptions: { content_unformatted: ['pre'] }
+      })
+    });
+    assert.ok(out.includes('alpha\n\tTABBED'), `got ${JSON.stringify(out)}`);
+    assert.equal(guard.check('html', code, out).equivalent, true);
   });
 });

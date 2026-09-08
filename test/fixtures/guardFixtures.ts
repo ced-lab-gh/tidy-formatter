@@ -127,6 +127,91 @@ export const guardFixtures: GuardFixture[] = [
     equivalent: false
   },
 
+  // ---- JSX TEXT: Prettier's own whitespace reflow, which Tidy REFUSES -----
+  //
+  // @babel/parser keeps an interior run of spaces on a single line exactly as
+  // written: `<p>hello  there</p>` parses to the JSXText "hello  there", TWO
+  // spaces. Prettier prints it as `<p>hello there</p>`, betting that a browser
+  // will collapse the run on display. The string the file COMPILES to changed,
+  // and the bet is wrong wherever that string is not HTML flow text. These
+  // fixtures are the product working, not a false positive: Tidy is stricter
+  // than Prettier's own assumption, and the rejection now says exactly why (see
+  // JSX_TEXT_WHITESPACE_REASON in src/safety/guard.ts).
+  {
+    id: 'GUARD-JSX-TEXT-RUN-COLLAPSED',
+    desc: 'an interior run of spaces collapsed by Prettier changes the compiled string, must be rejected',
+    ref: 'SAFE-01: babel keeps "hello  there" verbatim; prettier 3 prints "hello there"',
+    lang: 'typescriptreact',
+    input: '<p>hello  there</p>;',
+    output: '<p>hello there</p>;',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-JSX-I18N-KEY-COLLAPSED',
+    desc: 'an i18n message id whose run of spaces is collapsed becomes a different lookup key, must be rejected',
+    ref: 'SAFE-01: <Trans>Hello  world</Trans> is a KEY, not rendered flow text',
+    lang: 'typescriptreact',
+    input: '<Trans>Hello  world</Trans>;',
+    output: '<Trans>Hello world</Trans>;',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-RN-TEXT-RUN-COLLAPSED',
+    desc: 'React Native <Text> draws every space it is given, so a collapsed run is visible, must be rejected',
+    ref: 'SAFE-01: there is no browser under React Native to collapse the run',
+    lang: 'typescriptreact',
+    input: '<Text>col1  col2</Text>;',
+    output: '<Text>col1 col2</Text>;',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-JSX-TEXT-SPACE-INVENTED',
+    desc: 'a space inserted between two glued inline elements changes the text, must be rejected',
+    ref: 'SAFE-01: JSX text is compared byte for byte once cleanJsxText has run',
+    lang: 'typescriptreact',
+    input: '<p><b>x</b><i>y</i></p>;',
+    output: '<p><b>x</b> <i>y</i></p>;',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-JSX-SPACER-INVENTED',
+    desc: 'a {" "} spacer added where no space existed adds a character, must be rejected',
+    ref: 'SAFE-01: {" "} is a JSXExpressionContainer, compared structurally',
+    lang: 'typescriptreact',
+    input: '<p>read<b>me</b></p>;',
+    output: '<p>read{" "}<b>me</b></p>;',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-JSX-PRE-TEXT-COLLAPSED',
+    desc: 'a run of spaces collapsed inside <pre> is visible to a reader, must be rejected',
+    ref: 'SAFE-01 / src/safety/htmlPreformatted.ts',
+    lang: 'typescriptreact',
+    input: '<pre>col1    col2</pre>;',
+    output: '<pre>col1 col2</pre>;',
+    equivalent: false
+  },
+
+  // ---- HTML: xml:space="preserve" (SVG 1.1 §5.9) --------------------------
+  {
+    id: 'GUARD-SVG-XMLSPACE-COLLAPSED',
+    desc: 'SVG draws every space under xml:space="preserve", so a collapsed run is a drawn change, must be rejected',
+    ref: 'SVG 1.1 §5.9 "White space handling"; js-beautify wrote A  B as A B',
+    lang: 'html',
+    input: '<svg><text x="0" y="10" xml:space="preserve">A  B</text></svg>',
+    output: '<svg><text x="0" y="10" xml:space="preserve">A B</text></svg>',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-SVG-XMLSPACE-INHERITED',
+    desc: 'xml:space is inherited, so a nested <tspan> with no declaration of its own is preserved too, must be rejected',
+    ref: 'SVG 1.1 §5.9: the declaration applies to the whole subtree',
+    lang: 'html',
+    input: '<svg><text xml:space="preserve">A<tspan>B  C</tspan></text></svg>',
+    output: '<svg><text xml:space="preserve">A<tspan>B C</tspan></text></svg>',
+    equivalent: false
+  },
+
   // ---- JS/TS/JSX/TSX: legitimate reformattings that MUST be accepted ------
   {
     id: 'GUARD-JS-WHITESPACE-OK',
@@ -162,6 +247,27 @@ export const guardFixtures: GuardFixture[] = [
     lang: 'typescriptreact',
     input: '<div a={1} b={2} c={3}>x</div>;',
     output: '<div\n  a={1}\n  b={2}\n  c={3}\n>\n  x\n</div>;',
+    equivalent: true
+  },
+  {
+    // The other half of the xml:space fix: `default` turns preservation back
+    // OFF for its subtree, so ordinary collapsing there is still accepted and
+    // the fix cannot degenerate into "refuse every SVG".
+    id: 'GUARD-SVG-XMLSPACE-DEFAULT-OK',
+    desc: 'a run collapsed under xml:space="default" is ordinary insignificant whitespace, accepted',
+    ref: 'SVG 1.1 §5.9: xml:space="default" restores the collapsing behaviour',
+    lang: 'html',
+    input: '<svg><text xml:space="default">A  B</text></svg>',
+    output: '<svg><text xml:space="default">A B</text></svg>',
+    equivalent: true
+  },
+  {
+    id: 'GUARD-JSX-REFLOW-STILL-OK',
+    desc: 'a multi-line JSX reflow (newline + indentation between children) is still accepted',
+    ref: 'SPEC §12: the byte-exact rule applies AFTER cleanJsxText, so reflow is free',
+    lang: 'typescriptreact',
+    input: '<div><h1>a</h1><span>b</span></div>;',
+    output: '<div>\n  <h1>a</h1>\n  <span>b</span>\n</div>;',
     equivalent: true
   },
   {

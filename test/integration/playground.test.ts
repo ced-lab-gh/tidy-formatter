@@ -82,10 +82,16 @@ describe('Tidy playground & preview pre-gates (ADD-03)', function () {
     await activateExtension();
   });
 
-  after(() => {
+  after(async () => {
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await flushEventLoop();
+    // Windows keeps the fixture handle open for a beat after the editor closes
+    // (file watcher / hot-exit backup); Node's retry loop covers exactly that.
     fs.rmSync(path.join(workspaceRoot(), FIXTURE_DIR), {
       recursive: true,
-      force: true
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100
     });
   });
 

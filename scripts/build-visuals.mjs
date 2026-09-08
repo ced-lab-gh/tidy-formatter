@@ -1,22 +1,22 @@
 // Generates the README "before / after" marketing visuals for the Marketplace
 // listing as REAL PNG files (the Marketplace rewrites relative README image
-// paths to raw.githubusercontent.com and reliably renders PNG — not always SVG,
+// paths to raw.githubusercontent.com and reliably renders PNG, not always SVG,
 // so PNG is what we ship).
 //
 // What it makes (into media/before-after/):
-//   - css.png / css.svg  — messy.css  → Format Document → out/messy.css
-//   - tsx.png / tsx.svg  — messy.tsx  → Format Document → out/messy.tsx
-// Each is a 920px-wide, two-panel "Before" | "After — Tidy" card on a dark
+//   - css.png / css.svg  : messy.css  → Format Document → out/messy.css
+//   - tsx.png / tsx.svg  : messy.tsx  → Format Document → out/messy.tsx
+// Each is a 920px-wide, two-panel "Before" | "After : Tidy" card on a dark
 // (#0d1117) field, monospace code, syntax highlighting, a brand-teal (#168F7D)
 // accent on the Tidy side, and a caption. The TSX card additionally annotates
 // that the JSX stayed valid and the `?.` / `??` operators were preserved.
 //
 // The content is REAL: it is read verbatim from this repo's samples/ folder
-// (before) and samples/out/ folder (after) — the same inputs shown in README's
+// (before) and samples/out/ folder (after): the same inputs shown in README's
 // "Before / after" section. Nothing is faked.
 //
 // Method: we build a self-contained SVG and rasterise it to PNG with
-// @resvg/resvg-js (a devDependency — NOT a runtime dependency of the extension;
+// @resvg/resvg-js (a devDependency, NOT a runtime dependency of the extension;
 // it never ships in the VSIX). If the native rasteriser is unavailable, the
 // script still writes the .svg files and prints a clear notice that the PNG
 // rasterisation step remains to be run.
@@ -43,7 +43,7 @@ const CODE_TOP_PAD = 12;
 const CODE_BOTTOM_PAD = 14;
 const LINE_H = 21;
 const FONT_SIZE = 13.5;
-const CW = FONT_SIZE * 0.5498; // Consolas advance width (1126/2048 em) — monospace
+const CW = FONT_SIZE * 0.5498; // Consolas advance width (1126/2048 em), monospace
 const FIRST_BASELINE_OFFSET = 15;
 const LEFT_PAD = 14;
 const GUTTER_W = 20;
@@ -404,13 +404,13 @@ function buildSvg({ beforeRel, afterRel, filenameBefore, filenameAfter, tokenize
     x: PANEL_RX,
     tokenLines: afterToks,
     nLinesMax,
-    title: 'After — Tidy',
+    title: 'After : Tidy',
     titleColor: C.tealLt,
     dotColor: C.teal,
     filename: filenameAfter,
     teal: true,
     clipId: 'clipR',
-    fadeId: 'fadeL' // objectBoundingBox gradient — reused per-panel
+    fadeId: 'fadeL' // objectBoundingBox gradient, reused per-panel
   });
 
   const captionTop = PANELS_TOP + left.panelH + 16;
@@ -450,7 +450,7 @@ const IMAGES = [
     filenameBefore: 'messy.tsx',
     filenameAfter: 'messy.tsx',
     tokenizer: tokenizeTsx,
-    caption: 'JSX stays valid — <div /> never becomes < div / > · ?. and ?? preserved · AST-equivalence verified.',
+    caption: 'JSX stays valid : <div /> never becomes < div / > · ?. and ?? preserved · AST-equivalence verified.',
     annotate: true
   }
 ];
@@ -476,7 +476,7 @@ async function main() {
   } catch {
     // eslint-disable-next-line no-console
     console.warn(
-      '\n[build-visuals] @resvg/resvg-js is not installed — wrote SVGs only.\n' +
+      '\n[build-visuals] @resvg/resvg-js is not installed: wrote SVGs only.\n' +
         '                PNG rasterisation is STILL PENDING. Install the devDependency and re-run:\n' +
         '                  npm install -D @resvg/resvg-js && node scripts/build-visuals.mjs\n'
     );

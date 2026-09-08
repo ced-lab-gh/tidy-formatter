@@ -131,6 +131,11 @@ const EXPECTED_SECTIONS: readonly { title: string; keys: readonly string[] }[] =
     title: 'Project & Coexistence',
     keys: [
       'tidy.editorconfig',
+      // ADD-13: the .prettierrc project-config gate. Operational (like
+      // tidy.editorconfig), not an engine option, so it is not in
+      // OPTION_CATALOG. Placed between .editorconfig and .soukformatrc to
+      // mirror the precedence chain it sits in.
+      'tidy.prettier.respectProjectConfig',
       'tidy.soukformatrc',
       'tidy.respectSoukformatignore',
       'tidy.deferToOtherFormatters',
@@ -261,7 +266,8 @@ describe('config/packageJsonSync : catalogue ⇄ package.json', () => {
       'tidy.editorconfig',
       'tidy.soukformatrc',
       'tidy.respectSoukformatignore',
-      'tidy.deferToOtherFormatters'
+      'tidy.deferToOtherFormatters',
+      'tidy.prettier.respectProjectConfig'
     ]);
     for (const key of Object.keys(props)) {
       if (key.endsWith('.enable')) {
@@ -306,6 +312,16 @@ describe('config/packageJsonSync : catalogue ⇄ package.json', () => {
     assert.ok(prop, 'tidy.soukformatrc must be declared');
     assert.equal(prop.type, 'boolean');
     assert.equal(prop.default, true);
+  });
+
+  it('declares the .prettierrc opt-out (boolean, default true, resource scope)', () => {
+    const prop = props['tidy.prettier.respectProjectConfig'];
+    assert.ok(prop, 'tidy.prettier.respectProjectConfig must be declared');
+    assert.equal(prop.type, 'boolean');
+    assert.equal(prop.default, true);
+    assert.equal(prop.scope, 'resource');
+    assert.match(String(prop.description), /never executed/);
+    assert.match(String(prop.description), /Restricted Mode/);
   });
 
   it('keeps keywords <= 10 and categories unchanged', () => {

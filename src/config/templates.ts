@@ -52,6 +52,15 @@ export function isTemplateProtected(lang: LangId): boolean {
 const ISLAND_PATTERN = /\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}|<%[\s\S]*?%>/g;
 
 /**
+ * A fresh matcher for ISLAND_PATTERN. A /g regex carries `lastIndex` state, so a
+ * shared instance driven by `exec` would leak position between calls and make
+ * this module non-reentrant; every scan gets its own.
+ */
+function islandMatcher(): RegExp {
+  return new RegExp(ISLAND_PATTERN.source, 'g');
+}
+
+/**
  * A captured island and the placeholder token that temporarily stands in for it.
  */
 export interface TemplateIsland {
@@ -216,22 +225,117 @@ export function findFrontMatter(html: string): FrontMatterSpan | undefined {
 }
 
 /**
+ * Byte span [start, end) of one protected template construct. Shares the shape
+ * of FrontMatterSpan on purpose: both are located over a text and then handed to
+ * the same span-based masker.
+ */
+export interface TemplateIslandSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Every {{ }} / {% %} / <% %> island in `html`, as byte spans in document order.
+ * Matches are non-overlapping and sorted by construction (a single left-to-right
+ * regex scan), which is exactly what maskTemplateIslandSpans requires.
+ *
+ * SEPARATED FROM THE MASKING ON PURPOSE (the island scope fix): an island is a
+ * DOCUMENT-LEVEL byte span. A selection whose boundary falls between `<%` and
+ * `%>` contains no complete pattern, so a fragment can never find its own
+ * islands; the caller locates them over the WHOLE document and clips the spans
+ * to the fragment, the same mechanic that already makes ignore regions and front
+ * matter scope-invariant. Pure and linear.
+ */
+export function findHtmlTemplateIslandSpans(
+  html: string
+): readonly TemplateIslandSpan[] {
+  const spans: TemplateIslandSpan[] = [];
+  const matcher = islandMatcher();
+  let match = matcher.exec(html);
+  while (match !== null) {
+    spans.push({ start: match.index, end: match.index + match[0].length });
+    match = matcher.exec(html);
+  }
+  return spans;
+}
+
+/**
  * Outcome of masking template islands (and optionally a front matter block) out
  * of an HTML document, pipeline-grade:
  *  - 'none'      : nothing to protect; the caller formats the input as-is;
  *  - 'collision' : islands exist but the document already contains the
  *                  placeholder text, so a clean restore cannot be guaranteed;
  *                  the caller MUST decline to format (zero edit);
+ *  - 'unusable'  : the spans handed over are not a maskable set (out of bounds,
+ *                  empty, unsorted or overlapping). Unreachable from the spans
+ *                  this module produces; it exists so a caller that computes its
+ *                  own spans can only ever be told "decline", never handed a
+ *                  half-applied mask;
  *  - 'masked'    : the engine-ready text plus the ordered islands to restore.
  */
 export type HtmlMaskOutcome =
   | { readonly kind: 'none' }
   | { readonly kind: 'collision'; readonly islandCount: number }
+  | { readonly kind: 'unusable'; readonly islandCount: number }
   | {
       readonly kind: 'masked';
       readonly masked: string;
       readonly islands: readonly TemplateIsland[];
     };
+
+/**
+ * Mask the GIVEN spans of `html`, in document order, each behind its own
+ * placeholder. Mirrors src/ignore/mask.ts:applyMask: the spans are re-validated
+ * (in bounds, non-empty, strictly increasing, non-overlapping) so a malformed
+ * set can never produce a corrupt mask, and the splice runs from the end so
+ * earlier offsets stay valid.
+ *
+ * This is the single masking primitive: maskHtmlTemplateIslands below and the
+ * document-located, clipped spans the mask plan computes both go through it.
+ */
+export function maskTemplateIslandSpans(
+  html: string,
+  spans: readonly TemplateIslandSpan[]
+): HtmlMaskOutcome {
+  if (spans.length === 0) {
+    return { kind: 'none' };
+  }
+  if (hasPlaceholderCollision(html)) {
+    return { kind: 'collision', islandCount: spans.length };
+  }
+  let previousEnd = 0;
+  for (const span of spans) {
+    if (
+      !Number.isInteger(span.start) ||
+      !Number.isInteger(span.end) ||
+      span.start < previousEnd ||
+      span.end <= span.start ||
+      span.end > html.length
+    ) {
+      return { kind: 'unusable', islandCount: spans.length };
+    }
+    previousEnd = span.end;
+  }
+
+  // ONE pass, and one string build. Splicing span by span would re-copy the
+  // whole document per island, which is O(bytes x islands): on a 350 KB page
+  // with 8000 islands that is seconds, not milliseconds.
+  const islands: TemplateIsland[] = [];
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const span of spans) {
+    const island = {
+      placeholder: makePlaceholder(islands.length),
+      original: html.slice(span.start, span.end)
+    };
+    islands.push(island);
+    parts.push(html.slice(cursor, span.start), island.placeholder);
+    cursor = span.end;
+  }
+  parts.push(html.slice(cursor));
+
+  return { kind: 'masked', masked: parts.join(''), islands };
+}
 
 /**
  * Pipeline entry point (ADD-02). Masks, in this order:
@@ -241,40 +345,30 @@ export type HtmlMaskOutcome =
  * A {{ }} inside the front matter is hidden by step 1 and never double-masked.
  * Pure and deterministic. Unlike the legacy maskTemplateIslands, a collision is
  * an EXPLICIT outcome (the caller aborts) instead of a silent no-mask.
+ *
+ * Whole-text entry point: it locates the islands in the very text it masks, so
+ * it is correct only when that text IS the document. A caller formatting a
+ * FRAGMENT must locate spans over the document with findHtmlTemplateIslandSpans,
+ * clip them, and call maskTemplateIslandSpans instead.
  */
 export function maskHtmlTemplateIslands(
   html: string,
   includeFrontMatter: boolean
 ): HtmlMaskOutcome {
   const frontMatter = includeFrontMatter ? findFrontMatter(html) : undefined;
-  const remainder = frontMatter ? html.slice(frontMatter.end) : html;
-  const delimiterCount = (remainder.match(ISLAND_PATTERN) ?? []).length;
-  const islandCount = (frontMatter ? 1 : 0) + delimiterCount;
-
-  if (islandCount === 0) {
-    return { kind: 'none' };
-  }
-  if (hasPlaceholderCollision(html)) {
-    return { kind: 'collision', islandCount };
-  }
-
-  const islands: TemplateIsland[] = [];
-  let prefix = '';
-  if (frontMatter) {
-    const placeholder = makePlaceholder(0);
-    islands.push({
-      placeholder,
-      original: html.slice(frontMatter.start, frontMatter.end)
-    });
-    prefix = html.slice(0, frontMatter.start) + placeholder;
-  }
-  const maskedRemainder = remainder.replace(ISLAND_PATTERN, (match) => {
-    const placeholder = makePlaceholder(islands.length);
-    islands.push({ placeholder, original: match });
-    return placeholder;
-  });
-
-  return { kind: 'masked', masked: prefix + maskedRemainder, islands };
+  const head: readonly TemplateIslandSpan[] = frontMatter
+    ? [{ start: frontMatter.start, end: frontMatter.end }]
+    : [];
+  // Islands are looked for in the REMAINDER only, so one inside the front matter
+  // is hidden by the block's own placeholder and never double-masked.
+  const remainderStart = frontMatter ? frontMatter.end : 0;
+  const tail = findHtmlTemplateIslandSpans(html.slice(remainderStart)).map(
+    (span) => ({
+      start: span.start + remainderStart,
+      end: span.end + remainderStart
+    })
+  );
+  return maskTemplateIslandSpans(html, [...head, ...tail]);
 }
 
 /**

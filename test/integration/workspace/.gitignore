@@ -12,6 +12,22 @@ config-options/
 power-features/
 .soukformatignore
 
+# Throwaway fixtures written by the ADD-11 lazy chunk integration tests.
+lazy/
+
+# Throwaway fixtures written by the ADD-14 format-history integration tests.
+history/
+
+# Throwaway fixtures written by the ADD-08 per-family size cap tests.
+size-limit/
+
+# Throwaway fixtures written by the ADD-03 playground / preview pre-gate tests.
+# The suite deletes them in after(), but an aborted host run leaves them behind.
+playground/
+
+# Throwaway fixtures written by the ignore-layer integration tests.
+ignore-suite/
+
 # Throwaway readiness-probe files written by ensureTidyDefaultFormatter.
 .tidy-readiness/
 

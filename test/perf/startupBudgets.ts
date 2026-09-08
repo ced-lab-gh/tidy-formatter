@@ -6,21 +6,25 @@
 // run after `npm run compile` (CI wires it after the compile step).
 //
 // Budget calibration (empirical, measured on the reference machine, win32 x64,
-// Node 24, on the v0.3.0 bundle of 2 818 641 bytes). Two campaigns:
+// Node 24).
+//
+// ADD-09 campaign, v0.3.0 single bundle of 2 818 641 bytes:
 //   - busy machine, 7 runs: 243.9 / 252.7 / 254.4 / 256.5 / 268.9 / 277.7 /
 //     301.8 ms, median 256.5 ms, retained heap 11.2 MB;
 //   - idle machine, 5 runs through this harness: median 207.7 ms, max 223.3 ms,
 //     retained heap 10.7 MB.
-// The requireMs budget is set from the WORSE median (~1.55x of 256.5): enough
-// headroom that a busy machine or a slower disk does not red the gate, tight
-// enough that a doubling of the require cost is caught. The product spec's
-// original "150 ms" figure (and its later "350 ms" revision, calibrated on the
-// smaller v0.2.1 bundle) both predate this measurement. ADD-11 (lazy chunks) is
-// expected to bring the cold require under 80 ms and MUST tighten `requireMs`
-// in the same change.
+// That put `requireMs` at 400 (~1.55x the worse median).
 //
-// The heap budget is deliberately loose (40 MB against a measured 11.2 MB): it
-// is a structural tripwire for "the bundle now retains an order of magnitude
+// ADD-11 campaign, host bundle of 381 694 bytes plus four lazy chunks:
+//   - 5 runs through this harness: median 43.8 ms, max 45.6 ms, retained heap
+//     1.6 MB, require.cache 3 modules, ZERO chunks loaded.
+// ADD-11 therefore tightens `requireMs` to the 80 ms the split was designed to
+// buy: ~1.8x the measured median, the same headroom ratio ADD-09 used, and low
+// enough that quietly re-absorbing any engine into the host bundle reds the
+// gate immediately rather than hiding inside a 400 ms allowance.
+//
+// The heap budget stays deliberately loose (40 MB against a measured 1.6 MB):
+// it is a structural tripwire for "the bundle now retains an order of magnitude
 // more memory at load", not a precision instrument, and it is NOT CI-scaled
 // because memory does not vary with runner speed.
 
@@ -48,7 +52,7 @@ export interface Violation {
 }
 
 export const STARTUP_BUDGET: StartupBudget = {
-  requireMs: 400,
+  requireMs: 80,
   heapUsedDeltaBytes: 40 * 1024 * 1024
 } as const;
 
@@ -162,6 +166,205 @@ export function collectStartupViolations(
     violations.push({
       budget: 'zero lazy chunks loaded at require time',
       detail: `loaded: ${summary.chunkModulesLoaded.join(', ')}`
+    });
+  }
+
+  return violations;
+}
+
+// --- ADD-11: activation + first-format scenario ----------------------------
+//
+// The cold-require scenario above deliberately never calls activate(). ADD-11
+// needs the other half of the story, because the lazy chunk boundary can only
+// break in the PACKAGED bundle: under mocha + tsx the loader resolves a source
+// module and always succeeds, so a mis-emitted runtime require would reach a
+// user as "Tidy refuses to format anything" with a fully green test suite.
+//
+// test/perf/activationChild.cjs therefore requires the real dist/extension.js
+// behind a FUNCTIONAL vscode stub, calls activate(), and drives three real
+// formats through the registered document provider. The rules below are pure so
+// every one of them is unit-tested without a built dist/.
+
+export interface FormatProbe {
+  readonly elapsedMs: number;
+  readonly editCount: number;
+  readonly editText: string;
+}
+
+export interface ActivationSample {
+  readonly requireMs: number;
+  readonly activateMs: number;
+  readonly exportsActivate: string;
+  readonly exportsDeactivate: string;
+  readonly providerCount: number;
+  readonly chunksAfterRequire: readonly string[];
+  readonly chunksAfterActivate: readonly string[];
+  readonly chunksAfterTypescript: readonly string[];
+  readonly chunksAfterJson: readonly string[];
+  readonly chunksAfterCss: readonly string[];
+  readonly typescript: FormatProbe;
+  readonly json: FormatProbe;
+  readonly css: FormatProbe;
+  readonly warnings: readonly string[];
+}
+
+export interface ActivationBudget {
+  /** activate() itself, excluding the require (wall-clock, CI-scaled). */
+  readonly activateMs: number;
+  /** First typescript format, WITHOUT the idle preload (wall-clock, CI-scaled). */
+  readonly firstTsFormatMs: number;
+}
+
+// Measured on the reference machine: activate() 0.7 ms, first ts format 149 ms
+// (both chunks loaded inside that number). The budgets keep the ADD-11 spec
+// figures, which are far looser than the measurement on purpose: they exist to
+// catch "the first format now pays a pathological cost", not to police jitter.
+export const ACTIVATION_BUDGET: ActivationBudget = {
+  activateMs: 50,
+  firstTsFormatMs: 1000
+} as const;
+
+/** Chunks a first TypeScript format must load, and no others. */
+export const TS_FORMAT_CHUNKS: readonly string[] = [
+  'chunk-guard-js.js',
+  'chunk-prettier.js'
+];
+
+/** The one chunk a CSS format adds on top of whatever is already loaded. */
+export const CSS_FORMAT_CHUNK = 'chunk-guard-css.js';
+
+function sameSet(actual: readonly string[], expected: readonly string[]): boolean {
+  if (actual.length !== expected.length) {
+    return false;
+  }
+  const sortedActual = [...actual].sort();
+  const sortedExpected = [...expected].sort();
+  return sortedActual.every((value, index) => value === sortedExpected[index]);
+}
+
+/**
+ * Evaluate the activation scenario. Wall-clock rules are scaled by
+ * `timeMultiplier` (x3 under CI); every structural rule (which chunk loaded
+ * when, how many edits came back, whether a warning toast fired) is NEVER
+ * scaled: those are correctness statements, not timings.
+ *
+ * A measurement AT the budget (>=) is already a violation, matching perf.ts.
+ */
+export function collectActivationViolations(
+  sample: ActivationSample,
+  budget: ActivationBudget,
+  timeMultiplier: number
+): Violation[] {
+  const violations: Violation[] = [];
+
+  if (sample.exportsActivate !== 'function' || sample.exportsDeactivate !== 'function') {
+    violations.push({
+      budget: 'bundle exports activate/deactivate',
+      detail:
+        `activate=${sample.exportsActivate}, deactivate=${sample.exportsDeactivate} ` +
+        '(wrong or broken bundle measured)'
+    });
+  }
+
+  if (sample.providerCount < 1) {
+    violations.push({
+      budget: 'activate() registers formatting providers',
+      detail: `${sample.providerCount} document formatting provider(s) registered`
+    });
+  }
+
+  if (sample.chunksAfterRequire.length > 0) {
+    violations.push({
+      budget: 'zero lazy chunks loaded at require time',
+      detail: `loaded: ${sample.chunksAfterRequire.join(', ')}`
+    });
+  }
+
+  // THE structural gate of ADD-11: opening a supported file must not evaluate a
+  // single byte of Prettier, babel, PostCSS or parse5.
+  if (sample.chunksAfterActivate.length > 0) {
+    violations.push({
+      budget: 'zero lazy chunks loaded by activate()',
+      detail: `loaded: ${sample.chunksAfterActivate.join(', ')}`
+    });
+  }
+
+  const activateBudgetMs = budget.activateMs * timeMultiplier;
+  if (sample.activateMs >= activateBudgetMs) {
+    violations.push({
+      budget: `activate() < ${activateBudgetMs} ms`,
+      detail: `activate() took ${sample.activateMs.toFixed(1)} ms`
+    });
+  }
+
+  // A first format must really apply: exactly one replace edit, non-empty text.
+  // Zero edits would be the exact shape of the failure this whole harness
+  // exists to catch (a chunk that cannot load makes the guard abort every run).
+  if (sample.typescript.editCount !== 1 || sample.typescript.editText === '') {
+    violations.push({
+      budget: 'first typescript format produces exactly one edit',
+      detail:
+        `editCount=${sample.typescript.editCount}, ` +
+        `editText length=${sample.typescript.editText.length}`
+    });
+  }
+
+  const tsBudgetMs = budget.firstTsFormatMs * timeMultiplier;
+  if (sample.typescript.elapsedMs >= tsBudgetMs) {
+    violations.push({
+      budget: `first typescript format < ${tsBudgetMs} ms`,
+      detail: `took ${sample.typescript.elapsedMs.toFixed(0)} ms (no preload)`
+    });
+  }
+
+  if (!sameSet(sample.chunksAfterTypescript, TS_FORMAT_CHUNKS)) {
+    violations.push({
+      budget: `typescript format loads exactly [${TS_FORMAT_CHUNKS.join(', ')}]`,
+      detail: `loaded: ${sample.chunksAfterTypescript.join(', ') || 'none'}`
+    });
+  }
+
+  if (sample.json.editCount !== 1) {
+    violations.push({
+      budget: 'json format produces exactly one edit',
+      detail: `editCount=${sample.json.editCount}`
+    });
+  }
+
+  // jsonc-parser and js-beautify ship inside the host bundle: the JSON family
+  // must cost NO chunk at all.
+  if (!sameSet(sample.chunksAfterJson, sample.chunksAfterTypescript)) {
+    violations.push({
+      budget: 'json format loads no additional chunk',
+      detail:
+        `before: ${sample.chunksAfterTypescript.join(', ') || 'none'}; ` +
+        `after: ${sample.chunksAfterJson.join(', ') || 'none'}`
+    });
+  }
+
+  if (sample.css.editCount !== 1) {
+    violations.push({
+      budget: 'css format produces exactly one edit',
+      detail: `editCount=${sample.css.editCount}`
+    });
+  }
+
+  if (!sameSet(sample.chunksAfterCss, [...sample.chunksAfterJson, CSS_FORMAT_CHUNK])) {
+    violations.push({
+      budget: `css format adds exactly ${CSS_FORMAT_CHUNK}`,
+      detail:
+        `before: ${sample.chunksAfterJson.join(', ') || 'none'}; ` +
+        `after: ${sample.chunksAfterCss.join(', ') || 'none'}`
+    });
+  }
+
+  // The provider only shows a warning toast when it ABORTED (guard rejection,
+  // engine error, failed restore). In this scenario every abort would be a
+  // chunk-loading failure, so any warning at all is a hard failure.
+  if (sample.warnings.length > 0) {
+    violations.push({
+      budget: 'no format aborted (no warning toast)',
+      detail: sample.warnings.join(' | ')
     });
   }
 

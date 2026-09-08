@@ -65,7 +65,9 @@ const EXPECTED_TITLES: Record<string, string> = {
   'tidy.previewFormat': 'Preview Format (Diff)',
   'tidy.openPlayground': 'Open Playground',
   'tidy.reportIssue': 'Report an Issue',
-  'tidy.explainLastFormat': 'Explain Last Format'
+  'tidy.explainLastFormat': 'Explain Last Format',
+  // ADD-14: the session-wide companion of Explain Last Format.
+  'tidy.showFormatHistory': 'Show Format History'
 };
 
 /** The three active-file diagnostic commands gated by enablement, and only them. */
@@ -82,7 +84,7 @@ function findCommand(id: string): CommandContribution {
 }
 
 describe('manifest : command titles are Title Case (ADD-10)', () => {
-  it('contributes exactly the 7 known commands, no more, no less', () => {
+  it('contributes exactly the 8 known commands, no more, no less', () => {
     assert.deepEqual(
       manifest.contributes.commands.map((c) => c.command).sort(),
       Object.keys(EXPECTED_TITLES).sort()
@@ -128,7 +130,19 @@ describe('manifest : enablement clause (ADD-10)', () => {
     }
   });
 
-  it('onboarding, migration and report commands declare NO enablement', () => {
+  it('leaves tidy.showFormatHistory palette-available on any language (ADD-14)', () => {
+    // The history is a SESSION-wide view, not an active-file diagnostic: the
+    // moment you most want it is right after a guard rejection, when the file
+    // you just switched to may be anything (or nothing at all). Gating it on
+    // editorLangId would hide it exactly then. Same reasoning as the playground.
+    assert.equal(
+      findCommand('tidy.showFormatHistory').enablement,
+      undefined,
+      'the history command must not be gated on editorLangId'
+    );
+  });
+
+  it('onboarding, migration, report and history commands declare NO enablement', () => {
     for (const cmd of manifest.contributes.commands) {
       if (ENABLEMENT_GATED.includes(cmd.command)) {
         continue;

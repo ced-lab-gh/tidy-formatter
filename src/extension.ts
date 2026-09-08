@@ -51,11 +51,16 @@ import {
   explainLastFormat
 } from './commands/explainLastFormat';
 import {
+  SHOW_FORMAT_HISTORY_COMMAND_ID,
+  showFormatHistory
+} from './commands/showFormatHistory';
+import {
   STATUS_BAR_MENU_COMMAND_ID,
   showStatusBarMenu
 } from './commands/statusBarMenu';
 import { createTidyStatusBar } from './diagnostics/statusBarHost';
 import { getTidyOutputChannel } from './diagnostics/outputChannel';
+import { sanitizeDetail } from './diagnostics/lastFormat';
 import { detectCompetingFormatters } from './deference/detect';
 import {
   decide,
@@ -63,6 +68,11 @@ import {
   DEFERENCE_SETTING_KEY,
   DEFERENCE_PROMPTED_KEY
 } from './deference/decide';
+import {
+  scheduleChunkPreload,
+  type ChunkPreloadSchedule,
+  type PreloadReport
+} from './chunks/loader';
 import { SUPPORTED_LANG_IDS } from './types';
 
 /**
@@ -157,6 +167,17 @@ export function activate(context: vscode.ExtensionContext): void {
     )
   );
 
+  // Show Format History (ADD-14): chronological QuickPick over the session's
+  // bounded format history; picking an entry writes the full explanation to the
+  // shared output channel. Read-only: no hook, no listener, no setting written;
+  // session RAM only, nothing persisted, nothing sent.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      SHOW_FORMAT_HISTORY_COMMAND_ID,
+      showFormatHistory
+    )
+  );
+
   // Status bar (ADD-05, v0.3.0): a single, purely OBSERVATIONAL StatusBarItem.
   // Passive state of the active file + a short transient result after each
   // attempt. Read-only by construction: its only listeners repaint the item,
@@ -182,6 +203,15 @@ export function activate(context: vscode.ExtensionContext): void {
   // and writes no setting on its own (anti-hijack). Uses a globalState key
   // DISTINCT from the migration prompt so the two never collide.
   void maybeSurfaceDeference(context);
+
+  // Idle chunk preload (ADD-11). Five seconds after activation, warm ONLY the
+  // lazy engine/guard chunks the languages currently on screen can actually
+  // reach, so their first format skips the load cost. This is a plain timer, NOT
+  // an event hook: it observes nothing, writes no setting, never touches
+  // editor.defaultFormatter, and disposing the subscription (deactivate)
+  // cancels it. A preload failure only logs to the Tidy output channel; the
+  // chunk falls back to normal lazy loading on first use.
+  context.subscriptions.push(scheduleIdleChunkPreload());
 }
 
 /**
@@ -257,6 +287,78 @@ async function maybeSurfaceDeference(
   }
 }
 
+/** Delay before the idle preload fires. Not configurable on purpose. */
+const IDLE_PRELOAD_DELAY_MS = 5000;
+
+/**
+ * Schedule the one-shot, LANGUAGE-AWARE idle preload of the engine/guard chunks
+ * (ADD-11) and return the Disposable that cancels it.
+ *
+ * ANTI-HIJACK: this is a bare `setTimeout` (see scheduleChunkPreload), not a
+ * listener. It subscribes to no document/save/focus/change event, reads no user
+ * file, writes no setting, and shows no toast. Disposing before the timer fires
+ * (deactivate, or a reload inside five seconds) leaves ZERO work behind, and the
+ * timer can never fire twice.
+ *
+ * HONESTY: the preload warms only what the languages currently on screen can
+ * reach. A session with nothing but stylesheets open therefore never evaluates
+ * the TypeScript printer, which is exactly what the README promises; everything
+ * else keeps loading on demand at first use.
+ *
+ * The preload never rejects: failures are reported per chunk and logged to the
+ * Tidy output channel only (no telemetry, nothing leaves the machine); the
+ * affected chunk simply loads lazily on first use.
+ */
+function scheduleIdleChunkPreload(): vscode.Disposable {
+  const schedule: ChunkPreloadSchedule = scheduleChunkPreload(
+    IDLE_PRELOAD_DELAY_MS,
+    readOpenLanguageIds,
+    reportPreload
+  );
+  return new vscode.Disposable(() => {
+    schedule.dispose();
+  });
+}
+
+/**
+ * The languages the user currently has on screen, read ONCE when the preload
+ * timer fires.
+ *
+ * This is a single synchronous property read, NOT a subscription: no
+ * onDidChangeVisibleTextEditors, no watcher, nothing registered and nothing
+ * that can fire later. Documents opened after this instant are not preloaded;
+ * they simply load their chunk on first use, which is the normal lazy path.
+ */
+function readOpenLanguageIds(): readonly string[] {
+  return vscode.window.visibleTextEditors.map(
+    (editor) => editor.document.languageId
+  );
+}
+
+/** Log the preload outcome to the local output channel. Nothing leaves the machine. */
+function reportPreload(report: PreloadReport): void {
+  const channel = getTidyOutputChannel();
+  const total = report.loaded.length + report.failed.length;
+  if (total === 0) {
+    channel.appendLine(
+      '[preload] nothing to warm: no open editor needs a lazy engine chunk'
+    );
+    return;
+  }
+  const ready = report.loaded.length > 0 ? ` (${report.loaded.join(', ')})` : '';
+  channel.appendLine(
+    `[preload] ${report.loaded.length}/${total} engine chunks ready in ${report.elapsedMs} ms${ready}`
+  );
+  for (const failure of report.failed) {
+    channel.appendLine(
+      `[preload] ${failure.chunk} failed to preload ` +
+        `(${sanitizeDetail(failure.message)}); it will load on first use`
+    );
+  }
+}
+
 export function deactivate(): void {
-  // No-op: all disposables are owned by context.subscriptions.
+  // No-op: all disposables are owned by context.subscriptions, including the
+  // idle preload schedule, which VS Code disposes here (cancelling the timer if
+  // it has not fired yet).
 }
