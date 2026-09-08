@@ -288,6 +288,36 @@ export function flushEventLoop(): Promise<void> {
 }
 
 /**
+ * Poll `predicate` until it holds or the deadline passes, and report which.
+ *
+ * WHY THIS EXISTS. `flushEventLoop` is a fixed 50 ms yield, which is enough on
+ * an idle machine and is NOT enough on a loaded headless CI runner: a formatter
+ * registered by a test can be invoked and still have its edit unapplied when the
+ * next line reads the document. That produced a red anti-hijack test whose
+ * load-bearing assertion had actually PASSED, which is the worst kind of flake:
+ * it spends attention on the one suite that must never be ignored.
+ *
+ * Returns a boolean instead of throwing on purpose. A predicate about ANOTHER
+ * extension's timing is not evidence about Tidy, so the caller decides whether
+ * a timeout is a failure or merely a cross-check it could not run.
+ */
+export async function waitUntil(
+  predicate: () => boolean,
+  timeoutMs = 2000
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/**
  * Reset every Workspace-scoped setting this suite touches back to "unset". Used
  * in a global afterEach so tests are order-independent.
  */

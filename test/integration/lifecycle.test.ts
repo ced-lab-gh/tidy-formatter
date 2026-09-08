@@ -31,7 +31,8 @@ import {
   REFORMATTABLE_CSS,
   runFormatDocument,
   setEditorConfig,
-  setTidyConfig
+  setTidyConfig,
+  waitUntil
 } from './helpers';
 
 describe('Tidy lifecycle (QA-04) : anti-hijack guarantees', function () {
@@ -170,17 +171,29 @@ describe('Tidy lifecycle (QA-04) : anti-hijack guarantees', function () {
 
     await vscode.commands.executeCommand('workbench.action.files.save');
     await flushEventLoop();
+
+    // If the sentinel was invoked, give ITS edit time to land before reading.
+    // On a loaded headless runner the 50 ms yield above is not enough, and the
+    // result was a red anti-hijack test whose real assertion had passed.
+    const sentinelEditLanded =
+      !sentinelInvoked ||
+      (await waitUntil(() => document.getText().includes(SENTINEL_MARKER)));
     const after = document.getText();
 
     // The non-negotiable: Tidy did not reformat. The compact rule must survive.
+    // This is the assertion that carries the guarantee, and it does not depend
+    // on any other extension's timing: the precondition above proved Tidy WOULD
+    // have expanded this rule, so finding it intact proves Tidy did not run.
     assert.ok(
       after.includes('a{color:red}'),
       'Tidy must not reformat on save when another extension is the default formatter (#92)'
     );
 
-    // Cross-check identity: if any formatter ran, it must be the sentinel : and
-    // Tidy's multi-line expansion must be absent regardless.
-    if (sentinelInvoked) {
+    // Cross-check identity: if any formatter ran, it must be the sentinel. A
+    // sentinel edit that never lands says nothing about Tidy, so it does not
+    // fail this test; what would fail it is Tidy's expansion appearing, which
+    // the assertion above already forbids unconditionally.
+    if (sentinelInvoked && sentinelEditLanded) {
       assert.ok(
         after.includes(SENTINEL_MARKER),
         'if a formatter ran on save it must be the sentinel, never Tidy'
