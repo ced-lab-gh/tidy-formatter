@@ -12,6 +12,36 @@ import type { ResolvedOptions } from '../types';
 const EOL_REGEX = /\r\n|\r|\n/g;
 const TRAILING_WS_PER_LINE = /[^\S\r\n]+(?=\r\n|\r|\n|$)/g;
 
+/** Stateless (no /g): safe to share across calls. */
+const HAS_CRLF = /\r\n/;
+/** Any CR. Only ever consulted AFTER HAS_CRLF said no, so a match means BARE CR. */
+const HAS_CR = /\r/;
+
+/**
+ * The line ending to APPEND to `text`: what the user explicitly asked for, and
+ * otherwise the one the text already uses.
+ *
+ * The third answer is the one that was missing. Bare-CR (classic Mac) documents
+ * still turn up, and NOTHING in this pipeline normalises them: with `files.eol`
+ * unset or "auto" the EOL pass at the end of postProcess is a no-op, so such a
+ * document keeps its CRs from end to end. Deciding the terminator from
+ * `/\r\n/` alone therefore answered LF for them and glued a lone LF onto a
+ * CR-only file. That is exactly defect C-04's shape : a whitespace-only
+ * difference, so the guard says "equivalent" and the MIXED result is WRITTEN.
+ * Asking CRLF first and bare CR second makes the appended byte match the
+ * document in all three styles.
+ */
+function terminatorFor(
+  text: string,
+  endOfLine: ResolvedOptions['endOfLine']
+): string {
+  if (endOfLine === 'crlf') return '\r\n';
+  if (endOfLine === 'lf') return '\n';
+  if (HAS_CRLF.test(text)) return '\r\n';
+  if (HAS_CR.test(text)) return '\r';
+  return '\n';
+}
+
 /**
  * Normalise line endings, optionally strip per-line trailing whitespace, and
  * apply the final-newline policy. Pure string transform: no mutation of inputs.
@@ -39,16 +69,9 @@ export function postProcess(
 
   if (resolved.insertFinalNewline === true) {
     result = result.replace(/[\r\n]+$/, '');
-    // Append the DOCUMENT's EOL, never a hard-coded LF.
-    const eol =
-      resolved.endOfLine === 'crlf'
-        ? '\r\n'
-        : resolved.endOfLine === 'lf'
-          ? '\n'
-          : /\r\n/.test(result)
-            ? '\r\n'
-            : '\n';
-    result += eol;
+    // Append the DOCUMENT's own EOL, never a hard-coded LF, and never an LF for
+    // a bare-CR document either (terminatorFor).
+    result += terminatorFor(result, resolved.endOfLine);
   } else if (resolved.insertFinalNewline === false) {
     result = result.replace(/[\r\n]+$/, '');
   } else {
@@ -56,8 +79,7 @@ export function postProcess(
     // never adds nor removes the file's last byte on its own.
     const hasNewline = /[\r\n]$/.test(result);
     if (originalEndsWithNewline && !hasNewline) {
-      result +=
-        resolved.endOfLine === 'crlf' || /\r\n/.test(result) ? '\r\n' : '\n';
+      result += terminatorFor(result, resolved.endOfLine);
     } else if (!originalEndsWithNewline && hasNewline) {
       result = result.replace(/[\r\n]+$/, '');
     }

@@ -80,15 +80,36 @@ export interface MaskResult {
 }
 
 /**
+ * The recognisable body of the i-th placeholder, without its comment wrapper.
+ * This is the string the COLLISION pre-flight looks for: refusing to mask as
+ * soon as the bare body occurs anywhere is stricter than looking for the wrapped
+ * token, and stricter is the safe direction (we decline to protect rather than
+ * risk a wrong restore, and the caller says so).
+ */
+function placeholderBody(index: number): string {
+  return `__TIDY_IGNORE_PLACEHOLDER_${index}__`;
+}
+
+/**
  * Build a placeholder token for the i-th protected span. The token is:
- *   - a valid bare identifier in every language we format (letters + digits +
- *     underscore), so a masked JS/TS/CSS/HTML document still tends to parse,
- *     keeping the engine happy in the common case;
+ *   - SHAPED LIKE A BLOCK COMMENT, so it is a legal construct and not a stray
+ *     identifier in every language this mask serves (css/scss/less, javascript,
+ *     json/jsonc via jsonc-parser, and plain text inside html);
  *   - highly unlikely to appear in real source, lowering collision odds;
  *   - stable and unique per index so restore can map it back deterministically.
+ *
+ * WHY A COMMENT (v0.4.1, M3-2). The old bare identifier
+ * `__TIDY_IGNORE_PLACEHOLDER_0__` is not valid CSS anywhere a declaration or a
+ * rule is expected, so the ADD-01 second-chance postcss format threw
+ * "CssSyntaxError: Unknown word" whenever the region was the last thing in the
+ * file, the only thing in it, inside a declaration block, or a second region at
+ * end of file. The primary engine had already been rejected by the guard in
+ * those cases, so the rescue path was the user's last chance and it turned the
+ * format into a silent no-op. A `/* … *\/` token parses in all four positions
+ * and survives js-beautify and postcss alike.
  */
 function tokenFor(index: number): string {
-  return `__TIDY_IGNORE_PLACEHOLDER_${index}__`;
+  return `/*${placeholderBody(index)}*/`;
 }
 
 /** A space or a tab: the whitespace an engine uses to indent or to glue. */
@@ -163,11 +184,14 @@ export function applyMask(
     previousEnd = range.end;
   }
 
-  // Pre-flight collision check: none of the tokens we will use may already exist.
+  // Pre-flight collision check: none of the tokens we will use may already
+  // exist. The check is on the bare BODY, so a document that merely mentions
+  // `__TIDY_IGNORE_PLACEHOLDER_0__` (in a string, in prose) is enough to make us
+  // decline, whether or not it wears the comment wrapper.
   const restorations: Restoration[] = [];
   for (let i = 0; i < ranges.length; i += 1) {
     const token = tokenFor(i);
-    if (input.includes(token)) {
+    if (input.includes(placeholderBody(i))) {
       return undefined; // collision -> refuse to mask (caller stays safe).
     }
     const { start, end } = ranges[i];

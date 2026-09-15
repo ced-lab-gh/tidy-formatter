@@ -4,7 +4,11 @@
 // preserves the modern-syntax tokens the incumbent corrupted AND the output
 // round-trips through the safety guard as equivalent.
 import assert from 'node:assert/strict';
-import { pickEngine, dispatchFormat } from '../../../src/engine/dispatcher';
+import {
+  pickEngine,
+  dispatchFormat,
+  resolveEngineIdForSource
+} from '../../../src/engine/dispatcher';
 import { guard } from '../../../src/safety/guard';
 import { preserveFixtures, routingFixtures } from '../../fixtures/engineFixtures';
 import { resolved } from '../../helpers/options';
@@ -50,6 +54,60 @@ describe('engine/dispatcher : JSX re-routing for plain .js (SPEC §4 note)', () 
     const out = await dispatchFormat({ languageId: 'javascript', code, options: resolved() });
     assert.equal(guard.check('javascript', code, out).equivalent, true);
   });
+});
+
+// M3-5 (v0.4.1): the cheap JSX pre-filter only accepted a LETTER after `<`, so
+// a component whose name starts with `_` or `$` never reached the confirming
+// parse. The file stayed on js-beautify, which printed
+// "const a = < _Foo bar = {\n  x\n}\n/>;", and the guard then rejected the whole
+// format with "JSX tag boundaries were altered": a FALSE REJECT on valid code,
+// surfaced to the user as a warning toast and no format at all.
+describe('engine/dispatcher : JSX names may start with _ or $ (M3-5)', () => {
+  for (const [label, code] of [
+    ['underscore component', 'const a = <_Foo bar={x} />;'],
+    ['dollar component', 'const a = <$Bar bar={x} />;'],
+    // The control: a lower-case intrinsic tag must keep working exactly as before.
+    ['lower-case intrinsic tag', 'const a = <div bar={x} />;']
+  ] as const) {
+    it(`${label}: routes to prettier and the guard accepts the output`, async () => {
+      assert.equal(
+        resolveEngineIdForSource('javascript', code),
+        'prettier',
+        `${label} must reach the real-parser engine`
+      );
+      const out = await dispatchFormat({
+        languageId: 'javascript',
+        code,
+        options: resolved()
+      });
+      assert.ok(
+        !/<\s+[A-Za-z_$]/.test(out),
+        `tag-open must not be split, got: ${JSON.stringify(out)}`
+      );
+      const verdict = guard.check('javascript', code, out);
+      assert.equal(
+        verdict.equivalent,
+        true,
+        `guard rejected a valid format: ${JSON.stringify(verdict)}`
+      );
+    });
+  }
+
+  // The widened class must not drag anything NEW onto prettier: the confirming
+  // parse is still what decides, so `<_` / `<$` that are not JSX stay put.
+  for (const [label, code] of [
+    ['plain assignment', 'const x = 1;'],
+    ['comparison against an _ identifier', 'const r = a <_b;'],
+    ['comparison against a $ identifier', 'const r = a <$b;'],
+    ['left shift onto an _ identifier', 'const r = a <<_b;'],
+    ['a JSX-looking string literal', 'const s = "<_Foo/>";'],
+    ['a JSX-looking line comment', '// <$Bar/>\nconst s = 1;'],
+    ['generic-looking comparison chain', 'const r = (a < b) > c;']
+  ] as const) {
+    it(`${label}: still routes to js-beautify`, () => {
+      assert.equal(resolveEngineIdForSource('javascript', code), 'js-beautify');
+    });
+  }
 });
 
 describe('engine/dispatcher : modern-syntax preservation + guard round-trip', () => {

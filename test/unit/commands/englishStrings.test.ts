@@ -31,7 +31,11 @@ const SCANNED_SOURCES: readonly string[] = [
   // "Show Effective Configuration", so its strings are user-facing too.
   'src/config/prettierrc.ts',
   // ADD-14: every string it builds lands in a QuickPick or the output channel.
-  'src/commands/showFormatHistory.ts'
+  'src/commands/showFormatHistory.ts',
+  // v0.4.1 (C-11): the shared defaultFormatter write now composes the failure
+  // detail the "could not save the default formatter" toast shows verbatim, so
+  // its strings are user-facing too.
+  'src/commands/setDefaultFormatter.ts'
 ];
 
 /**

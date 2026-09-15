@@ -24,7 +24,7 @@ import {
   UNHONOURED_IGNORE_MASK_UNAVAILABLE,
   type MaskContext
 } from '../../../src/engine/maskPlan';
-import { dispatchFormat } from '../../../src/engine/dispatcher';
+import { dispatchCssFallback, dispatchFormat } from '../../../src/engine/dispatcher';
 import { scanMarkers } from '../../../src/ignore/markers';
 import { guard } from '../../../src/safety/guard';
 import { resolved } from '../../helpers/options';
@@ -1097,10 +1097,20 @@ function islandSpans(
 
 describe('engine/maskPlan : template islands are protected in EVERY scope', () => {
   it('THE FINDING: a line-aligned selection used to destroy the code inside an island', async () => {
-    // Selecting lines 1..3 cuts the `<% ... %>` island open. Unmasked, the
-    // engine joined `out.write(total);` onto the `// total is in cents` line,
-    // which puts the statement INSIDE the comment: the template stops emitting
-    // anything. The guard said EQUIVALENT and the edit was applied.
+    // A line-aligned selection that STARTS inside the `<% ... %>` island cuts it
+    // open. Unmasked, the engine re-indents the island's own lines: the closing
+    // `  %>` comes back as `    %>`, so the template's delimiter no longer lines
+    // up with the code it closes. The guard says EQUIVALENT - an island is one
+    // HTML text node, and it normalises that node's whitespace - so the edit is
+    // applied.
+    //
+    // The fixture used to cut at `    out.write` and rely on the range path
+    // TRIMMING the slice's trailing line break, which glued the statement onto
+    // the comment line. v0.4.1 made the slice's own edge whitespace survive
+    // verbatim (defects G3-4 / M3-3), so that cut is no longer corrupted at all
+    // and could no longer establish the precondition. The hazard is unchanged;
+    // only the cut that exposes it moved inside the slice, where the edge rule
+    // has nothing to say.
     const doc =
       '<div>\n' +
       '  <%\n' +
@@ -1110,10 +1120,10 @@ describe('engine/maskPlan : template islands are protected in EVERY scope', () =
       '  <p>tail</p>\n' +
       '</div>\n';
     const island = '<%\n    // total is in cents\n    out.write(total);\n  %>';
-    // Line-aligned, and both boundaries strictly inside the island: exactly the
+    // Line-aligned, opening boundary strictly inside the island: exactly the
     // range shape editor.formatOnSaveMode "modifications" hands the provider.
-    const start = doc.indexOf('  <%');
-    const end = doc.indexOf('    out.write');
+    const start = doc.indexOf('    // total is in cents');
+    const end = doc.indexOf('</div>');
     const input = doc.slice(start, end);
 
     // 1. The hazard is real: unmasked, the engine breaks the code AND the guard
@@ -1130,8 +1140,8 @@ describe('engine/maskPlan : template islands are protected in EVERY scope', () =
       'precondition: the bare engine really does rewrite the island interior'
     );
     assert.ok(
-      brokenDoc.includes('// total is in cents    out.write(total);'),
-      `precondition: the statement lands inside the comment, got ${JSON.stringify(brokenDoc)}`
+      brokenDoc.includes('    %>'),
+      `precondition: the island's closing delimiter is re-indented, got ${JSON.stringify(brokenDoc)}`
     );
     assert.equal(
       guard.check('html', doc, brokenDoc).equivalent,
@@ -1381,5 +1391,343 @@ describe('engine/maskPlan : template islands are protected in EVERY scope', () =
       'plain ASCII English only'
     );
     assert.ok(TEMPLATE_ISLAND_SPANS_UNUSABLE_REASON.length < 200);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* v0.4.1 M3-4 : an apostrophe must not cost the user their protection         */
+/* -------------------------------------------------------------------------- */
+
+describe('engine/maskPlan : an apostrophe in HTML text never disarms a region', () => {
+  const doc = [
+    '<div>',
+    "  <p>don't touch the block below</p>",
+    '  <!-- tidy-ignore-start -->',
+    '        <pre>KEEP   ME</pre>',
+    '  <!-- tidy-ignore-end -->',
+    '  <p>x</p>',
+    '</div>',
+    ''
+  ].join('\n');
+  const region = doc.slice(
+    doc.indexOf('  <!-- tidy-ignore-start -->'),
+    doc.indexOf('-end -->') + '-end -->'.length
+  );
+
+  it('THE FINDING: v0.4.0 rewrote the protected bytes with no mask and no notice', async () => {
+    // The exact v0.4.0 state: the pseudo-string opened at the apostrophe ate the
+    // whole comment scan, so the provider handed the plan an EMPTY range list.
+    // Reproduced by passing that empty scan, which is what the scanner returned.
+    const plan = buildMaskPlan('html', doc, 'document', {
+      markerScan: { ignoreFile: false, protectedRanges: [] },
+      inputOffset: 0,
+      documentText: doc
+    });
+    assert.equal(plan.mask, undefined, 'no ranges means no mask');
+    assert.equal(
+      plan.unhonouredIgnore,
+      undefined,
+      'and no notice either: the user was never told'
+    );
+    const raw = await dispatchFormat({
+      languageId: 'html',
+      code: engineTextFor(doc, plan.mask),
+      options: resolved()
+    });
+    assert.ok(!raw.includes(region), 'the engine really does re-indent the marked lines');
+    assert.equal(
+      guard.check('html', doc, raw).equivalent,
+      true,
+      'and the guard accepts it, so the edit reaches the file'
+    );
+  });
+
+  it('the scan now finds the region, so the protected bytes come back verbatim', async () => {
+    const scan = scanMarkers(doc, 'html');
+    assert.equal(scan.protectedRanges.length, 1, 'the apostrophe no longer hides the markers');
+    const result = await formatThroughPlan('html', doc, 'document', documentContext('html', doc));
+    assert.equal(result.abortReason, undefined);
+    assert.ok(result.text !== undefined);
+    assert.ok(
+      result.text.includes(region),
+      `the marked span must survive byte for byte, got ${JSON.stringify(result.text)}`
+    );
+    assert.equal(guard.check('html', doc, result.text).equivalent, true);
+  });
+
+  it('protection does not depend on apostrophe parity, in either scope', async () => {
+    for (const count of [0, 1, 2, 3]) {
+      const text = doc.replace("don't", `it${"'".repeat(count)}s`);
+      const marked = text.slice(
+        text.indexOf('  <!-- tidy-ignore-start -->'),
+        text.indexOf('-end -->') + '-end -->'.length
+      );
+      assert.equal(
+        scanMarkers(text, 'html').protectedRanges.length,
+        1,
+        `count=${count}: the region must be found`
+      );
+      const whole = await formatThroughPlan(
+        'html',
+        text,
+        'document',
+        documentContext('html', text)
+      );
+      assert.ok(whole.text?.includes(marked), `count=${count}: document scope`);
+
+      // Same bytes, selection scope: the verdict must not depend on it.
+      const start = text.indexOf('  <!-- tidy-ignore-start -->');
+      const fragment = text.slice(start);
+      const selection = await formatThroughPlan(
+        'html',
+        fragment,
+        'selection',
+        selectionContext('html', text, start)
+      );
+      assert.ok(selection.text?.includes(marked), `count=${count}: selection scope`);
+    }
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* v0.4.1 M3-2 : a masked region must not cost the CSS family its rescue path   */
+/* -------------------------------------------------------------------------- */
+
+describe('engine/maskPlan : the ADD-01 second chance survives a masked region', () => {
+  // `.m(@c:red){color:@c}.a{.m()}` is the corpus case the js-beautify candidate
+  // is REJECTED on and the postcss fallback rescues (test/fixtures/css-sass,
+  // less-mixin-default.less). With a tidy-ignore region in the same file, the
+  // old bare-identifier placeholder made postcss throw "Unknown word" and the
+  // whole format became a silent no-op: the primary was already refused, so the
+  // second chance WAS the user's last one.
+  const body = '.m(@c:red){color:@c}.a{.m()}';
+  const region = [
+    '/* tidy-ignore-start */',
+    '   .keep  {  color : red  }',
+    '/* tidy-ignore-end */'
+  ].join('\n');
+  const marked = '   .keep  {  color : red  }';
+
+  const positions: ReadonlyArray<readonly [string, string]> = [
+    ['above the rule', `${region}\n${body}\n`],
+    ['LAST in the file', `${body}\n${region}\n`],
+    [
+      'INSIDE a declaration block',
+      `.a {\n/* tidy-ignore-start */\n   color : red ;\n/* tidy-ignore-end */\n}\n${body}\n`
+    ],
+    ['second region at end of file', `${region}\n${body}\n${region.replace('.keep', '.keep2')}\n`]
+  ];
+
+  /** The provider's pipeline: primary -> guard -> postcss second chance -> guard. */
+  async function pipeline(doc: string) {
+    const plan = buildMaskPlan('less', doc, 'document', documentContext('less', doc));
+    assert.equal(plan.abortReason, undefined, 'a plain region must not abort');
+    const engineInput = engineTextFor(doc, plan.mask);
+    const restoreOf = (raw: string) =>
+      plan.mask ? plan.mask.restore(raw) : { ok: true as const, text: raw };
+
+    const primary = restoreOf(
+      await dispatchFormat({ languageId: 'less', code: engineInput, options: resolved() })
+    );
+    if (primary.ok && guard.check('less', doc, primary.text).equivalent) {
+      return { status: 'applied-jsbeautify' as const, text: primary.text };
+    }
+    const second = restoreOf(
+      await dispatchCssFallback({ languageId: 'less', code: engineInput, options: resolved() })
+    );
+    if (!second.ok) {
+      return { status: 'restore-failed' as const, text: undefined };
+    }
+    return guard.check('less', doc, second.text).equivalent
+      ? { status: 'applied-fallback' as const, text: second.text }
+      : { status: 'guard-rejected' as const, text: undefined };
+  }
+
+  for (const [name, doc] of positions) {
+    it(`rescues a file whose region sits ${name}`, async () => {
+      // The precondition that makes this test meaningful: the primary engine is
+      // really refused here, so only the second chance can produce an edit.
+      const plan = buildMaskPlan('less', doc, 'document', documentContext('less', doc));
+      const primaryRaw = await dispatchFormat({
+        languageId: 'less',
+        code: engineTextFor(doc, plan.mask),
+        options: resolved()
+      });
+      const primary = plan.mask ? plan.mask.restore(primaryRaw) : { ok: true, text: primaryRaw };
+      assert.equal(
+        primary.ok && guard.check('less', doc, primary.text).equivalent,
+        false,
+        'precondition: the js-beautify candidate must be rejected here'
+      );
+
+      const result = await pipeline(doc);
+      assert.equal(result.status, 'applied-fallback', 'the second chance must produce an edit');
+      assert.ok(
+        result.text?.includes(marked) || result.text?.includes('   color : red ;'),
+        `the protected bytes must come back verbatim, got ${JSON.stringify(result.text)}`
+      );
+    });
+  }
+
+  it('the fallback engine never throws on the masked text, in any position', async () => {
+    for (const [name, doc] of positions) {
+      const plan = buildMaskPlan('less', doc, 'document', documentContext('less', doc));
+      await assert.doesNotReject(
+        dispatchCssFallback({
+          languageId: 'less',
+          code: engineTextFor(doc, plan.mask),
+          options: resolved()
+        }),
+        `postcss must parse the masked text (${name})`
+      );
+    }
+  });
+
+  it('a region that is the ONLY content of a css file also parses', async () => {
+    const doc = `${region}\n`;
+    const plan = buildMaskPlan('css', doc, 'document', documentContext('css', doc));
+    await assert.doesNotReject(
+      dispatchCssFallback({
+        languageId: 'css',
+        code: engineTextFor(doc, plan.mask),
+        options: resolved()
+      })
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* EngineMask.protectedSpans : WHICH bytes of the input come back verbatim     */
+/* -------------------------------------------------------------------------- */
+//
+// "These bytes were restored verbatim" was a fact only this module knew, and the
+// slice-edge rule downstream had to guess at it: with an explicit files.eol it
+// normalised every line ending of a restored edge run, INCLUDING the ones inside
+// an ignore region or a template island, which README and CHANGELOG both promise
+// come back byte for byte. It changed no meaning, so the guard accepted it and
+// nothing else could catch it. The plan now states the fact instead.
+//
+// The coordinate space is the INPUT's own, never the engine text's: the mask
+// makes the engine text a different length, and the edge rule works on the
+// caller's slice.
+
+describe('engine/maskPlan : the spans the mask restores verbatim', () => {
+  /** The bytes a span points at, in the input it was measured on. */
+  function textOf(input: string, span: { start: number; end: number }): string {
+    return input.slice(span.start, span.end);
+  }
+
+  it('a css ignore region is reported in INPUT coordinates', () => {
+    const input =
+      '/* tidy-ignore-start */\n.keep{color:red}\n/* tidy-ignore-end */\n.b{color:blue}';
+    const plan = buildMaskPlan('css', input, 'document', documentContext('css', input));
+
+    assert.ok(plan.mask, 'a region mask was expected');
+    assert.equal(plan.mask.protectedSpans.length, 1);
+    assert.equal(
+      textOf(input, plan.mask.protectedSpans[0]),
+      '/* tidy-ignore-start */\n.keep{color:red}\n/* tidy-ignore-end */'
+    );
+  });
+
+  it('a SELECTION gets the same span, clipped and in the slice own coordinates', () => {
+    // The marker opens ABOVE the selection: the region still protects the part
+    // of it that reaches inside, and the span says exactly which part.
+    const document =
+      '/* tidy-ignore-start */\n.keep{color:red}\n/* tidy-ignore-end */\n.b{color:blue}';
+    const startOffset = 24; // the first byte of ".keep{color:red}"
+    const input = document.slice(startOffset);
+    const plan = buildMaskPlan(
+      'css',
+      input,
+      'selection',
+      selectionContext('css', document, startOffset)
+    );
+
+    assert.ok(plan.mask, 'a selection must be protected like a document');
+    assert.equal(plan.mask.protectedSpans.length, 1);
+    assert.equal(plan.mask.protectedSpans[0].start, 0, 'clipped to the slice head');
+    assert.equal(
+      textOf(input, plan.mask.protectedSpans[0]),
+      '.keep{color:red}\n/* tidy-ignore-end */'
+    );
+  });
+
+  it('an html template island is reported too', () => {
+    const input = '<div>\n<% if (x) {\n  go();\n} %>\n</div>';
+    const plan = buildMaskPlan('html', input, 'document', documentContext('html', input));
+
+    assert.ok(plan.mask, 'an island mask was expected');
+    assert.equal(plan.mask.protectedSpans.length, 1);
+    assert.equal(textOf(input, plan.mask.protectedSpans[0]), '<% if (x) {\n  go();\n} %>');
+  });
+
+  it('head front matter is reported, like the layer it rides on', () => {
+    const input = '---\ntitle: x\n---\n<p>a</p>';
+    const plan = buildMaskPlan('html', input, 'document', documentContext('html', input));
+
+    assert.ok(plan.mask, 'front matter must be masked');
+    assert.equal(plan.mask.protectedSpans.length, 1);
+    assert.ok(
+      textOf(input, plan.mask.protectedSpans[0]).includes('title: x'),
+      `the front matter block must be covered, got ${JSON.stringify(
+        textOf(input, plan.mask.protectedSpans[0])
+      )}`
+    );
+  });
+
+  it('both layers at once come back as ONE sorted, disjoint list', () => {
+    const input =
+      '<div>\n<!-- tidy-ignore-start -->\n  <b>  k  </b>\n<!-- tidy-ignore-end -->\n<% if (x) {\n  go();\n} %>\n</div>';
+    const plan = buildMaskPlan('html', input, 'document', documentContext('html', input));
+
+    assert.ok(plan.mask, 'both layers must build a mask');
+    const spans = plan.mask.protectedSpans;
+    assert.equal(spans.length, 2, `got ${JSON.stringify(spans)}`);
+    assert.ok(
+      textOf(input, spans[0]).startsWith('<!-- tidy-ignore-start -->'),
+      'the region comes first'
+    );
+    assert.equal(textOf(input, spans[1]), '<% if (x) {\n  go();\n} %>');
+    for (let i = 1; i < spans.length; i += 1) {
+      assert.ok(
+        spans[i].start >= spans[i - 1].end,
+        `spans must be sorted and disjoint: ${JSON.stringify(spans)}`
+      );
+    }
+  });
+
+  it('an island INSIDE a region is one merged span, never two nested ones', () => {
+    const input =
+      '<div>\n<!-- tidy-ignore-start -->\n<% keep() %>\n<!-- tidy-ignore-end -->\n</div>';
+    const plan = buildMaskPlan('html', input, 'document', documentContext('html', input));
+
+    assert.ok(plan.mask);
+    assert.equal(plan.mask.protectedSpans.length, 1, 'one span, not a nest');
+    assert.ok(textOf(input, plan.mask.protectedSpans[0]).includes('<% keep() %>'));
+  });
+
+  it('every reported span survives a REAL format byte for byte', async () => {
+    const input =
+      '<div>\n<!-- tidy-ignore-start -->\n  <b>  k  </b>\n<!-- tidy-ignore-end -->\n<% if (x) {\n  go();\n} %>\n</div>';
+    const context = documentContext('html', input);
+    const plan = buildMaskPlan('html', input, 'document', context);
+    assert.ok(plan.mask);
+
+    const result = await formatThroughPlan('html', input, 'document', context);
+
+    for (const span of plan.mask.protectedSpans) {
+      assert.ok(
+        result.text?.includes(textOf(input, span)),
+        `a reported span was not restored verbatim: ${JSON.stringify(
+          textOf(input, span)
+        )}`
+      );
+    }
+  });
+
+  it('no mask means nothing was protected, so there is nothing to report', () => {
+    const plan = buildMaskPlan('html', '<div><p>x</p></div>', 'document');
+    assert.equal(plan.mask, undefined);
   });
 });

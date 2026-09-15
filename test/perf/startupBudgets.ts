@@ -181,9 +181,10 @@ export function collectStartupViolations(
 // user as "Tidy refuses to format anything" with a fully green test suite.
 //
 // test/perf/activationChild.cjs therefore requires the real dist/extension.js
-// behind a FUNCTIONAL vscode stub, calls activate(), and drives three real
-// formats through the registered document provider. The rules below are pure so
-// every one of them is unit-tested without a built dist/.
+// behind a FUNCTIONAL vscode stub, calls activate(), and drives four real
+// formats through the registered document provider - one per chunk family
+// (ts, css, html) plus json, which must cost no chunk at all. The rules below
+// are pure so every one of them is unit-tested without a built dist/.
 
 export interface FormatProbe {
   readonly elapsedMs: number;
@@ -202,9 +203,11 @@ export interface ActivationSample {
   readonly chunksAfterTypescript: readonly string[];
   readonly chunksAfterJson: readonly string[];
   readonly chunksAfterCss: readonly string[];
+  readonly chunksAfterHtml: readonly string[];
   readonly typescript: FormatProbe;
   readonly json: FormatProbe;
   readonly css: FormatProbe;
+  readonly html: FormatProbe;
   readonly warnings: readonly string[];
 }
 
@@ -232,6 +235,22 @@ export const TS_FORMAT_CHUNKS: readonly string[] = [
 
 /** The one chunk a CSS format adds on top of whatever is already loaded. */
 export const CSS_FORMAT_CHUNK = 'chunk-guard-css.js';
+
+/**
+ * The one chunk an HTML format adds on top of whatever is already loaded.
+ *
+ * This rule closes a real blind spot. Until it existed, NOTHING asserted that
+ * formatting HTML reaches chunk-guard-html: the integration tier
+ * (test/integration/lazy-chunks.test.ts) only asserts that the text changed,
+ * which a parse5-less path could satisfy, and this harness asserted chunk sets
+ * for ts, json and css while never naming html at all. That is precisely how
+ * the lazy/first.html fixture was able to drift to the formatter's own fixed
+ * point and stop loading the chunk without a single gate turning red. Naming
+ * the chunk here makes the same silent drift impossible: the delta is measured
+ * against the PACKAGED bundle, where a mis-emitted runtime require is the only
+ * place this boundary can actually break.
+ */
+export const HTML_FORMAT_CHUNK = 'chunk-guard-html.js';
 
 function sameSet(actual: readonly string[], expected: readonly string[]): boolean {
   if (actual.length !== expected.length) {
@@ -355,6 +374,28 @@ export function collectActivationViolations(
       detail:
         `before: ${sample.chunksAfterJson.join(', ') || 'none'}; ` +
         `after: ${sample.chunksAfterCss.join(', ') || 'none'}`
+    });
+  }
+
+  if (sample.html.editCount !== 1 || sample.html.editText === '') {
+    violations.push({
+      budget: 'html format produces exactly one edit',
+      detail:
+        `editCount=${sample.html.editCount}, ` +
+        `editText length=${sample.html.editText.length}`
+    });
+  }
+
+  // The assertion the html family never had: the parse5 guard chunk must be
+  // reached, and nothing else may come with it. An input that the formatter
+  // leaves untouched short-circuits before the guard, loads no chunk, and now
+  // fails here instead of passing silently.
+  if (!sameSet(sample.chunksAfterHtml, [...sample.chunksAfterCss, HTML_FORMAT_CHUNK])) {
+    violations.push({
+      budget: `html format adds exactly ${HTML_FORMAT_CHUNK}`,
+      detail:
+        `before: ${sample.chunksAfterCss.join(', ') || 'none'}; ` +
+        `after: ${sample.chunksAfterHtml.join(', ') || 'none'}`
     });
   }
 

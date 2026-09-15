@@ -14,8 +14,26 @@ import { resolved } from '../../helpers/options';
 // with the project defaults (tabSize 2, spaces). Hard-coded on purpose so a
 // silent behaviour change in the chunk boundary cannot be absorbed by
 // recomputing the expectation from the same code path under test.
+//
+// BASELINE MOVED IN v0.4.1, AND NOT BY THE CHUNK BOUNDARY. This input carries no
+// final newline, and the expectation used to end in one, because the Prettier
+// path returned prettier's output untouched and prettier emits a trailing
+// newline unconditionally. The path now finishes through the SHARED whitespace
+// pass (src/engine/postProcess.ts), whose no-opinion branch restores the INPUT's
+// own final-newline state: no opinion was expressed here, the input ends without
+// a newline, so the output does too. The js-beautify family and the Prettier CSS
+// fallback have always behaved this way; this is the TS/JSX path joining them.
+//
+// The property this suite exists for is untouched: eager and lazy still print
+// the same bytes. TS_INPUT_TRAILING below pins that on a document whose final
+// newline the policy does not touch AT ALL, so the two fixtures together still
+// catch a chunk-boundary drift even if someone later argues about this one.
 const TS_INPUT = 'const  a = {b:1,c:2}';
-const TS_EXPECTED = 'const a = { b: 1, c: 2 };\n';
+const TS_EXPECTED = 'const a = { b: 1, c: 2 };';
+
+/** Same source, already ending in a newline: identical before and after v0.4.1. */
+const TS_INPUT_TRAILING = 'const  a = {b:1,c:2}\n';
+const TS_EXPECTED_TRAILING = 'const a = { b: 1, c: 2 };\n';
 
 describe('engine/prettierLazy : lazy output equals the eager baseline (ADD-11)', () => {
   beforeEach(() => {
@@ -44,6 +62,20 @@ describe('engine/prettierLazy : lazy output equals the eager baseline (ADD-11)',
       options: resolved()
     });
     assert.equal(second, TS_EXPECTED);
+  });
+
+  it('the same baseline on a document that already ends in a newline', async () => {
+    // The fixture the v0.4.1 whitespace change cannot move: this expectation is
+    // byte-for-byte the pre-ADD-11 one AND the pre-v0.4.1 one, so it pins the
+    // chunk boundary on its own.
+    const engine = new PrettierEngine();
+    const out = await engine.format({
+      languageId: 'typescript',
+      code: TS_INPUT_TRAILING,
+      options: resolved()
+    });
+    assert.equal(out, TS_EXPECTED_TRAILING);
+    assert.equal(__isChunkLoadedForTests('chunk-prettier'), true);
   });
 
   it('the tsx path uses the same chunk and keeps JSX intact', async () => {

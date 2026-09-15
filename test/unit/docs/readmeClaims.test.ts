@@ -32,6 +32,7 @@ import {
 } from '../../../src/diagnostics/lastFormat';
 import { evaluateApplyGate } from '../../../src/commands/previewFormat';
 import { OPTION_CATALOG } from '../../../src/config/optionCatalog';
+import { resolveOptions } from '../../../src/config/resolver';
 import {
   dispatchFormat,
   resolveEngineIdForSource
@@ -2503,5 +2504,108 @@ describe('README : the consent flow prose matches useAsFormatter as it stands', 
       );
     }
     assert.ok(!README_FLAT.includes('*Do nothing*'));
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The ONE documented deviation from the layer order (C-15, v0.4.1)            */
+/* -------------------------------------------------------------------------- */
+
+describe('README : the line-width deviation is documented, not denied', () => {
+  // An 88-character line: it fits under a width of 120 and not under 40, so the
+  // shape of the output says which width actually reached the printer.
+  const LONG =
+    'const aVeryLongVariableName = someFunctionCall(argumentOne, argumentTwo, argumentThree);\n';
+
+  async function widthUsed(
+    layers: { source: string; values: Record<string, unknown> }[]
+  ): Promise<'wide' | 'narrow'> {
+    const options = resolveOptions({ languageId: 'typescript', layers });
+    const out = await dispatchFormat({
+      languageId: 'typescript',
+      code: LONG,
+      options
+    });
+    return out.split('\n').length > 2 ? 'narrow' : 'wide';
+  }
+
+  it('a width from a HIGHER layer really does lose to tidy.prettier.printWidth', async () => {
+    // Control: the shared width alone governs, so the assertion below is not
+    // measuring prettier's default.
+    assert.equal(
+      await widthUsed([
+        { source: '.editorconfig', values: { wrap_line_length: 120 } }
+      ]),
+      'wide',
+      'a 120 width leaves the 88-character line alone'
+    );
+    // The deviation: .editorconfig is layer 3 and plain VS Code settings are
+    // layer 2, yet printWidth wins, because prettier.ts assigns printWidth from
+    // wrap_line_length and then overwrites it from engineOptions.prettier.
+    assert.equal(
+      await widthUsed([
+        { source: 'VS Code', values: { 'prettier.printWidth': 40 } },
+        { source: '.editorconfig', values: { wrap_line_length: 120 } }
+      ]),
+      'narrow',
+      'tidy.prettier.printWidth beats .editorconfig max_line_length'
+    );
+    // And it beats the layer the README calls the last word, too.
+    assert.equal(
+      await widthUsed([
+        { source: 'VS Code', values: { 'prettier.printWidth': 40 } },
+        { source: '.soukformatrc[typescript]', values: { wrap_line_length: 120 } }
+      ]),
+      'narrow',
+      'tidy.prettier.printWidth beats a .soukformatrc wrap_line_length'
+    );
+  });
+
+  it('the same key in a higher layer still wins, which is the documented workaround', async () => {
+    assert.equal(
+      await widthUsed([
+        { source: 'VS Code', values: { 'prettier.printWidth': 40 } },
+        { source: '.soukformatrc[typescript]', values: { 'prettier.printWidth': 120 } }
+      ]),
+      'wide',
+      'a printWidth written in .soukformatrc is layered normally and wins'
+    );
+  });
+
+  it('the README states the deviation instead of claiming the layer order holds', () => {
+    assert.ok(
+      !README_FLAT.includes(
+        'so your `.soukformatrc` always keeps the last word'
+      ),
+      'that absolute is false for line width'
+    );
+    assert.ok(
+      README_FLAT.includes('**Known deviation, line width.**'),
+      'the deviation must be stated where the layer order is described'
+    );
+    assert.ok(
+      README_FLAT.includes(
+        'beats an `.editorconfig` `max_line_length` **and** a `.soukformatrc` `wrap_line_length`'
+      ),
+      'and it must name exactly which layers lose'
+    );
+    assert.ok(
+      README_FLAT.includes(
+        'express the width in the same vocabulary as the layer you want to win'
+      ),
+      'a known deviation must come with the workaround that does work'
+    );
+  });
+
+  it('the engine comment agrees with the README rather than denying it', () => {
+    const engine = readSource('src/engine/prettier.ts');
+    assert.ok(
+      !/only when no explicit prettier\.printWidth was set/.test(engine),
+      'the comment claimed a conditional assignment the code does not make'
+    );
+    assert.ok(
+      /KNOWN DEVIATION/.test(engine),
+      'the code must carry the same warning as the README'
+    );
   });
 });

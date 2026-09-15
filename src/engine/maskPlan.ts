@@ -73,6 +73,7 @@
 // PURE: imports neither 'vscode' nor any engine. Fully unit-testable under
 // mocha + tsx (test/unit/engine/maskPlan.test.ts).
 import type { LangId } from '../types';
+import type { ProtectedSpan } from './sliceEdges';
 import { scanMarkers, type MarkerScan, type ProtectedRange } from '../ignore/markers';
 import { applyMask, restoreMask } from '../ignore/mask';
 import {
@@ -92,13 +93,26 @@ export type RestoreOutcome =
   | { readonly ok: false; readonly reason: string };
 
 /**
- * The engine-facing mask: the text actually sent to the engine, and the checked
- * restore mapping its output back to the caller's world. Replaces the provider's
- * previous private RegionMask (same shape, checked restore result).
+ * The engine-facing mask: the text actually sent to the engine, the checked
+ * restore mapping its output back to the caller's world, and WHICH BYTES OF THE
+ * INPUT that restore hands back verbatim. Replaces the provider's previous
+ * private RegionMask (same shape, checked restore result).
+ *
+ * `protectedSpans` is in the INPUT's own coordinates (never the engine text's),
+ * sorted and disjoint, and it is the union of every layer: ignore regions, the
+ * head front matter block and the template islands this plan masked. It exists
+ * because "the mask restored these bytes verbatim" is a fact the rest of the
+ * pipeline needs and could otherwise only guess at. One consumer today: the
+ * slice-edge rule, which must not apply an explicit `files.eol` to a line ending
+ * that sits inside a span the user asked to be left alone (see
+ * engine/sliceEdges.ts). Empty is a legitimate answer for a mask with no
+ * protected byte in the span, and there is no mask at all when nothing is
+ * protected, so a caller with no mask has nothing to skip.
  */
 export interface EngineMask {
   readonly engineInput: string;
   readonly restore: (engineOutput: string) => RestoreOutcome;
+  readonly protectedSpans: readonly ProtectedSpan[];
 }
 
 /**
@@ -188,9 +202,18 @@ export const UNHONOURED_IGNORE_PREFIX = 'tidy-ignore markers not applied';
  * which has its own node-level directive. Tidy does NOT mask on that path: the
  * placeholder would have to survive a strict parser, and Prettier's own
  * `prettier-ignore` is the syntax-aware mechanism there. So we say it plainly.
+ *
+ * THE ADVICE MUST BE TRUE AT BOTH SCOPES (reworded in v0.4.1). It used to read
+ * "use // prettier-ignore, which it honours natively", which holds for Format
+ * Document and NOT for Format Selection: a range format hands Prettier only the
+ * selected span, so a directive sitting outside that span is not even in the text
+ * Prettier parses and cannot protect anything. Pointing a user at a mechanism
+ * that silently does nothing at the scope they are actually using is the same
+ * class of defect as saying nothing at all, so the sentence now names the
+ * condition instead of promising unconditional support.
  */
 export const UNHONOURED_IGNORE_PRETTIER_PATH =
-  `${UNHONOURED_IGNORE_PREFIX}: this language is printed by Prettier; use // prettier-ignore, which it honours natively`;
+  `${UNHONOURED_IGNORE_PREFIX}: this language is printed by Prettier; use // prettier-ignore inside the text you format (a selection format hands Prettier only the selected lines)`;
 
 /**
  * The span carries a tidy-ignore marker on a path that normally masks it, but no
@@ -204,8 +227,11 @@ export const UNHONOURED_IGNORE_MASK_UNAVAILABLE =
 /**
  * Languages whose engine does NOT natively honour in-source ignore directives,
  * so Tidy protects regions itself via mask/restore (the js-beautify family).
- * The Prettier path honours `// prettier-ignore` natively at the node level.
- * Moved verbatim from providers/formattingProvider.ts (ADD-02).
+ * The Prettier path honours `// prettier-ignore` natively at the node level :
+ * for the text it is given, which is the whole document on a document format and
+ * ONLY the selected span on a range format (see
+ * {@link UNHONOURED_IGNORE_PRETTIER_PATH}). Moved verbatim from
+ * providers/formattingProvider.ts (ADD-02).
  */
 const REGION_MASKING_LANGUAGES: ReadonlySet<LangId> = new Set<LangId>([
   'css',
@@ -370,6 +396,48 @@ function withFrontMatter(
 }
 
 /**
+ * The same ranges as bare {start, end} spans: the shape the rest of the pipeline
+ * consumes, with the diagnostics-only `kind` dropped so a merged span never has
+ * to claim a kind it no longer has. Pure, no mutation.
+ */
+function asSpans(
+  ranges: readonly { readonly start: number; readonly end: number }[]
+): readonly ProtectedSpan[] {
+  return ranges.map(({ start, end }) => ({ start, end }));
+}
+
+/**
+ * The union of two sorted, disjoint span lists, as ONE sorted, disjoint list.
+ * The two layers can NEST -- an island that CONTAINS a protected range keeps it
+ * (see throughRegionLayer) -- so a plain concatenation would be neither sorted
+ * nor disjoint. Abutting spans are merged too: for the "were these bytes
+ * restored verbatim?" question a seam between two protected spans is not a fact,
+ * and merging keeps the answer a single lookup. Pure, no mutation of either
+ * argument.
+ */
+function mergedSpans(
+  first: readonly { readonly start: number; readonly end: number }[],
+  second: readonly { readonly start: number; readonly end: number }[]
+): readonly ProtectedSpan[] {
+  const sorted = [...asSpans(first), ...asSpans(second)].sort(
+    (left, right) => left.start - right.start
+  );
+  const merged: ProtectedSpan[] = [];
+  for (const span of sorted) {
+    const last = merged[merged.length - 1];
+    if (last === undefined || span.start > last.end) {
+      merged.push(span);
+      continue;
+    }
+    merged[merged.length - 1] = {
+      start: last.start,
+      end: Math.max(last.end, span.end)
+    };
+  }
+  return merged;
+}
+
+/**
  * The built region layer: the mask itself, plus what the island layer needs to
  * sit on top of it. `ranges` are the spans actually handed to applyMask, in
  * INPUT coordinates; `deltas[i]` is how much longer the i-th placeholder is than
@@ -412,6 +480,9 @@ function buildRegionLayer(
     ),
     mask: {
       engineInput: masked.masked,
+      // Already sorted and disjoint (scanMarkers guarantees it, clipRanges and
+      // withFrontMatter preserve it), so the union needs no further work.
+      protectedSpans: asSpans(ranges),
       restore: (engineOutput: string): RestoreOutcome => {
         const restored = restoreMask(engineOutput, masked.restorations);
         return restored === undefined
@@ -483,9 +554,12 @@ function offsetAfterRegionMask(offset: number, region: RegionLayer): number {
 }
 
 /**
- * The island spans that still need masking after the region layer ran, in that
- * layer's own coordinates. Two rules, both of which reproduce what scanning the
- * region-masked text used to do, minus the scope defect:
+ * The island spans that still need masking after the region layer ran, STILL IN
+ * INPUT COORDINATES (inRegionCoordinates below moves them into the masked text's
+ * space; keeping the two steps apart is what lets the plan report the protected
+ * spans in the coordinates its caller works in). Two rules, both of which
+ * reproduce what scanning the region-masked text used to do, minus the scope
+ * defect:
  *
  *  - an island whose START or END falls INSIDE a span the region layer already
  *    protects is DROPPED. Those bytes are restored verbatim by layer 1 already,
@@ -519,12 +593,29 @@ function throughRegionLayer(
     if (!containsEveryOverlap) {
       continue;
     }
-    kept.push({
-      start: offsetAfterRegionMask(span.start, region),
-      end: offsetAfterRegionMask(span.end, region)
-    });
+    kept.push(span);
   }
   return kept;
+}
+
+/**
+ * The same island spans, re-expressed in the coordinate space of the text the
+ * region layer produced: that is the string `maskTemplateIslandSpans` receives,
+ * and the one its spans must index. Only ever called on spans that survived
+ * throughRegionLayer, so no protected range straddles either boundary, which is
+ * exactly what offsetAfterRegionMask requires.
+ */
+function inRegionCoordinates(
+  spans: readonly TemplateIslandSpan[],
+  region: RegionLayer | undefined
+): readonly TemplateIslandSpan[] {
+  if (region === undefined) {
+    return spans;
+  }
+  return spans.map((span) => ({
+    start: offsetAfterRegionMask(span.start, region),
+    end: offsetAfterRegionMask(span.end, region)
+  }));
 }
 
 /**
@@ -590,9 +681,13 @@ export function buildMaskPlan(
   // islands it cuts through; then carried across the region layer, which also
   // drops anything the front matter placeholder already hides, so no span is
   // ever masked twice.
+  const islandSpans = throughRegionLayer(
+    templateIslandSpansFor(input, context),
+    region
+  );
   const outcome = maskTemplateIslandSpans(
     base,
-    throughRegionLayer(templateIslandSpansFor(input, context), region)
+    inRegionCoordinates(islandSpans, region)
   );
 
   if (outcome.kind === 'collision') {
@@ -623,6 +718,11 @@ export function buildMaskPlan(
     unhonouredIgnore,
     mask: {
       engineInput: outcome.masked,
+      // Both layers, in the INPUT's coordinates: the region ranges this plan
+      // masked (front matter included) and the islands that survived on top of
+      // them. `islandSpans` is deliberately the input-coordinate list, never the
+      // one handed to maskTemplateIslandSpans.
+      protectedSpans: mergedSpans(region ? region.ranges : [], islandSpans),
       restore: (engineOutput: string): RestoreOutcome => {
         // Reverse of masking order: islands first, then regions.
         const restored = restoreTemplateIslandsChecked(engineOutput, islands);

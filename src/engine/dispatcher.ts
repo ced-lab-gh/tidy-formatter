@@ -44,7 +44,16 @@ const JS_PARSER_PLUGINS: readonly ParserPlugin[] = [
 // or a JSX fragment `<>`. This is intentionally permissive (false positives are
 // fine : they only trigger the confirming parse below; false negatives are what
 // we must avoid, and a real JSX element always begins with one of these forms).
-const JSX_HINT = /<(?:[A-Za-z][\w.:-]*|>)/;
+//
+// FIRST-CHARACTER CLASS (v0.4.1, M3-5): a JSXIdentifier starts with any JS
+// identifier-start character, so `_` and `$` are as legal as a letter. Omitting
+// them made `<_Foo/>` and `<$Bar/>` miss this gate: the confirming parse never
+// ran, the file stayed on js-beautify, which printed `< _Foo bar = {`, and the
+// guard then REJECTED the result ("JSX tag boundaries were altered") : a false
+// reject on valid code. The trailing class is deliberately left alone: this gate
+// only has to MATCH, never to consume a whole tag, so a `$` further inside a name
+// (`<Foo$Bar`) is already covered by the `<Foo` prefix that precedes it.
+const JSX_HINT = /<(?:[A-Za-z_$][\w.:-]*|>)/;
 
 /**
  * Pick the engine for a language, ignoring code content.

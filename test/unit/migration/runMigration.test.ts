@@ -3,7 +3,17 @@
 // PURE (no 'vscode'): we import only the recap builders + message formatter +
 // constants. The host handler (`runMigration`, `showMigrationNotification`) loads
 // 'vscode' lazily inside its body, so importing this module does NOT pull in
-// 'vscode'. The host flow itself is covered by the integration suite.
+// 'vscode'.
+//
+// WHAT IS NOT COVERED, stated plainly (corrected in v0.4.1: this header used to
+// claim "the host flow itself is covered by the integration suite", and it is
+// not : no test anywhere names `runMigration`, and the host half of
+// src/migration/runMigration.ts measures 0 % line coverage). Untested today:
+// the trust check, the .jsbeautifyrc read, the modal recap, the settings WRITE
+// after consent, the "use as formatter" follow-up and the one-shot migration
+// notification. Only the pure pieces listed below are exercised. Closing that
+// gap is tracked for v0.5.0 with the other coverage items; until then nothing
+// here may be read as evidence that the write path works.
 //
 // Coverage focus:
 //   - buildMigrationRecap copies (does not alias) the mapper result;

@@ -12,6 +12,14 @@ test/perf/results.json
 .vscode-test/
 samples/out/
 
+# ── Audit / verification scratch directories ──
+#    Every adversarial pass creates one next to the sources (_probe_bh/,
+#    _probe_x/, ...): throwaway fixtures and notes, never part of the repo.
+#    MIRRORED in .vscodeignore on purpose: vsce packages from the working
+#    directory and never reads this file, so an ignored-but-present probe
+#    directory would otherwise be PUBLISHED (reproduced with vsce ls).
+_probe*/
+
 # ── Local-only working docs: strategy, mining data, growth/GTM,
 #    build reports, and the vsix archive, all consolidated under
 #    _internal/. NEVER for the public repo: the mining data can

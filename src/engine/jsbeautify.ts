@@ -7,9 +7,14 @@
 //     wrap_attributes, space_after_anon_function, ...) onto js-beautify's
 //     css()/html()/js() option objects.
 //   - Drive the correct js-beautify entry point per language family.
-//   - Apply endOfLine / insertFinalNewline / trimTrailingWhitespace as a pure
-//     post-processing pass (js-beautify only partially handles these).
-//   - Honour `range`: format the sub-text only and splice it back in.
+//   - Apply endOfLine / insertFinalNewline / trimTrailingWhitespace through the
+//     SHARED post-processing pass (src/engine/postProcess.ts), which every
+//     engine uses: this adapter's own copy of that policy drifted and wrote a
+//     bare LF into CRLF documents (defect C-04).
+//   - Honour `range`: format the sub-text only and splice it back in, leaving
+//     the slice's own leading and trailing whitespace runs VERBATIM (defects
+//     G3-4 and M3-3: a trimmed edge joins the slice to the bytes still sitting
+//     beside it in the buffer, which the guard cannot see).
 //
 // PURE: this module MUST NOT import 'vscode' so it stays testable under
 // mocha + tsx outside the Electron host. All inputs arrive via FormatRequest.
@@ -18,6 +23,8 @@ import type { CSSBeautifyOptions, HTMLBeautifyOptions, JSBeautifyOptions } from 
 import type { Engine, FormatRequest, LangId, ResolvedOptions } from '../types';
 import { htmlPreformattedTags } from '../safety/htmlPreformatted';
 import { formatJson } from './jsonFormatter';
+import { postProcess } from './postProcess';
+import { splitSliceEdges } from './sliceEdges';
 
 const SUPPORTED: ReadonlySet<LangId> = new Set<LangId>([
   'css',
@@ -336,41 +343,22 @@ function runBeautifier(family: Family, source: string, resolved: ResolvedOptions
   }
 }
 
-const EOL_REGEX = /\r\n|\r|\n/g;
-const TRAILING_WS_PER_LINE = /[^\S\r\n]+(?=\r\n|\r|\n|$)/g;
-
 /**
- * Normalise line endings, optionally strip per-line trailing whitespace, and
- * apply the final-newline policy. Pure string transform : no mutation of inputs.
- *
- * Ordering matters: trailing-whitespace trimming runs before the final-newline
- * decision so a file ending in spaces still gets exactly one (or zero) newline.
+ * Does this text already end in a line break? Handed to the SHARED
+ * post-processor as `originalEndsWithNewline`, so "no opinion"
+ * (insertFinalNewline undefined) really means "no edit", in both directions.
+ * Stateless (no /g flag): safe to reuse across calls.
  */
-function postProcess(text: string, resolved: ResolvedOptions): string {
-  let result = text;
+const ENDS_WITH_NEWLINE = /[\r\n]$/;
 
-  if (resolved.trimTrailingWhitespace === true) {
-    result = result.replace(TRAILING_WS_PER_LINE, '');
-  }
-
-  if (resolved.insertFinalNewline === true) {
-    result = result.replace(/[\r\n]+$/, '');
-    result += '\n';
-  } else if (resolved.insertFinalNewline === false) {
-    result = result.replace(/[\r\n]+$/, '');
-  }
-  // When insertFinalNewline is undefined we leave js-beautify's own trailing
-  // newline behaviour untouched (no opinion = no edit).
-
-  // Apply EOL last so every newline introduced above gets the right style.
-  if (resolved.endOfLine === 'crlf') {
-    result = result.replace(EOL_REGEX, '\r\n');
-  } else if (resolved.endOfLine === 'lf') {
-    result = result.replace(EOL_REGEX, '\n');
-  }
-
-  return result;
-}
+// The whitespace policy (per-line trim, final-newline, EOL normalisation) lives
+// in src/engine/postProcess.ts and NOWHERE ELSE. This adapter used to carry its
+// own copy, and the copy drifted: its final-newline branch appended a bare LF
+// instead of the document's own line ending, so at the DEFAULT configuration
+// (files.eol "auto", i.e. endOfLine undetermined, with insertFinalNewline true)
+// a CRLF document came back with one lone LF glued to its last line. A
+// whitespace-only difference is equivalent to the guard, so that mixed-EOL
+// result was WRITTEN (defect C-04). One implementation, one behaviour.
 
 /**
  * Clamp and validate a requested range against the source bounds.
@@ -407,14 +395,20 @@ export class JsBeautifyEngine implements Engine {
     // Whole-document path: beautify everything, then post-process.
     if (!req.range) {
       const beautified = beautify(req.code);
-      return postProcess(beautified, req.options);
+      return postProcess(
+        beautified,
+        req.options,
+        ENDS_WITH_NEWLINE.test(req.code)
+      );
     }
 
     // Range path: beautify only the selected slice and splice it back so the
     // surrounding text is preserved byte-for-byte (VS Code applies a TextEdit
-    // covering exactly this range). The whole result is post-processed for EOL
-    // consistency, but the final-newline policy is intentionally NOT applied to
-    // a partial format since the selection is not the end of the document.
+    // covering exactly this range). The slice's CONTENT is post-processed for
+    // trim and EOL consistency; the final-newline policy is intentionally NOT
+    // applied, since the selection is not the end of the document, and the
+    // slice's own two edge whitespace runs are excluded from the pass entirely
+    // and put back verbatim (see below).
     const bounds = normaliseRange(req.code, req.range);
     if (bounds === null) {
       // Degenerate/empty range: nothing to format; return input unchanged so
@@ -426,16 +420,47 @@ export class JsBeautifyEngine implements Engine {
     const selected = req.code.slice(bounds.start, bounds.end);
     const after = req.code.slice(bounds.end);
 
+    // The slice's OWN leading and trailing whitespace runs are not the
+    // printer's to rewrite: the bytes on either side of the slice stay in the
+    // buffer, so trimming an edge JOINS the slice to its neighbour. In HTML
+    // that turns "hello x y" into "hello xy" and the guard cannot see it
+    // (defect G3-4); in every family it also means a selection whose last
+    // character is a line break comes back one line longer than it went in, so
+    // the next pass formats a DIFFERENT slice and format(format(x)) never
+    // reaches the fixed point the README promises (defect M3-3). Both runs go
+    // back byte for byte below.
+    const edges = splitSliceEdges(selected);
+
+    // A slice that is nothing but whitespace has no content to print, and in
+    // HTML the run IS a rendered space. Hand the document back untouched
+    // rather than letting the printer collapse it.
+    if (edges.core === '') {
+      return req.code;
+    }
+
     const beautifiedSelection = beautify(selected);
 
     // Apply only whitespace-level post-processing (trim + EOL) to the selection;
-    // suppress the final-newline policy by clearing it for this sub-format.
+    // suppress the final-newline policy by clearing it for this sub-format. The
+    // slice is not the end of the document, and its own trailing run is put
+    // back verbatim just below, so "no opinion" is told the printed text does
+    // NOT end in a newline: any newline the printer added at the edge is the
+    // printer's, not the user's.
     const selectionOptions: ResolvedOptions = {
       ...req.options,
       insertFinalNewline: undefined
     };
-    const processedSelection = postProcess(beautifiedSelection, selectionOptions);
+    const processedSelection = postProcess(
+      beautifiedSelection,
+      selectionOptions,
+      false
+    );
 
-    return before + processedSelection + after;
+    // Verbatim, line endings included: these bytes come straight from the
+    // document, so putting them back can never introduce a foreign EOL.
+    const spliced =
+      edges.leading + splitSliceEdges(processedSelection).core + edges.trailing;
+
+    return before + spliced + after;
   }
 }

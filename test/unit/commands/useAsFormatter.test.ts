@@ -806,7 +806,16 @@ describe('commands/useAsFormatter : confirmAndApplyDefaultFormatter (consent gat
     );
     assert.equal(result.outcome, 'write-failed');
     if (result.outcome === 'write-failed') {
-      assert.equal(result.cause, 'simulated write failure');
+      // v0.4.1 (C-11): the cause now carries the REAL state of the settings
+      // after the failure, not just the engine's complaint. Here the very first
+      // write failed, so nothing was ever written and nothing needed undoing.
+      assert.match(result.cause, /^simulated write failure;/);
+      assert.match(result.cause, /no key was left written/);
+      assert.ok(!result.cause.includes('\n'), 'the cause stays single-line');
+      // The rollback of this mock also throws, so a partially-written batch
+      // would have to say so; with one language there is nothing to roll back.
+      assert.ok(!result.cause.includes('rolled back'));
+      assert.ok(!result.cause.includes('stayed written'));
     }
   });
 

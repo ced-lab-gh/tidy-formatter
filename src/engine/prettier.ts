@@ -10,6 +10,16 @@ import type { Options as PrettierOptions } from 'prettier';
 // only shape that survives bundling). Nothing here is evaluated at activation.
 // A load failure is surfaced as a typed engine error: the provider aborts and
 // the file stays intact; the engine NEVER degrades to a partial printer.
+//
+// WHITESPACE POLICY: this adapter owns NONE of it. Both of its paths finish
+// through src/engine/postProcess.ts, the same module the js-beautify family
+// uses, so the final-newline rule and the EOL rule have ONE implementation for
+// the whole extension. Until v0.4.1 the TS/JSX path returned prettier's output
+// straight to the provider, and prettier's own endOfLine default ('lf') then
+// rewrote a whole CRLF document whenever files.eol was unset or "auto": nothing
+// was corrupted and the endings were never left MIXED, but a CRLF project got
+// one answer for a .css and a different one for a .ts, which is the exact
+// inconsistency a local copy of the policy caused in the first place (C-04).
 import { loadPrettierChunk, type PrettierChunkModule } from '../chunks/loader';
 import type { Engine, FormatRequest, LangId, ResolvedOptions } from '../types';
 import { postProcess } from './postProcess';
@@ -50,15 +60,37 @@ const CSS_PARSER_BY_LANG: Readonly<Record<string, 'css' | 'scss' | 'less'>> = {
 };
 
 /**
- * Map our endOfLine contract onto prettier's. We never pass 'auto' here because
- * the caller already resolved a concrete EOL (or left it undefined, in which
- * case prettier's default 'lf' applies).
+ * Map our endOfLine contract onto prettier's, or undefined when the caller
+ * resolved no concrete EOL. EVERY call site turns that undefined into 'auto'
+ * (see resolveEndOfLine): prettier's OWN default is 'lf', which rewrites a whole
+ * CRLF document the user never asked to convert.
  */
 function mapEndOfLine(eol: ResolvedOptions['endOfLine']): 'lf' | 'crlf' | undefined {
   if (eol === 'lf' || eol === 'crlf') {
     return eol;
   }
   return undefined;
+}
+
+/**
+ * The prettier `endOfLine` to use for a resolved option bag. ONE rule for BOTH
+ * paths (TS/JSX and the CSS fallback): an EXPLICIT setting is honoured, and
+ * "the user has not said" means KEEP WHAT THE DOCUMENT ALREADY HAS.
+ *
+ * Prettier's own default is 'lf'. Leaving the key unset therefore rewrote a
+ * whole CRLF document to LF whenever files.eol was unset or "auto": measured at
+ * 6 of 36 (files.eol x insertFinalNewline x document shape) combinations for
+ * each of typescript, typescriptreact and javascriptreact, and 0 for the seven
+ * js-beautify languages, which had already been aligned on the document's own
+ * line endings (defect C-04). Nothing was ever corrupted, and the result was
+ * never MIXED, so the guard rightly accepted it; but the same extension gave a
+ * CRLF project two different answers for a .css and a .ts, which is precisely
+ * the inconsistency a single shared whitespace policy exists to prevent.
+ */
+function resolveEndOfLine(
+  options: ResolvedOptions
+): 'lf' | 'crlf' | 'auto' {
+  return mapEndOfLine(options.endOfLine) ?? 'auto';
 }
 
 /**
@@ -153,17 +185,30 @@ function buildPrettierOptions(
   const prettierOptions: PrettierOptions = {
     parser,
     tabWidth: options.tabSize,
-    useTabs: !options.insertSpaces
+    useTabs: !options.insertSpaces,
+    // ALWAYS set, 'auto' when the user resolved no EOL: see resolveEndOfLine.
+    // The key used to be omitted in that case, which handed the document to
+    // prettier's own 'lf' default and flattened a CRLF file (defect C-04's
+    // class, on the Prettier family).
+    endOfLine: resolveEndOfLine(options)
   };
 
-  const endOfLine = mapEndOfLine(options.endOfLine);
-  if (endOfLine) {
-    prettierOptions.endOfLine = endOfLine;
-  }
-
-  // A shared wrap_line_length (js-beautify vocabulary) maps to prettier printWidth
-  // only when no explicit prettier.printWidth was set, so the cross-engine "core"
-  // option still influences TS/JSX width.
+  // A shared wrap_line_length (js-beautify vocabulary) maps to prettier
+  // printWidth, so the cross-engine "core" option influences TS/JSX width.
+  //
+  // KNOWN DEVIATION, DO NOT READ THIS AS "ONLY WHEN UNSET" (C-15). This comment
+  // used to claim the mapping applied "only when no explicit prettier.printWidth
+  // was set". It does not: `applyStylisticOptions` runs AFTER this assignment and
+  // overwrites printWidth from engineOptions.prettier.printWidth whenever that
+  // key has a valid value. Because the resolver has already collapsed every layer
+  // into one bag, wrap_line_length here may be carrying .editorconfig
+  // max_line_length or .soukformatrc, and a plain `tidy.prettier.printWidth` from
+  // VS Code settings therefore beats BOTH : the reverse of the documented layer
+  // order, where .soukformatrc has the last word. Resolving a single width key
+  // BEFORE the engine is the real fix; it is deferred to v0.5.0 with the other
+  // option-resolution defects (C-12, C-14, C-15) because changing it moves a
+  // precedence layer, which a patch release must not do. README flags the same
+  // deviation, and the two must be corrected together.
   const sharedWrap = options.engineOptions.wrap_line_length;
   if (typeof sharedWrap === 'number' && Number.isInteger(sharedWrap) && sharedWrap > 0) {
     prettierOptions.printWidth = sharedWrap;
@@ -182,9 +227,11 @@ function buildPrettierOptions(
 /**
  * Prettier options for the CSS-family fallback (ADD-01). STYLISTIC ONLY, and
  * deliberately much narrower than the TS/JSX path:
- *  - tabWidth/useTabs/endOfLine: the layout knobs Tidy owns. endOfLine falls
- *    back to 'auto' when unresolved so a CRLF stylesheet is never rewritten to
- *    LF by the fallback (Prettier's own default is 'lf', which would).
+ *  - tabWidth/useTabs/endOfLine: the layout knobs Tidy owns. endOfLine goes
+ *    through the SHARED resolveEndOfLine, so it falls back to 'auto' when
+ *    unresolved and a CRLF stylesheet is never rewritten to LF by the fallback
+ *    (Prettier's own default is 'lf', which would). The TS/JSX path above asks
+ *    the same question through the same function.
  *  - printWidth: shared wrap_line_length first, then an explicit
  *    engineOptions.prettier.printWidth (same precedence as the TS path).
  *  - NOTHING else from the prettier bag. singleQuote would rewrite quoted CSS
@@ -205,7 +252,7 @@ function buildCssPrettierOptions(
     parser,
     tabWidth: options.tabSize,
     useTabs: !options.insertSpaces,
-    endOfLine: mapEndOfLine(options.endOfLine) ?? 'auto'
+    endOfLine: resolveEndOfLine(options)
   };
 
   const sharedWrap = options.engineOptions.wrap_line_length;
@@ -227,6 +274,57 @@ function buildCssPrettierOptions(
   }
 
   return prettierOptions;
+}
+
+/**
+ * Does this text already end in a line break? Handed to the SHARED
+ * post-processor as `originalEndsWithNewline`, so "no opinion"
+ * (insertFinalNewline undefined) really means "no edit", in both directions.
+ * Same predicate the js-beautify adapter uses, deliberately: one question, one
+ * answer. Stateless (no /g flag): safe to reuse across calls.
+ */
+const ENDS_WITH_NEWLINE = /[\r\n]$/;
+
+/**
+ * Hand a prettier result to the SHARED whitespace policy
+ * (src/engine/postProcess.ts) : the very pass the js-beautify family runs. Both
+ * prettier paths go through here, so this engine carries NO whitespace policy of
+ * its own, and there is no third implementation to drift (the drift of a local
+ * copy is exactly what defect C-04 was).
+ *
+ * `applyTrimPolicy` is FALSE for the TS/JSX path and TRUE for the CSS fallback,
+ * and that asymmetry is deliberate, not an oversight. Prettier reprints code, so
+ * the only per-line trailing whitespace that survives it in a JS/TS file sits
+ * INSIDE a template literal, where those spaces are part of the string's value.
+ * Trimming them changes what the program means: verified here, `` `line one   \n
+ * line two` `` comes back with the spaces gone and the guard answers
+ * "AST structure changed after formatting". The format would then abort on every
+ * such file : a silent no-op where Tidy works today. The CSS family has no
+ * multi-line string literal of that kind, and the trim has been part of that
+ * path since ADD-01, so it keeps it.
+ *
+ * For a RANGE (selection) request the final-newline policy is suppressed and the
+ * printed text is declared NOT to end in a newline: a selection is not the end of
+ * the document, and the provider puts the slice's own edge whitespace runs back
+ * verbatim afterwards (src/engine/sliceEdges.ts).
+ *
+ * Pure: `req` and its options are never mutated; a NEW option bag is built.
+ */
+function applyWhitespacePolicy(
+  req: FormatRequest,
+  printed: string,
+  applyTrimPolicy: boolean
+): string {
+  const effectiveOptions: ResolvedOptions = {
+    ...req.options,
+    ...(req.range ? { insertFinalNewline: undefined } : {}),
+    ...(applyTrimPolicy ? {} : { trimTrailingWhitespace: undefined })
+  };
+  return postProcess(
+    printed,
+    effectiveOptions,
+    req.range ? false : ENDS_WITH_NEWLINE.test(req.code)
+  );
 }
 
 export class PrettierEngine implements Engine {
@@ -281,14 +379,26 @@ export class PrettierEngine implements Engine {
         ? [chunk.pluginTypescript, chunk.pluginEstree]
         : [chunk.pluginBabel, chunk.pluginEstree];
 
+    let raw: string;
     try {
-      return await chunk.format(req.code, { ...prettierOptions, plugins });
+      raw = await chunk.format(req.code, { ...prettierOptions, plugins });
     } catch (error: unknown) {
       // Never swallow: surface a typed error so the provider can abort with a
       // file-intact outcome and log to the OutputChannel (never the code itself).
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`prettier failed to format ${req.languageId}: ${message}`);
     }
+
+    // SAME shared whitespace policy as the js-beautify family and as the CSS
+    // fallback below: the document's own line endings are kept when the user
+    // resolved no endOfLine, and the file's final-newline state is restored when
+    // the user expressed no opinion. Prettier emits a trailing newline of its
+    // own unconditionally, so without this pass a .ts with no final newline grew
+    // one byte the user never asked for, and an explicit insertFinalNewline
+    // false was ignored outright. The trim policy is deliberately NOT applied
+    // here (see applyWhitespacePolicy: it would eat spaces inside a template
+    // literal and the guard would then reject every such format).
+    return applyWhitespacePolicy(req, raw, false);
   }
 
   /**
@@ -298,6 +408,10 @@ export class PrettierEngine implements Engine {
    * drop-in for whitespace policy (trim, final newline, EOL). For a selection
    * (range) request the final-newline policy is suppressed, mirroring the
    * js-beautify range path: a selection is not the end of the document.
+   *
+   * Since v0.4.1 the TS/JSX path above runs the very same pass, through the very
+   * same helper, so "which family printed it" no longer decides what happens to
+   * a document's line endings.
    */
   private async formatCssFamily(
     req: FormatRequest,
@@ -322,13 +436,9 @@ export class PrettierEngine implements Engine {
       throw new Error(`prettier failed to format ${req.languageId}: ${message}`);
     }
 
-    const effectiveOptions: ResolvedOptions = req.range
-      ? { ...req.options, insertFinalNewline: undefined }
-      : req.options;
-    return postProcess(
-      raw,
-      effectiveOptions,
-      req.range ? false : /\r?\n$/.test(req.code)
-    );
+    // The trim policy HAS applied on this path since ADD-01 and keeps applying:
+    // the CSS family has no multi-line string literal whose value a per-line
+    // trim could change (see applyWhitespacePolicy).
+    return applyWhitespacePolicy(req, raw, true);
   }
 }

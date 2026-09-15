@@ -64,8 +64,15 @@ function rejected(reason: string): GuardVerdict {
 }
 
 /**
- * Normalize an error of unknown shape into a short, code-free message.
- * The OutputChannel must never receive user source code, only a summary.
+ * Normalize an error of unknown shape into a short, one-line message.
+ *
+ * It drops the parser's CODE FRAME, which is the bulk of the source a parser
+ * error carries, and keeps its FIRST LINE. That first line is not code-free:
+ * parsers name the offending token in it, so a message can read "Identifier
+ * 'CLIENT_SECRET_abc123' has already been declared". README documents this
+ * honestly; three comments elsewhere used to deny it and were corrected in
+ * v0.4.1. Do not restore the "code-free" claim here without also making it
+ * true, which means redacting the token, not just the frame.
  */
 function describeError(error: unknown): string {
   if (error instanceof Error) {

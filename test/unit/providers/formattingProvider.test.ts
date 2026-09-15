@@ -106,10 +106,25 @@ class FakeDocument {
 interface StubState {
   channelLines: string[];
   warnings: string[];
+  /** The action buttons offered with each warning, in the same order. */
+  warningActions: string[][];
   infos: string[];
+  /**
+   * EXPLICITLY set `files.*` settings for the next format, as
+   * `inspect().globalValue` (the shape readExplicit consumes). Empty by default
+   * and cleared before every test, so the suite stays as hermetic as it was: an
+   * unset key still answers "not set" and no on-disk layer is consulted.
+   */
+  files: Record<string, unknown>;
 }
 
-const state: StubState = { channelLines: [], warnings: [], infos: [] };
+const state: StubState = {
+  channelLines: [],
+  warnings: [],
+  warningActions: [],
+  infos: [],
+  files: {}
+};
 
 const vscodeStub = {
   Range: FakeRange,
@@ -129,8 +144,9 @@ const vscodeStub = {
         }
       };
     },
-    showWarningMessage(message: string): Promise<undefined> {
+    showWarningMessage(message: string, ...actions: string[]): Promise<undefined> {
       state.warnings.push(message);
+      state.warningActions.push(actions);
       return Promise.resolve(undefined);
     },
     showInformationMessage(message: string): Promise<undefined> {
@@ -147,16 +163,23 @@ const vscodeStub = {
     // Untrusted on purpose: every on-disk config layer declines, so the suite
     // never depends on the machine it runs on.
     isTrusted: false,
-    getConfiguration(): {
+    getConfiguration(section?: string): {
       get(key: string, fallback?: unknown): unknown;
-      inspect(): undefined;
+      inspect(key: string): { globalValue: unknown } | undefined;
     } {
       return {
         get(_key: string, fallback?: unknown): unknown {
           return fallback;
         },
-        inspect(): undefined {
-          return undefined;
+        inspect(key: string): { globalValue: unknown } | undefined {
+          // Only the `files` section is answerable, and only for a key a test
+          // set. Everything else stays "not set", which is what keeps the
+          // .editorconfig / .soukformatrc / .prettierrc layers out of the suite.
+          if (section !== 'files') {
+            return undefined;
+          }
+          const value = state.files[key];
+          return value === undefined ? undefined : { globalValue: value };
         }
       };
     },
@@ -191,6 +214,12 @@ interface ProviderModule {
       token: unknown
     ): Promise<FakeTextEdit[]>;
   };
+  /** The verdict-carrying abort message (guard rejection / failed restore). */
+  ABORT_WARNING_MESSAGE: string;
+  /** The no-verdict-exists abort message (engine error / guard threw). */
+  ENGINE_ERROR_WARNING_MESSAGE: string;
+  /** The refusal message for an HTML selection whose boundary cuts a tag. */
+  TAG_SPLIT_WARNING_MESSAGE: string;
 }
 
 type LoadFn = (request: string, parent: unknown, isMain: boolean) => unknown;
@@ -231,7 +260,9 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
   beforeEach(() => {
     state.channelLines = [];
     state.warnings = [];
+    state.warningActions = [];
     state.infos = [];
+    state.files = {};
     clearLastFormat();
   });
 
@@ -836,4 +867,925 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
     await formatDocument(document);
     assert.equal(lastRecord(document).engineId, 'js-beautify');
   });
+
+  /* ------------------------------------------------------------------ */
+  /* G3-4 / M3-3 : a selection keeps its OWN edge whitespace              */
+  /* ------------------------------------------------------------------ */
+  //
+  // The one rank-1 defect of v0.4.0 that was reachable AND wrote a
+  // non-equivalent result. js-beautify trims the edges of the slice it is
+  // handed; the bytes on either side stay in the buffer, so the trim JOINS the
+  // slice to its neighbour. The HTML guard cannot see it: a whitespace-only
+  // text node between two inline elements is exactly what it normalises away,
+  // so it says EQUIVALENT and the edit is applied. Measured end to end before
+  // the fix:
+  //
+  //   DOC  "<p>hello <b>x</b> \n<i>y</i></p>"   selection [0,19)
+  //   engine gets "<p>hello <b>x</b>"
+  //   RESULT      "<p>hello <b>x</b><i>y</i></p>"   guard ACCEPT
+  //   renders     "hello x y"  ->  "hello xy"
+  //
+  // 353 of 7266 plausible selections over five ordinary HTML snippets wrote a
+  // changed rendering; 0 at document scope. So it is purely a range-path
+  // defect, and it is closed on the PROVIDER side: the guard is untouched.
+
+  /** Apply the edits of a format to the document text they were built from. */
+  function applyEdits(text: string, edits: FakeTextEdit[]): string {
+    let out = text;
+    for (const edit of [...edits].sort(
+      (a, b) => b.range.start.offset - a.range.start.offset
+    )) {
+      out =
+        out.slice(0, edit.range.start.offset) +
+        edit.newText +
+        out.slice(edit.range.end.offset);
+    }
+    return out;
+  }
+
+  /** Offsets of whole lines [firstLine, lastLine], including the final EOL. */
+  function lineSpan(
+    text: string,
+    firstLine: number,
+    lastLine: number
+  ): { start: number; end: number } {
+    const starts: number[] = [0];
+    for (let i = 0; i < text.length; i += 1) {
+      if (text[i] === '\n') {
+        starts.push(i + 1);
+      }
+    }
+    const start = starts[Math.min(firstLine, starts.length - 1)];
+    const end = lastLine + 1 < starts.length ? starts[lastLine + 1] : text.length;
+    return { start, end };
+  }
+
+  it('THE FINDING: a trimmed trailing run used to render "hello x y" as "hello xy"', async () => {
+    const source = '<p>hello <b>x</b> \n<i>y</i></p>';
+    const document = new FakeDocument('html', source, '/w/edge.html');
+
+    const edits = await formatSelection(document, 0, 19);
+    const applied = applyEdits(source, edits);
+
+    assert.ok(
+      applied.includes('</b> \n<i>') || applied.includes('</b> \n  <i>'),
+      `the whitespace between the two inline elements must survive, got ${JSON.stringify(applied)}`
+    );
+    assert.ok(
+      !applied.includes('</b><i>'),
+      `the two inline elements were joined: ${JSON.stringify(applied)}`
+    );
+  });
+
+  it('THE FINDING: a slice with a leading AND a trailing space keeps both', async () => {
+    const source = '<p>hello <b>x</b> world</p>';
+    const document = new FakeDocument('html', source, '/w/edge2.html');
+
+    const edits = await formatSelection(document, 8, 18);
+    const applied = applyEdits(source, edits);
+
+    assert.equal(
+      applied,
+      source,
+      `nothing to reflow here, so nothing may be written: ${JSON.stringify(applied)}`
+    );
+  });
+
+  it('a whitespace-only selection is never collapsed', async () => {
+    // That run IS a rendered space. Collapsing it changes what the reader sees
+    // and the guard calls it equivalent.
+    const source = '<p>a <b>x</b>   <i>y</i> b</p>';
+    const start = source.indexOf('</b>') + '</b>'.length;
+    const end = source.indexOf('<i>');
+    const document = new FakeDocument('html', source, '/w/blank.html');
+
+    const edits = await formatSelection(document, start, end);
+
+    assert.equal(applyEdits(source, edits), source);
+  });
+
+  it('the selection is still really formatted: the edge rule is not a no-op switch', async () => {
+    const source = '<div>\n<div><p>x</p></div>\n</div>';
+    const start = source.indexOf('<div><p>');
+    const end = source.indexOf('</div>\n</div>') + '</div>'.length;
+    const document = new FakeDocument('html', source, '/w/live.html');
+
+    const edits = await formatSelection(document, start, end);
+
+    assert.equal(edits.length, 1, 'a reflowable selection must still be formatted');
+    assert.ok(
+      edits[0].newText.includes('\n  <p>x</p>\n'),
+      `the content must be reflowed, got ${JSON.stringify(edits[0].newText)}`
+    );
+    assert.equal(lastRecord(document).status, 'applied');
+  });
+
+  it('composes with the mask coordinate mapping: islands AND edges both survive', async () => {
+    // The edge rule runs AFTER the island restore, in the CALLER's coordinate
+    // space, so engineSpanFor is untouched by it (FIX-A stays fixed).
+    const before = '<p>head</p>\n';
+    const selected = ' {{a}}<div><p>x</p></div>{{b}} \n';
+    const after = '<p>tail</p>\n';
+    const source = before + selected + after;
+    const document = new FakeDocument('html', source, '/w/islands.html');
+
+    const edits = await formatSelection(
+      document,
+      before.length,
+      before.length + selected.length
+    );
+
+    const written = edits.length === 0 ? selected : edits[0].newText;
+    assert.ok(
+      written.startsWith(' '),
+      `the leading run must survive, got ${JSON.stringify(written)}`
+    );
+    assert.ok(
+      written.endsWith(' \n'),
+      `the trailing run must survive, got ${JSON.stringify(written)}`
+    );
+    for (const island of ['{{a}}', '{{b}}']) {
+      assert.ok(written.includes(island), `${island} must stay verbatim`);
+    }
+    assert.ok(
+      !written.includes('tidytplisland'),
+      'no placeholder may ever reach the buffer'
+    );
+  });
+
+  it('composes with a selection that STARTS inside a protected island', async () => {
+    const source =
+      '<div>\n  <%\n    out.write(total);\n  %> \n  <p>tail</p>\n</div>\n';
+    const start = source.indexOf('    out.write');
+    const end = source.indexOf('  <p>tail');
+    const document = new FakeDocument('html', source, '/w/cut.html');
+
+    const edits = await formatSelection(document, start, end);
+    const applied = applyEdits(source, edits);
+
+    assert.ok(
+      applied.includes('<%\n    out.write(total);\n  %>'),
+      `the island must survive verbatim, got ${JSON.stringify(applied)}`
+    );
+    assert.ok(
+      applied.includes('%> \n'),
+      `the slice trailing run must survive, got ${JSON.stringify(applied)}`
+    );
+  });
+
+  it('composes with a selection that ENDS inside a protected ignore region', async () => {
+    const source =
+      '<p>a</p>\n<!-- tidy-ignore-start -->\n<div   >keep</div   >\n<!-- tidy-ignore-end -->\n<p>b</p>\n';
+    const start = 0;
+    const end = source.indexOf('keep');
+    const document = new FakeDocument('html', source, '/w/region.html');
+
+    const edits = await formatSelection(document, start, end);
+    const applied = applyEdits(source, edits);
+
+    assert.ok(
+      applied.includes('<div   >keep</div   >'),
+      `the protected bytes must be verbatim, got ${JSON.stringify(applied)}`
+    );
+  });
+
+  it('leaves a whole-DOCUMENT format alone: the rule is scoped to a selection', async () => {
+    // A document's edges ARE the file's edges; the final-newline policy owns
+    // them, and this rule must not fight it.
+    const source = '\n<div><p>x</p></div>\n\n';
+    const document = new FakeDocument('html', source, '/w/doc.html');
+
+    const edits = await formatDocument(document);
+
+    assert.equal(edits.length, 1, 'the document is still formatted');
+    assert.ok(
+      !edits[0].newText.startsWith('\n'),
+      `a document format still trims its own head, got ${JSON.stringify(edits[0].newText)}`
+    );
+  });
+
+  const CONVERGENCE_FRAMINGS: ReadonlyArray<{
+    lang: string;
+    id: string;
+    source: string;
+    firstLine: number;
+    lastLine: number;
+  }> = [
+    {
+      lang: 'javascript',
+      id: 'first line',
+      source: 'const a={x:1};\nconst b=2;\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'javascript',
+      id: 'inner line, framed both sides',
+      source: 'let z=0;\nfunction f(){return 1;}\nlet w=1;\n',
+      firstLine: 1,
+      lastLine: 1
+    },
+    {
+      lang: 'html',
+      id: 'first line',
+      source: '<div><p>a</p></div>\n<span>b</span>\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'json',
+      id: 'first line',
+      source: '{"a":1,\n"b":2}\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'css',
+      id: 'first line',
+      source: '.a{color:red}\n.b{color:blue}\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'css',
+      id: 'inner line, framed both sides',
+      source: 'body{margin:0}\n.a{color:red}\n.b{color:blue}\n',
+      firstLine: 1,
+      lastLine: 1
+    }
+  ];
+
+  for (const framing of CONVERGENCE_FRAMINGS) {
+    it(`M3-3 ${framing.lang} (${framing.id}): Format Selection converges on pass 2`, async () => {
+      // A LINE-ANCHORED selection is what Format Selection on whole lines and
+      // editor.formatOnSaveMode "modifications" both send, so the slice keeps
+      // ending in a line break on every pass. Before the fix the printer kept
+      // stripping it and the splice kept gluing the next line on: edits
+      // 1,1,1,1,1,1 with pass3 == pass5 and pass4 == pass6.
+      let text = framing.source;
+      const states: string[] = [];
+      const editCounts: number[] = [];
+      for (let pass = 0; pass < 6; pass += 1) {
+        const span = lineSpan(text, framing.firstLine, framing.lastLine);
+        const document = new FakeDocument(
+          framing.lang,
+          text,
+          `/w/converge-${framing.lang}`
+        );
+        // eslint-disable-next-line no-await-in-loop
+        const edits = await formatSelection(document, span.start, span.end);
+        editCounts.push(edits.length);
+        text = applyEdits(text, edits);
+        states.push(text);
+      }
+      assert.deepEqual(
+        editCounts.slice(1),
+        [0, 0, 0, 0, 0],
+        `pass 2 onwards must produce no edit, got ${editCounts.join(',')} ` +
+          `with states ${JSON.stringify(states)}`
+      );
+      for (let pass = 1; pass < states.length; pass += 1) {
+        assert.equal(states[pass], states[0], `pass ${pass + 1} drifted`);
+      }
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* v0.4.1 : the EOL a write really carries, at the provider seam        */
+  /* ------------------------------------------------------------------ */
+
+  // The engine-level matrix lives in test/unit/engine/prettierEol.test.ts. What
+  // is asserted HERE is the byte that would reach the buffer: the stub reports
+  // an untrusted workspace and answers every configuration read with its
+  // fallback, which is exactly the defect configuration (files.eol unset, so
+  // endOfLine undefined, and insertFinalNewline unset).
+
+  /** Lone LF: the only kind that can make a CRLF document mixed. */
+  const countLoneLf = (text: string): number =>
+    (text.match(/(?<!\r)\n/g) ?? []).length;
+
+  const CRLF_DOCUMENTS: Array<[string, string, string]> = [
+    ['typescript', 'const  a:number=1\r\nfunction  f(){\r\nreturn a\r\n}\r\n', '.ts'],
+    [
+      'typescriptreact',
+      'const  a=<div>hi</div>\r\nfunction  g(){\r\nreturn a\r\n}\r\nexport default g\r\n',
+      '.tsx'
+    ],
+    [
+      'javascriptreact',
+      'const  a=<div>hi</div>\r\nfunction  g(){\r\nreturn a\r\n}\r\nexport default g\r\n',
+      '.jsx'
+    ],
+    ['css', '.a  {\r\ncolor:red\r\n}\r\n.b{\r\ncolor:blue\r\n}\r\n', '.css']
+  ];
+
+  for (const [lang, source, extension] of CRLF_DOCUMENTS) {
+    it(`writes CRLF back into a CRLF ${extension} when files.eol is unset`, async () => {
+      // Before the fix the three Prettier languages returned the WHOLE document
+      // rewritten to LF here, and the .css beside them did not: one extension,
+      // two answers for one project.
+      const document = new FakeDocument(lang, source, `/w/crlf${extension}`);
+
+      const edits = await formatDocument(document);
+      const result = bufferAfter(source, edits);
+
+      assert.equal(
+        countLoneLf(result),
+        0,
+        `the document was rewritten to LF: ${JSON.stringify(result)}`
+      );
+      assert.ok(result.includes('\r\n'), 'the CRLFs must still be there');
+      assert.notEqual(
+        lastRecord(document).status,
+        'guard-rejected',
+        'and the file must still actually format'
+      );
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* v0.4.1 : the abort toast stops accusing a file the verifier never    */
+  /*          looked at                                                   */
+  /* ------------------------------------------------------------------ */
+
+  // One shared ABORT_WARNING_MESSAGE used to cover BOTH a guard rejection and an
+  // engine error. So a TypeScript selection that straddles a template literal,
+  // which Prettier cannot parse as a standalone unit, told the user "the result
+  // could not be proven equivalent to your original" while the output channel
+  // correctly recorded engine-error with "Unterminated template literal". The
+  // verifier never ran; claiming a verdict about the user's code is a false
+  // accusation, the same defect class v0.4.0 fixed for chunk-load failures.
+  //
+  // ZERO edits happen on either branch, so what is under test here is WORDING,
+  // not behaviour: the edit counts and the recorded statuses below are exactly
+  // what they were before.
+
+  /** A document whose first line opens a template literal the next line closes. */
+  const STRADDLED_TEMPLATE =
+    'const message = `hello\nworld`;\nconst other = 1;\n';
+  /** The selection: line 1 only, so the literal is cut in half. */
+  const STRADDLE_SELECTION_END = STRADDLED_TEMPLATE.indexOf('\n');
+
+  it('an ENGINE error says the formatter could not read the code, not that the file failed verification', async () => {
+    const document = new FakeDocument(
+      'typescript',
+      STRADDLED_TEMPLATE,
+      '/w/straddle.ts'
+    );
+
+    const edits = await formatSelection(document, 0, STRADDLE_SELECTION_END);
+
+    // Unchanged behaviour: nothing is written, and the record is what it was.
+    assert.equal(edits.length, 0, 'an engine error must still write nothing');
+    const record = lastRecord(document);
+    assert.equal(record.status, 'engine-error');
+    assert.equal(record.scope, 'selection');
+    assert.ok(
+      record.detail?.startsWith('engine error:'),
+      `the channel must still record the real cause, got ${JSON.stringify(record.detail)}`
+    );
+
+    // The fix: the toast now matches the record.
+    assert.equal(state.warnings.length, 1, 'the user is told, once');
+    assert.equal(state.warnings[0], providers.ENGINE_ERROR_WARNING_MESSAGE);
+    assert.notEqual(
+      state.warnings[0],
+      providers.ABORT_WARNING_MESSAGE,
+      'an engine error must not claim an equivalence verdict exists'
+    );
+    assert.ok(
+      !state.warnings[0].includes('could not be proven equivalent'),
+      'the false accusation must be gone from this branch entirely'
+    );
+    // And it names the normal, innocent cause the user most likely hit.
+    assert.ok(
+      /selection/i.test(state.warnings[0]),
+      `the message must explain a partial selection, got ${JSON.stringify(state.warnings[0])}`
+    );
+  });
+
+  it('a real GUARD rejection still says the result could not be proven equivalent', async () => {
+    // The other branch, unchanged: here the guard really did return a verdict.
+    const document = new FakeDocument(
+      'typescriptreact',
+      JSX_DOUBLE_SPACE,
+      '/w/verdict-branch.tsx'
+    );
+
+    const edits = await formatDocument(document);
+
+    assert.equal(edits.length, 0);
+    assert.equal(lastRecord(document).status, 'guard-rejected');
+    assert.equal(state.warnings.length, 1);
+    assert.equal(state.warnings[0], providers.ABORT_WARNING_MESSAGE);
+  });
+
+  it('the engine-error toast never carries a byte of the user code', async () => {
+    // The engine message names the offending token from the file (Prettier's
+    // first line is "Unterminated template literal. (1:23)"), which is why the
+    // detail goes through sanitizeDetail to the output channel and the toast
+    // stays a constant. A leak here would be a privacy regression, not a
+    // wording one.
+    const document = new FakeDocument(
+      'typescript',
+      'const secretName = `topsecret\nvalue`;\n',
+      '/w/leak.ts'
+    );
+
+    await formatSelection(document, 0, 'const secretName = `topsecret'.length);
+
+    assert.equal(state.warnings.length, 1);
+    for (const leak of ['secretName', 'topsecret', 'Unterminated', '`']) {
+      assert.ok(
+        !state.warnings[0].includes(leak),
+        `the toast leaked ${JSON.stringify(leak)}: ${JSON.stringify(state.warnings[0])}`
+      );
+    }
+  });
+
+  it('both abort branches keep the same two action buttons', async () => {
+    // ADD-06's one-click remedies are wording-independent: splitting the message
+    // must not have dropped a remedy on either branch.
+    const engineError = new FakeDocument(
+      'typescript',
+      STRADDLED_TEMPLATE,
+      '/w/buttons-engine.ts'
+    );
+    await formatSelection(engineError, 0, STRADDLE_SELECTION_END);
+    assert.deepEqual(state.warningActions[0], ['Explain', 'Report Issue']);
+
+    const guardRejection = new FakeDocument(
+      'typescriptreact',
+      JSX_DOUBLE_SPACE,
+      '/w/buttons-guard.tsx'
+    );
+    await formatDocument(guardRejection);
+    assert.deepEqual(state.warningActions[1], ['Explain', 'Report Issue']);
+  });
+
+  it('the three messages are distinct, English, em-dash-free and all reassure', () => {
+    const engine = providers.ENGINE_ERROR_WARNING_MESSAGE;
+    const verdict = providers.ABORT_WARNING_MESSAGE;
+    const tagSplit = providers.TAG_SPLIT_WARNING_MESSAGE;
+    assert.equal(
+      new Set([engine, verdict, tagSplit]).size,
+      3,
+      'splitting them is the whole point'
+    );
+    for (const message of [engine, verdict, tagSplit]) {
+      assert.ok(
+        message.startsWith('Tidy did not apply the format:'),
+        `both must open the same way, got ${JSON.stringify(message)}`
+      );
+      assert.ok(
+        message.endsWith('Your file is intact.'),
+        `both must still reassure, got ${JSON.stringify(message)}`
+      );
+      // The escape, never the codepoint: this repository ships ZERO real U+2014
+      // bytes, and a test asserting their absence must not be the file that
+      // introduces one.
+      assert.ok(
+        !message.includes('\u2014'),
+        'no em dash may reach a shipped string'
+      );
+      // Printable ASCII only: the v0.3.0 string migration's practical test.
+      assert.ok(/^[\x20-\x7e]+$/.test(message), 'the message must be plain ASCII');
+    }
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* A SELECTION whose boundary falls inside a TAG is refused outright    */
+  /* ------------------------------------------------------------------ */
+  //
+  // The regression this patch created. Putting the slice's own leading
+  // whitespace run back (the G3-4 rule above) REPAIRS a start tag the selection
+  // cut in half, so the engine's repair is no longer a tree change for the guard
+  // to reject. What reaches the guard instead is a line break the engine
+  // inserted between two ADJACENT INLINE elements: a whitespace-only text node,
+  // exactly what the HTML guard normalises away. Accept, write, and the reader
+  // sees a different text.
+  //
+  //   DOC  '<div class="row"><button\n  class="btn">Save</button><button ...'
+  //   Format Selection [24,53)
+  //   at 4a72a32 : guard-rejected, "HTML tree changed after formatting", 0 edits
+  //   with the edge rule and no refusal : APPLIED, writing '...Save</button>\n<button'
+  //   Chromium innerText 'SaveCancel' -> 'Save Cancel' (box 103.89px -> 111.59px)
+  //
+  // Sweeping every selection of four ordinary snippets: 14 cells of 10141 turned
+  // from a rejection into a write that changed the rendered text (5/4560, 1/1326,
+  // 3/1770, 5/2485), and all 441 rendering-changing writes in that corpus have a
+  // boundary inside a tag. The refusal removes every one of them and removes NO
+  // write whose two boundaries were well formed.
+
+  const ROW_BUTTONS =
+    '<div class="row"><button\n  class="btn">Save</button><button\n  class="btn">Cancel</button></div>';
+
+  it('THE REGRESSION: a selection that cuts a tag is refused, with zero edits', async () => {
+    const document = new FakeDocument('html', ROW_BUTTONS, '/w/row.html');
+
+    const edits = await formatSelection(document, 24, 53);
+
+    assert.equal(edits.length, 0, 'zero edits: the file must stay byte-identical');
+    const record = lastRecord(document);
+    assert.equal(record.scope, 'selection');
+    // No engine ran and no guard verdict exists: the record must not claim one.
+    assert.equal(record.status, 'engine-error');
+    assert.ok(
+      record.detail?.startsWith('selection boundary inside a tag'),
+      `the reason must be explainable, got ${JSON.stringify(record.detail)}`
+    );
+  });
+
+  it('THE REGRESSION: and the two inline elements are never joined by a break', async () => {
+    const document = new FakeDocument('html', ROW_BUTTONS, '/w/row2.html');
+
+    const applied = applyEdits(ROW_BUTTONS, await formatSelection(document, 24, 53));
+
+    assert.equal(applied, ROW_BUTTONS, 'nothing may be written at all');
+    assert.ok(
+      !/<\/button>\s+<button/.test(applied),
+      `the buttons were separated by whitespace: ${JSON.stringify(applied)}`
+    );
+  });
+
+  it('says WHICH selection to make, with the usual two remedies', async () => {
+    const document = new FakeDocument('html', ROW_BUTTONS, '/w/row3.html');
+
+    await formatSelection(document, 24, 53);
+
+    assert.deepEqual(state.warnings, [providers.TAG_SPLIT_WARNING_MESSAGE]);
+    assert.deepEqual(state.warningActions[0], ['Explain', 'Report Issue']);
+    assert.ok(
+      providers.TAG_SPLIT_WARNING_MESSAGE.includes('Select whole elements'),
+      'the message must say what to do instead'
+    );
+  });
+
+  it('reproduces on <nav><a> and <p><span>, the other two shapes', async () => {
+    const shapes: ReadonlyArray<[string, string, number, number]> = [
+      ['nav', '<nav><a\n href="/a1">A</a><a\n href="/b1">B</a></nav>', 7, 26],
+      ['spans', '<p><span\n class="xx">a</span><span\n class="yy">b</span></p>', 8, 30]
+    ];
+    for (const [name, source, start, end] of shapes) {
+      const document = new FakeDocument('html', source, `/w/${name}.html`);
+      // eslint-disable-next-line no-await-in-loop
+      const edits = await formatSelection(document, start, end);
+      assert.equal(edits.length, 0, `${name} must be refused`);
+      assert.equal(lastRecord(document).status, 'engine-error');
+    }
+  });
+
+  it('leaves DOCUMENT scope alone: the same file still formats', async () => {
+    // The defect is a statement about a selection BOUNDARY, and a whole document
+    // has none of its own. Refusing here would break Format Document on any file
+    // with a multi-line tag, which is most real HTML.
+    const document = new FakeDocument('html', ROW_BUTTONS, '/w/row-doc.html');
+
+    const edits = await formatDocument(document);
+
+    assert.equal(edits.length, 1, 'the document must still be formatted');
+    assert.equal(lastRecord(document).status, 'applied');
+    assert.ok(
+      edits[0].newText.includes('Save</button><button'),
+      `the buttons must stay adjacent, got ${JSON.stringify(edits[0].newText)}`
+    );
+    assert.equal(state.warnings.length, 0, 'nothing to warn about at document scope');
+  });
+
+  it('is not a "refuse selections" switch: a well-formed one still formats', async () => {
+    const source = '<div><p>x</p></div>';
+    const document = new FakeDocument('html', source, '/w/wellformed.html');
+
+    const edits = await formatSelection(document, 0, source.length);
+
+    assert.equal(edits.length, 1);
+    assert.ok(edits[0].newText.includes('\n  <p>x</p>\n'));
+    assert.equal(lastRecord(document).status, 'applied');
+    assert.equal(state.warnings.length, 0);
+  });
+
+  it('refuses a boundary in a TAG only when the format would really write', async () => {
+    // Two conditions, and BOTH are needed. Refusing on the boundary alone was
+    // over-broad: most boundaries inside markup produce no edit at all, and
+    // turning those into a warning toast is noise on a silent no-op. Only a
+    // format that would write can carry the defect the rule exists for.
+    const inText = new FakeDocument('html', ROW_BUTTONS, '/w/in-text.html');
+    await formatSelection(inText, 40, 52); // inside 'Save', then just past '</button>'
+    assert.notEqual(lastRecord(inText).status, 'engine-error');
+
+    // Boundary inside a tag AND the pipeline wants to write: refused, zero edits.
+    const inTag = new FakeDocument('html', ROW_BUTTONS, '/w/in-tag.html');
+    const refused = await formatSelection(inTag, 24, 53);
+    assert.equal(lastRecord(inTag).status, 'engine-error');
+    assert.equal(refused.length, 0, 'a refusal writes nothing');
+
+    // Boundary inside a tag but nothing to change: stays a silent no-op, with no
+    // warning, exactly as it behaved before the rule existed.
+    const quiet = new FakeDocument('html', ROW_BUTTONS, '/w/quiet.html');
+    const before = state.warnings.length;
+    const noEdits = await formatSelection(quiet, 24, 52);
+    assert.equal(noEdits.length, 0);
+    assert.notEqual(lastRecord(quiet).status, 'engine-error');
+    assert.equal(
+      state.warnings.length,
+      before,
+      'a selection that changes nothing must not raise a toast'
+    );
+  });
+
+  it('is scoped to HTML: a JSX selection cutting a tag gets the engine answer', async () => {
+    // Other languages have their own "not a complete piece of code" path, and it
+    // must not be overwritten by a statement about markup.
+    const source = 'const a = <div\n  className="x">hi</div>;\n';
+    const document = new FakeDocument('typescriptreact', source, '/w/cut.tsx');
+
+    await formatSelection(document, source.indexOf('\n  className'), source.indexOf('hi'));
+
+    assert.ok(
+      !state.warnings.includes(providers.TAG_SPLIT_WARNING_MESSAGE),
+      'the HTML refusal must not fire on a JSX file'
+    );
+    assert.ok(
+      !lastRecord(document).detail?.startsWith('selection boundary inside a tag'),
+      'nor may it be recorded there'
+    );
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* A CR-only document is never left MIXED (both engine families)        */
+  /* ------------------------------------------------------------------ */
+  //
+  // The final-newline terminator was chosen with /\r\n/ alone, so a bare-CR
+  // document got an LF glued onto its last line: a whitespace-only difference,
+  // "equivalent" to the guard, WRITTEN. New for the Prettier family with this
+  // patch (it used to return uniform LF) and pre-existing for js-beautify.
+
+  const CR_ONLY: ReadonlyArray<[string, string, string]> = [
+    ['js-beautify', 'css', '.a{color:red}\r.b{color:blue}'],
+    ['prettier', 'typescript', 'const  a=1\rconst  b=2']
+  ];
+
+  for (const [family, lang, source] of CR_ONLY) {
+    it(`keeps a CR-only document uniform on the ${family} path`, async () => {
+      state.files.insertFinalNewline = true;
+      const document = new FakeDocument(lang, source, `/w/cr-${lang}`);
+
+      const edits = await formatDocument(document);
+      const applied = applyEdits(source, edits);
+
+      assert.ok(
+        !applied.includes('\n'),
+        `a lone LF was glued onto a CR-only file: ${JSON.stringify(applied)}`
+      );
+      assert.ok(
+        applied.endsWith('\r'),
+        `insertFinalNewline must still add one: ${JSON.stringify(applied)}`
+      );
+    });
+  }
+
+  it('restores a CR-only final newline as CR when nobody asked for one', async () => {
+    const source = '.a{color:red}\r';
+    const document = new FakeDocument('css', source, '/w/cr-restore.css');
+
+    const applied = applyEdits(source, await formatDocument(document));
+
+    assert.ok(!applied.includes('\n'), `got ${JSON.stringify(applied)}`);
+    assert.ok(applied.endsWith('\r'), `got ${JSON.stringify(applied)}`);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* An EXPLICIT files.eol owns the restored slice edges too              */
+  /* ------------------------------------------------------------------ */
+  //
+  // The edge rule put the slice's own runs back byte for byte, which is right
+  // when the user has said nothing and wrong when they have: the engine converts
+  // the slice's INTERIOR to the requested ending and a verbatim edge keeps the
+  // old one, so a full-span Format Selection wrote a MIXED slice. That is
+  // defect C-04's shape, and the guard cannot see it. 251 of 7491 selections
+  // over seven documents x three settings, 9 of 21 of them full-span.
+
+  /** Distinct line-ending styles in a text. */
+  function eolStyles(text: string): string[] {
+    return [...new Set(text.match(/\r\n|\r|\n/g) ?? [])];
+  }
+
+  const EOL_CASES: ReadonlyArray<[string, string, string, string, number, number]> = [
+    ['js-beautify full span, crlf file, files.eol lf', 'css', '.a{color:red}\r\n.b{color:blue}\r\n', '\n', 0, 31],
+    ['js-beautify full span, lf file, files.eol crlf', 'css', '.a{color:red}\n.b{color:blue}\n', '\r\n', 0, 29],
+    ['js-beautify partial, crlf file, files.eol lf', 'css', '.a{color:red}\r\n.b{color:blue}\r\n', '\n', 0, 15],
+    ['html full span, crlf file, files.eol lf', 'html', '<div>\r\n<p>x</p>\r\n</div>\r\n', '\n', 0, 25],
+    ['prettier full span, crlf file, files.eol lf', 'typescript', 'const  a=1\r\nconst  b=2\r\n', '\n', 0, 24],
+    ['prettier full span, lf file, files.eol crlf', 'typescript', 'const  a=1\nconst  b=2\n', '\r\n', 0, 22],
+    ['prettier partial, crlf file, files.eol lf', 'typescript', 'const  a=1\r\nconst  b=2\r\n', '\n', 0, 12]
+  ];
+
+  for (const [name, lang, source, eol, start, end] of EOL_CASES) {
+    it(`writes ONE line-ending style: ${name}`, async () => {
+      state.files.eol = eol;
+      const document = new FakeDocument(lang, source, `/w/eol-${name.replace(/W+/g, "-")}`);
+
+      const edits = await formatSelection(document, start, end);
+
+      assert.equal(edits.length, 1, 'the selection must still be formatted');
+      assert.deepEqual(
+        eolStyles(edits[0].newText),
+        [eol],
+        `the written span is mixed: ${JSON.stringify(edits[0].newText)}`
+      );
+    });
+  }
+
+  it('an UNSET files.eol still puts the edge bytes back verbatim', async () => {
+    // "The user has not said" is exactly when keeping the document's own bytes
+    // is the right rule, and that half of the edge promise must not move.
+    const source = '.a{color:red}\r\n.b{color:blue}\r\n';
+    const document = new FakeDocument('css', source, '/w/eol-unset.css');
+
+    const edits = await formatSelection(document, 0, source.length);
+
+    assert.equal(edits.length, 1);
+    assert.ok(
+      edits[0].newText.endsWith('\r\n'),
+      `the slice trailing run must survive: ${JSON.stringify(edits[0].newText)}`
+    );
+  });
+
+  it('an explicit files.eol does not disturb a whitespace-only selection', async () => {
+    // No content was printed, so there is no converted interior for a restored
+    // edge to disagree with, and in HTML that run IS a rendered space.
+    const source = '<p>a <b>x</b>\r\n<i>y</i> b</p>';
+    const start = source.indexOf('</b>') + '</b>'.length;
+    const end = source.indexOf('<i>');
+    state.files.eol = '\n';
+    const document = new FakeDocument('html', source, '/w/eol-blank.html');
+
+    const edits = await formatSelection(document, start, end);
+
+    assert.equal(applyEdits(source, edits), source);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* ...but an explicit files.eol stops at a PROTECTED span               */
+  /* ------------------------------------------------------------------ */
+  //
+  // The rule above owns the slice's OWN whitespace. When a slice edge run
+  // reaches into a span the mask restored VERBATIM moments earlier, normalising
+  // it rewrote line endings INSIDE an ignore region or a template island:
+  //
+  //   src        "<div>\n<!-- tidy-ignore-start -->\n  <b>  k  </b>\n" ...
+  //   selection  [0,48), files.eol = crlf
+  //   before     "...</b>\n<!-- tidy-ignore-end -->"    protected bytes verbatim
+  //   the defect "...</b>\r\n<!-- tidy-ignore-end -->"  an LF rewritten INSIDE
+  //
+  // No meaning changed, so it was not a corruption and the guard accepted it.
+  // README and CHANGELOG both promise those bytes come back BYTE FOR BYTE, and a
+  // documented guarantee that is quietly false is the defect class v0.4.0 was
+  // spent eliminating. 54 occurrences over two documents in the campaign; an
+  // exhaustive paired sweep of 27 705 selection x files.eol cells (all three
+  // settings) found 242 and now finds none, with the same 507 guard rejections
+  // and the same 17 556 refusals on both sides.
+
+  /** The document of the defect report: a tidy-ignore region, LF throughout. */
+  const REGION_DOC =
+    '<div>\n<!-- tidy-ignore-start -->\n  <b>  k  </b>\n<!-- tidy-ignore-end -->\n</div>';
+  /** The bytes that region PROMISES to hand back untouched. */
+  const REGION_BYTES = '<!-- tidy-ignore-start -->\n  <b>  k  </b>\n';
+  /** A multi-line <% %> island: the same defect, the other protecting layer. */
+  const ISLAND_DOC = '<div>\n<% if (x) {\n  go();\n} %>\n</div>';
+
+  it('THE DEFECT: a trailing run INSIDE an ignore region keeps its line ending', async () => {
+    state.files.eol = '\r\n';
+    const document = new FakeDocument('html', REGION_DOC, '/w/protected-region.html');
+
+    const edits = await formatSelection(document, 0, 48);
+
+    assert.equal(edits.length, 1, 'the selection is still formatted');
+    assert.ok(
+      edits[0].newText.includes(REGION_BYTES),
+      `the protected bytes must come back verbatim, got ${JSON.stringify(
+        edits[0].newText
+      )}`
+    );
+    assert.ok(
+      edits[0].newText.endsWith('</b>\n'),
+      `the edge run inside the region must stay LF, got ${JSON.stringify(
+        edits[0].newText
+      )}`
+    );
+    // ...and the line ending OUTSIDE the region still follows the user: the fix
+    // is not "skip normalisation whenever a mask exists".
+    assert.ok(
+      edits[0].newText.startsWith('<div>\r\n'),
+      `the slice own line ending must follow files.eol, got ${JSON.stringify(
+        edits[0].newText
+      )}`
+    );
+  });
+
+  it('the mirror case: an explicit LF leaves a protected CRLF alone', async () => {
+    const source =
+      '<div>\r\n<!-- tidy-ignore-start -->\r\n  <b>  k  </b>\r\n<!-- tidy-ignore-end -->\r\n</div>';
+    state.files.eol = '\n';
+    const document = new FakeDocument('html', source, '/w/protected-region-crlf.html');
+
+    const edits = await formatSelection(document, 0, 51);
+
+    assert.equal(edits.length, 1);
+    assert.ok(
+      edits[0].newText.includes('<!-- tidy-ignore-start -->\r\n  <b>  k  </b>\r\n'),
+      `the protected CRLFs must survive, got ${JSON.stringify(edits[0].newText)}`
+    );
+    assert.ok(
+      edits[0].newText.startsWith('<div>\n'),
+      `the slice own line ending must follow files.eol, got ${JSON.stringify(
+        edits[0].newText
+      )}`
+    );
+  });
+
+  for (const eol of ['\n', undefined]) {
+    const label = eol === undefined ? 'unset' : 'lf';
+    it(`leaves the region untouched with files.eol ${label}`, async () => {
+      if (eol !== undefined) state.files.eol = eol;
+      const document = new FakeDocument(
+        'html',
+        REGION_DOC,
+        `/w/protected-region-${label}.html`
+      );
+
+      const edits = await formatSelection(document, 0, 48);
+
+      assert.ok(
+        applyEdits(REGION_DOC, edits).includes(REGION_BYTES),
+        'the protected bytes must survive whatever the setting says'
+      );
+    });
+  }
+
+  for (const [label, eol] of [
+    ['crlf', '\r\n'],
+    ['lf', '\n'],
+    ['unset', undefined]
+  ] as const) {
+    it(`a trailing run inside a TEMPLATE ISLAND keeps its bytes (files.eol ${label})`, async () => {
+      // [0,18) cuts the island: its clipped part is masked and restored
+      // verbatim, and the slice's trailing run is the LF inside it.
+      if (eol !== undefined) state.files.eol = eol;
+      const document = new FakeDocument(
+        'html',
+        ISLAND_DOC,
+        `/w/protected-island-${label}.html`
+      );
+
+      const edits = await formatSelection(document, 0, 18);
+
+      assert.equal(edits.length, 1, 'the selection is still formatted');
+      assert.ok(
+        edits[0].newText.includes('<% if (x) {\n'),
+        `the island bytes must come back verbatim, got ${JSON.stringify(
+          edits[0].newText
+        )}`
+      );
+    });
+  }
+
+  it('ADJACENT BUT OUTSIDE: the line ending after an island still follows files.eol', async () => {
+    // The proof that the fix is precise rather than blunt. The trailing run is
+    // the LF just PAST '%>', so it is the slice's own whitespace and the user's
+    // setting owns it, while the island's interior stays byte for byte.
+    state.files.eol = '\r\n';
+    const document = new FakeDocument('html', ISLAND_DOC, '/w/island-adjacent.html');
+
+    const edits = await formatSelection(document, 0, 31);
+
+    assert.equal(edits.length, 1);
+    assert.ok(
+      edits[0].newText.endsWith('} %>\r\n'),
+      `the run outside the island must be normalised, got ${JSON.stringify(
+        edits[0].newText
+      )}`
+    );
+    assert.ok(
+      edits[0].newText.includes('<% if (x) {\n  go();\n} %>'),
+      `the island itself must stay verbatim, got ${JSON.stringify(edits[0].newText)}`
+    );
+  });
+
+  for (const [label, eol, expected] of [
+    ['crlf', '\r\n', '<div>\r\n  <p>x</p>\r\n'],
+    ['lf', '\n', '<div>\n  <p>x</p>\n'],
+    ['unset', undefined, '<div>\n  <p>x</p>\n']
+  ] as const) {
+    it(`NO protected span: the edge rule is exactly what it was (files.eol ${label})`, async () => {
+      const source = '<div>\n<p>x</p>\n</div>';
+      if (eol !== undefined) state.files.eol = eol;
+      const document = new FakeDocument('html', source, `/w/no-protection-${label}.html`);
+
+      const edits = await formatSelection(document, 0, 15);
+
+      assert.equal(edits.length, 1);
+      assert.equal(edits[0].newText, expected);
+    });
+  }
 });

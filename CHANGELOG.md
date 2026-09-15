@@ -4,6 +4,65 @@ All notable changes to **Tidy Formatter : JS/CSS/HTML** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-09-15
+
+A patch release, fixes only. It closes fourteen verified defects, every one of
+them reproduced with a probe against the shipped code before being touched, and
+it does so WITHOUT changing a single line of logic in the safety guard: the whole
+diff for `src/safety/guard.ts` is comments. The rule for this release was to stop
+handing the guard a bad input rather than to change what the guard believes.
+
+Measured against 0.4.0 by a paired campaign (every selection boundary on a corpus
+of documents, plus a large random sweep, run through both builds and judged by an
+oracle built from the parsers rather than from the guard): **2 029 writes that
+corrupt on 0.4.0 no longer do, and nothing new does.**
+
+### Fixed : what Tidy writes
+
+- **Format Selection could silently change what your HTML renders.** js-beautify trims the edges of the slice it is handed, and the guard does not see a whitespace-only text node disappear, so `<p>hello <b>x</b> <i>y</i></p>` could be written back as `hello xy`. Measured on five ordinary snippets: 353 of 7 266 possible selections wrote a changed rendering; now 0. Whole-document formatting was never affected.
+- **A selection ending in a line break never stopped changing the file.** The printer stripped the final break and the splice glued the next line on, so each format produced another edit, for ever: passes 1 through 6 gave 1, 1, 1, 1, 1, 1 edits in JavaScript, HTML, JSON and CSS alike. They now settle on pass 2, which is what the README has always promised.
+- **A selection cutting through a tag could write mangled markup.** Such a range is not a formattable unit: Tidy now refuses it explicitly, with zero edits and a message saying to select whole elements, instead of relying on a guard rejection that happened to fire by accident.
+  - **This refusal is deliberately WIDER than the defect, and you may notice it.** Of the selections it declines, roughly seven percent were the ones that corrupted; the rest would have reformatted safely. Telling them apart needs the guard to model which whitespace a browser actually draws, which is a design change scheduled for 0.5.0, so until then Tidy refuses the whole class rather than guess. Selecting whole lines or whole elements, which is what an editor's line and block selections give you, is unaffected; a drag that starts or ends in the middle of `<button` now ends in a message instead of a reformat.
+- **An apostrophe in HTML text silently destroyed `tidy-ignore` protection.** One `'` anywhere before the markers made the scanner treat the rest of the file as a string, so the protected region was never masked AND no notice was shown: the formatter then rewrote bytes you had explicitly fenced. The marker scanner now models markup properly (character data, inside a tag, raw text inside `<script>` and `<style>`) and quotes bind only where the language really quotes.
+- **Line endings.** Several paths wrote a file with mixed endings. With `insertFinalNewline` on and no explicit `files.eol`, the js-beautify family appended a bare LF to a CRLF document; the Prettier family rewrote a whole CRLF document to LF; a CR-only document got an LF terminator; and a full-span selection with an explicit `files.eol` converted the interior while restoring the edge verbatim. The rule is now one rule everywhere: when you have said what you want, Tidy writes that, and when you have not, it keeps what the document already uses.
+- **Protected spans stay byte for byte, even against an explicit `files.eol`.** An explicit end-of-line setting applies to the whitespace of your own selection, never to bytes inside a `tidy-ignore` region or a template island. That was the documented promise and it is now true in this case too.
+
+### Fixed : commands
+
+- **`Tidy: Use Tidy as my Formatter` could leave a partial write behind.** If the settings write failed part-way, the languages already written stayed written while the message said nothing had been saved. It now rolls back, reusing the mechanism the format-on-save path already had, and if a key genuinely cannot be restored the message names it instead of claiming a clean failure.
+- **`Preview Format (Diff)` showed a stale diff on a second preview.** VS Code resolves a read-only document URI once, so previewing the same file twice displayed the FIRST result while *Apply* wrote the current one. Each preview now gets its own URI.
+- **A component named `_Foo` or `$Bar` no longer breaks formatting.** The check that routes a `.js` file containing JSX to Prettier ignored those two leading characters, so the file went to js-beautify, came back mangled, and was correctly rejected by the guard: a warning and no format, on perfectly ordinary code.
+
+### Fixed : other
+
+- **A `tidy-ignore` region no longer disables the CSS second chance.** The placeholder was not valid CSS, so the PostCSS fallback threw and a file the first engine had rejected ended up formatted by nobody. The placeholder is now comment-shaped and survives both engines.
+- **Formatting a large template file is no longer quadratic.** Restoring protected islands was O(bytes x islands): 727 KB with 18 001 islands took 13.2 seconds. It now takes 10 milliseconds, with byte-identical output verified over 54 608 differential comparisons and every damage check (a dropped, duplicated, split or case-changed placeholder) still refused.
+- **An engine failure no longer says your file could not be verified.** A selection that is not a complete piece of code makes the printer fail, which is a normal thing to happen; it was being reported with the guard's wording, which accuses the file of something the verifier never got to check.
+
+### Fixed : packaging and release
+
+- **Scratch files could be packaged into the extension.** Directories named `_probe*` were in neither `.gitignore` nor `.vscodeignore`, and `vsce ls` really did list their non-TypeScript contents among the packaged files. They are excluded now, verified by planting one and checking the package listing, nested directories included. No released version is known to have shipped one.
+- **A manual workflow run can no longer publish.** The release workflow only checked that the ref was a tag, not that the run came from a push, so a `workflow_dispatch` on an existing tag would really publish to both registries. It now requires both. The publishing tokens were also being passed on the command line, where they are visible in the process list; they stay in the environment.
+
+### Documentation
+
+- **Three comments denied something the README discloses honestly.** The guard keeps the first line of a parser error and drops only the code frame, and that first line names the offending token, so a diagnostic can read `Identifier 'CLIENT_SECRET_abc123' has already been declared`. README says so; `previewFormat.ts`, `lastFormat.ts` and `statusBar.ts` each claimed the opposite, as did a comment inside the guard itself. Corrected to match the behaviour, which is unchanged.
+- The notice shown when `tidy-ignore` cannot be honoured on the Prettier path advised using `// prettier-ignore` "which it honours natively". That is not true during *Format Selection*, where Prettier is handed only the selected lines and cannot see a directive outside them.
+- README now states a real deviation instead of denying it: `tidy.prettier.printWidth` currently overrides `.editorconfig` `max_line_length` and `.soukformatrc`, which the documented layer order says it should not. The code fix is scheduled for 0.5.0.
+- Corrected a comment claiming the `.soukformatrc` upward-walk defect was still open (0.4.0 fixed it) and a test header claiming coverage of a migration write path that has none.
+
+### Tests
+
+- 4 074 to 4 401 unit tests, and 63 of 63 integration tests in a real VS Code host.
+- **One integration test was passing only because of a defect.** Its HTML fixture was the formatter's exact fixed point, so the only reason it ever produced an edit was the final-newline bug fixed in this release. Worse, at zero edits the pipeline short-circuits, so the case could not prove the thing it existed to prove. The fixture was replaced and the missing assertion added: nothing anywhere asserted that formatting HTML loads the HTML guard chunk, which is how the drift went unnoticed for two releases.
+
+### Known limitations
+
+Unchanged from 0.4.0, and still true:
+
+- A line-scoped directive comment (`// @ts-expect-error`, `// eslint-disable-next-line`) can end up governing a different line when reflow splits the statement it covered. Comments are compared as a position-free multiset, so the guard does not see it. Runtime semantics are unchanged; only what the type checker or linter suppresses moves. The fix is a new guard rule, which measured two false rejects over the 174 files of this repository, so it needs a wider corpus than one project before it ships.
+- `// prettier-ignore` is not honoured during *Format Selection* on the TypeScript path, because Prettier is handed only the selected span and cannot see a directive that sits outside it.
+
 ## [0.4.0] - 2026-09-08
 
 The release that makes Tidy start fast, read your project's Prettier config, and

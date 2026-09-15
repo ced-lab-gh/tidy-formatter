@@ -218,13 +218,24 @@ jobs:
       - name: Publish to VS Marketplace
         id: publish_mp
         continue-on-error: true
+        # ANTI-DISPATCH GUARD (v0.4.1, I-16): github.event_name == 'push'.
+        # The header above documents workflow_dispatch as a DRY RUN that
+        # publishes nothing, and nothing enforced it: ref_type is not an event
+        # test, and a manual dispatch started FROM a tag ref reports
+        # github.ref_type == 'tag' just like a tag push, so this step really
+        # published, to a live registry, irreversibly. The event name is the
+        # only thing that separates a real release from a rehearsal.
         if: >-
-          github.ref_type == 'tag'
+          github.event_name == 'push'
+          && github.ref_type == 'tag'
           && steps.vsce_secret.outputs.present == 'true'
           && steps.probe.outputs.marketplace_published != 'true'
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx @vscode/vsce publish -p "$VSCE_PAT" --packagePath tidy-formatter.vsix
+        # The token is passed ONLY through env: above. vsce reads VSCE_PAT from
+        # the environment, so -p "$VSCE_PAT" added nothing and put the secret in
+        # argv, where any process listing on the runner can read it.
+        run: npx @vscode/vsce publish --packagePath tidy-formatter.vsix
 
       # Open VSX --------------------------------------------------------------
       # Every Open VSX step carries always() so a Marketplace failure upstream
@@ -249,14 +260,19 @@ jobs:
       - name: Publish to Open VSX
         id: publish_ovsx
         continue-on-error: true
+        # Same anti-dispatch guard as the Marketplace step, and it must be
+        # repeated here: always() keeps this step reachable after an upstream
+        # failure, so it needs its own event test.
         if: >-
           always()
+          && github.event_name == 'push'
           && github.ref_type == 'tag'
           && steps.ovsx_secret.outputs.present == 'true'
           && steps.probe.outputs.ovsx_published != 'true'
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx ovsx publish tidy-formatter.vsix -p "$OVSX_PAT"
+        # Token through env: only (ovsx reads OVSX_PAT), never in argv.
+        run: npx ovsx publish tidy-formatter.vsix
 
       # Final gate: both registries have been given their chance; now fail loudly
       # if either attempt failed. This keeps continue-on-error above from turning

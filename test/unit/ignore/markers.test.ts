@@ -263,3 +263,242 @@ describe('ignore/markers : no markers / edge cases', () => {
     assert.ok(!first.includes('gap'));
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* v0.4.1 M3-4 : quoting is POSITIONAL in markup                               */
+/* -------------------------------------------------------------------------- */
+
+describe('ignore/markers : quotes never swallow the marker scan (M3-4)', () => {
+  /** The same document, with `text` dropped into its first paragraph. */
+  function htmlWith(text: string): string {
+    return [
+      '<div>',
+      `  <p>${text}</p>`,
+      '  <!-- tidy-ignore-start -->',
+      '      <pre>KEEP  ME</pre>',
+      '  <!-- tidy-ignore-end -->',
+      '</div>'
+    ].join('\n');
+  }
+
+  // Every apostrophe count from 0 to 5: parity must not decide protection.
+  // Before the fix, an ODD count left protectedRanges EMPTY and the provider
+  // had nothing to protect AND nothing to report.
+  for (let count = 0; count <= 5; count += 1) {
+    it(`protects the region with ${count} apostrophe(s) in the HTML text`, () => {
+      const html = htmlWith(`it${"'".repeat(count)}s fine`);
+      const scan = scanMarkers(html, 'html');
+      assert.equal(
+        scan.protectedRanges.length,
+        1,
+        `an apostrophe in character data is a letter, not a delimiter (count=${count})`
+      );
+      const [protectedText] = slices(html, scan.protectedRanges);
+      assert.match(protectedText, /tidy-ignore-start[\s\S]*KEEP {2}ME[\s\S]*tidy-ignore-end/);
+    });
+  }
+
+  it('a double quote in HTML text is a character too, at any count', () => {
+    for (const text of ['he said "hi', 'he said "hi"', 'a " b " c "']) {
+      assert.equal(
+        scanMarkers(htmlWith(text), 'html').protectedRanges.length,
+        1,
+        `unbalanced double quotes must not hide the markers: ${text}`
+      );
+    }
+  });
+
+  it('the marker line itself is reported, not an earlier one', () => {
+    const html = htmlWith("don't");
+    const scan = scanMarkers(html, 'html');
+    const [range] = scan.protectedRanges;
+    assert.equal(
+      html.slice(range.start, html.indexOf('\n', range.start)),
+      '  <!-- tidy-ignore-start -->',
+      'the region must open at the START of the marker line, indentation included'
+    );
+  });
+
+  it('a quoted ATTRIBUTE value still hides what it contains', () => {
+    const html = [
+      '<div>',
+      "  <a href='/x' title='a <!-- tidy-ignore-start --> b'>link</a>",
+      '  <p>plain</p>',
+      '</div>'
+    ].join('\n');
+    assert.equal(
+      scanMarkers(html, 'html').protectedRanges.length,
+      0,
+      'a marker inside an attribute value is not a comment'
+    );
+  });
+
+  it('an attribute value may span lines without losing the markers below it', () => {
+    const html = [
+      '<div',
+      '  title="first',
+      '         second">',
+      '  <!-- tidy-ignore-start -->',
+      '      <pre>KEEP</pre>',
+      '  <!-- tidy-ignore-end -->',
+      '</div>'
+    ].join('\n');
+    const scan = scanMarkers(html, 'html');
+    assert.equal(scan.protectedRanges.length, 1);
+    const [protectedText] = slices(html, scan.protectedRanges);
+    assert.match(protectedText, /tidy-ignore-start[\s\S]*KEEP[\s\S]*tidy-ignore-end/);
+  });
+
+  it('inside <script> the JS quoting rules DO apply', () => {
+    const html = [
+      '<div>',
+      '  <script>',
+      "    var s = 'a <!-- tidy-ignore-start --> b';",
+      '  </script>',
+      '  <p>x</p>',
+      '</div>'
+    ].join('\n');
+    assert.equal(
+      scanMarkers(html, 'html').protectedRanges.length,
+      0,
+      'a marker inside a JS string literal is not a comment'
+    );
+  });
+
+  it('inside <style> the CSS quoting rules DO apply', () => {
+    const html = [
+      '<div>',
+      '  <style>',
+      '    .a { content: "<!-- tidy-ignore-start -->"; }',
+      '  </style>',
+      '  <p>x</p>',
+      '</div>'
+    ].join('\n');
+    assert.equal(scanMarkers(html, 'html').protectedRanges.length, 0);
+  });
+
+  it('a real marker after a </script> is still found', () => {
+    const html = [
+      '<div>',
+      '  <script>',
+      '    var s = "it\'s fine";',
+      '  </script>',
+      '  <!-- tidy-ignore-start -->',
+      '      <pre>KEEP</pre>',
+      '  <!-- tidy-ignore-end -->',
+      '</div>'
+    ].join('\n');
+    const scan = scanMarkers(html, 'html');
+    assert.equal(scan.protectedRanges.length, 1);
+    const [protectedText] = slices(html, scan.protectedRanges);
+    assert.match(protectedText, /tidy-ignore-start[\s\S]*KEEP[\s\S]*tidy-ignore-end/);
+  });
+
+  it('an apostrophe inside a <script> comment does not hide the markers below', () => {
+    const html = [
+      '<div>',
+      '  <script>',
+      "    var a = 1; /* don't worry */",
+      '  </script>',
+      '  <!-- tidy-ignore-start -->',
+      '      <pre>KEEP</pre>',
+      '  <!-- tidy-ignore-end -->',
+      '</div>'
+    ].join('\n');
+    assert.equal(scanMarkers(html, 'html').protectedRanges.length, 1);
+  });
+
+  it('an apostrophe in text does not turn `a < b` into a tag', () => {
+    const html = [
+      "<p>don't compare a < b</p>",
+      '<!-- tidy-ignore-start -->',
+      'KEEP',
+      '<!-- tidy-ignore-end -->'
+    ].join('\n');
+    assert.equal(scanMarkers(html, 'html').protectedRanges.length, 1);
+  });
+
+  it('a DOCTYPE with quoted identifiers does not hide the markers', () => {
+    const html = [
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN">',
+      '<!-- tidy-ignore-start -->',
+      'KEEP',
+      '<!-- tidy-ignore-end -->'
+    ].join('\n');
+    assert.equal(scanMarkers(html, 'html').protectedRanges.length, 1);
+  });
+});
+
+describe('ignore/markers : one stray quote never hides the rest of a file', () => {
+  it('CSS: an unterminated quote does not swallow the markers below it', () => {
+    const css = [
+      '.a { content: "oops; }',
+      '/* tidy-ignore-start */',
+      '   .keep  {  color : red  }',
+      '/* tidy-ignore-end */'
+    ].join('\n');
+    const scan = scanMarkers(css, 'css');
+    assert.equal(scan.protectedRanges.length, 1);
+    const [protectedText] = slices(css, scan.protectedRanges);
+    assert.match(protectedText, /tidy-ignore-start[\s\S]*\.keep[\s\S]*tidy-ignore-end/);
+  });
+
+  it('JS: an unterminated quote does not swallow the markers below it', () => {
+    const js = ["const s = 'oops;", '// tidy-ignore-start', 'keep();', '// tidy-ignore-end'].join(
+      '\n'
+    );
+    const scan = scanMarkers(js, 'javascript');
+    assert.equal(scan.protectedRanges.length, 1);
+    const [protectedText] = slices(js, scan.protectedRanges);
+    assert.match(protectedText, /tidy-ignore-start[\s\S]*keep\(\);[\s\S]*tidy-ignore-end/);
+  });
+
+  it('JS: a TERMINATED string still hides a marker inside it', () => {
+    const js = ["const s = '// tidy-ignore-start';", 'const t = 2;'].join('\n');
+    assert.equal(scanMarkers(js, 'javascript').protectedRanges.length, 0);
+  });
+
+  it('JS: a multi-line template literal hides its contents but not what follows', () => {
+    const js = [
+      'const s = `line one',
+      '// tidy-ignore-start',
+      'line three`;',
+      '// tidy-ignore-start',
+      'keep();',
+      '// tidy-ignore-end'
+    ].join('\n');
+    const scan = scanMarkers(js, 'javascript');
+    assert.equal(scan.protectedRanges.length, 1);
+    const [protectedText] = slices(js, scan.protectedRanges);
+    assert.ok(
+      protectedText.startsWith('// tidy-ignore-start\nkeep();'),
+      `the region must open on the REAL marker line, got ${JSON.stringify(protectedText)}`
+    );
+  });
+
+  it('JSON: an apostrophe cannot open a string there', () => {
+    const json = [
+      '{',
+      "  // it's a comment",
+      '  // tidy-ignore-start',
+      '  "a": 1,',
+      '  // tidy-ignore-end',
+      '  "b": 2',
+      '}'
+    ].join('\n');
+    const scan = scanMarkers(json, 'json');
+    assert.equal(scan.protectedRanges.length, 1);
+    const [protectedText] = slices(json, scan.protectedRanges);
+    assert.match(protectedText, /tidy-ignore-start[\s\S]*"a": 1,[\s\S]*tidy-ignore-end/);
+  });
+
+  it('CSS: a backtick is not a string delimiter', () => {
+    const css = [
+      '.a { content: "x`y"; }',
+      '/* tidy-ignore-start */',
+      '.keep {}',
+      '/* tidy-ignore-end */'
+    ].join('\n');
+    assert.equal(scanMarkers(css, 'css').protectedRanges.length, 1);
+  });
+});

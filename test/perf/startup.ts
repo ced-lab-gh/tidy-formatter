@@ -111,7 +111,9 @@ function runActivationChild(): ActivationSample {
   if (
     typeof sample?.activateMs !== 'number' ||
     !Array.isArray(sample?.chunksAfterActivate) ||
-    typeof sample?.typescript?.editCount !== 'number'
+    !Array.isArray(sample?.chunksAfterHtml) ||
+    typeof sample?.typescript?.editCount !== 'number' ||
+    typeof sample?.html?.editCount !== 'number'
   ) {
     throw new Error(`activation child printed an unexpected payload: ${stdout}`);
   }
@@ -132,7 +134,8 @@ function printActivationSummary(sample: ActivationSample): void {
       `(budget < ${ACTIVATION_BUDGET.firstTsFormatMs * TIME_MULTIPLIER} ms, no preload), ` +
       `${sample.typescript.editCount} edit(s); chunks: ${list(sample.chunksAfterTypescript)}\n` +
       `  json format      ${sample.json.editCount} edit(s); chunks: ${list(sample.chunksAfterJson)}\n` +
-      `  css format       ${sample.css.editCount} edit(s); chunks: ${list(sample.chunksAfterCss)}`
+      `  css format       ${sample.css.editCount} edit(s); chunks: ${list(sample.chunksAfterCss)}\n` +
+      `  html format      ${sample.html.editCount} edit(s); chunks: ${list(sample.chunksAfterHtml)}`
   );
 }
 

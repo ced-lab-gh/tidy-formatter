@@ -301,6 +301,38 @@ export function flushEventLoop(): Promise<void> {
  * extension's timing is not evidence about Tidy, so the caller decides whether
  * a timeout is a failure or merely a cross-check it could not run.
  */
+/**
+ * Remove a fixture directory from the test workspace, and do NOT fail the suite
+ * if Windows will not let go of it.
+ *
+ * WHY IT DOES NOT THROW. On Windows the editor, the file watcher and hot-exit
+ * backup all keep a handle open for a beat after the editors close, and a
+ * recursive delete loses that race with EPERM. Node's own retry loop covers the
+ * common case, but one run in three still lost it, which turned a CLEANUP race
+ * into a red integration gate while all 63 product assertions passed. A red gate
+ * that means nothing is worse than a leftover directory: the next run's
+ * openFixture overwrites the fixture anyway, so nothing leaks INTO a later
+ * assertion. The failure is reported instead, so a directory that is genuinely
+ * stuck is still visible in the log.
+ */
+export function removeFixtureDir(relativeDir: string): void {
+  const target = path.join(workspaceRoot(), relativeDir);
+  try {
+    fs.rmSync(target, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 150
+    });
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[cleanup] could not remove ${relativeDir}: ${reason}. ` +
+        'Not failing the suite: this is a Windows handle race in teardown, not a product defect.'
+    );
+  }
+}
+
 export async function waitUntil(
   predicate: () => boolean,
   timeoutMs = 2000

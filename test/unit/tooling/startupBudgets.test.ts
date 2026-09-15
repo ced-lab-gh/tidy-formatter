@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   ACTIVATION_BUDGET,
   CSS_FORMAT_CHUNK,
+  HTML_FORMAT_CHUNK,
   STARTUP_BUDGET,
   TS_FORMAT_CHUNKS,
   collectActivationViolations,
@@ -199,6 +200,7 @@ function activationSample(
   overrides: Partial<ActivationSample> = {}
 ): ActivationSample {
   const afterTs = [...TS_FORMAT_CHUNKS];
+  const afterCss = [...afterTs, CSS_FORMAT_CHUNK];
   return {
     requireMs: 30,
     activateMs: 2,
@@ -209,10 +211,12 @@ function activationSample(
     chunksAfterActivate: [],
     chunksAfterTypescript: afterTs,
     chunksAfterJson: afterTs,
-    chunksAfterCss: [...afterTs, CSS_FORMAT_CHUNK],
+    chunksAfterCss: afterCss,
+    chunksAfterHtml: [...afterCss, HTML_FORMAT_CHUNK],
     typescript: { elapsedMs: 160, editCount: 1, editText: 'const a: number = 1;\n' },
     json: { elapsedMs: 4, editCount: 1, editText: '{\n  "a": 1\n}' },
     css: { elapsedMs: 15, editCount: 1, editText: '.a {\n  color: red\n}' },
+    html: { elapsedMs: 20, editCount: 1, editText: '<div><span>x</span></div>\n' },
     warnings: [],
     ...overrides
   };
@@ -273,7 +277,9 @@ describe('startupBudgets : collectActivationViolations (ADD-11)', () => {
       activationSample({
         chunksAfterTypescript: ['chunk-prettier.js'],
         chunksAfterJson: ['chunk-prettier.js'],
-        chunksAfterCss: ['chunk-prettier.js', CSS_FORMAT_CHUNK]
+        chunksAfterCss: ['chunk-prettier.js', CSS_FORMAT_CHUNK],
+        // Kept consistent downstream so ONLY the typescript rule fires.
+        chunksAfterHtml: ['chunk-prettier.js', CSS_FORMAT_CHUNK, HTML_FORMAT_CHUNK]
       }),
       ACTIVATION_BUDGET,
       1
@@ -298,12 +304,74 @@ describe('startupBudgets : collectActivationViolations (ADD-11)', () => {
 
   it('flags a css format that did not pull the postcss guard chunk', () => {
     const violations = collectActivationViolations(
-      activationSample({ chunksAfterCss: [...TS_FORMAT_CHUNKS] }),
+      activationSample({
+        chunksAfterCss: [...TS_FORMAT_CHUNKS],
+        // Kept consistent downstream so ONLY the css rule fires.
+        chunksAfterHtml: [...TS_FORMAT_CHUNKS, HTML_FORMAT_CHUNK]
+      }),
       ACTIVATION_BUDGET,
       1
     );
     assert.equal(violations.length, 1);
     assert.match(violations[0].budget, /css format adds exactly/);
+  });
+
+  // --- the html blind spot, now closed ------------------------------------
+  //
+  // Nothing used to assert that formatting HTML reaches chunk-guard-html: the
+  // integration tier only checks that the text changed, and this harness named
+  // ts, json and css but never html. These three cases make the drift that hid
+  // behind that silence (a fixture at the formatter's fixed point, which
+  // short-circuits before the guard and loads NO chunk) a hard failure.
+
+  it('flags an html format that did not pull the parse5 guard chunk', () => {
+    const violations = collectActivationViolations(
+      activationSample({
+        chunksAfterHtml: [...TS_FORMAT_CHUNKS, CSS_FORMAT_CHUNK]
+      }),
+      ACTIVATION_BUDGET,
+      1
+    );
+    assert.equal(violations.length, 1);
+    assert.match(violations[0].budget, /html format adds exactly/);
+    assert.match(violations[0].budget, /chunk-guard-html\.js/);
+  });
+
+  it('flags an html format that pulled MORE than the parse5 guard chunk', () => {
+    const violations = collectActivationViolations(
+      activationSample({
+        chunksAfterHtml: [
+          ...TS_FORMAT_CHUNKS,
+          CSS_FORMAT_CHUNK,
+          HTML_FORMAT_CHUNK,
+          'chunk-unexpected.js'
+        ]
+      }),
+      ACTIVATION_BUDGET,
+      1
+    );
+    assert.equal(violations.length, 1);
+    assert.match(violations[0].budget, /html format adds exactly/);
+  });
+
+  it('flags an html format that produced NO edit (the fixed-point fixture shape)', () => {
+    // A fixture already at the formatter's fixed point returns zero edits AND
+    // loads no chunk: both rules fire, which is exactly the drift signal.
+    const violations = collectActivationViolations(
+      activationSample({
+        html: { elapsedMs: 3, editCount: 0, editText: '' },
+        chunksAfterHtml: [...TS_FORMAT_CHUNKS, CSS_FORMAT_CHUNK]
+      }),
+      ACTIVATION_BUDGET,
+      1
+    );
+    assert.equal(violations.length, 2);
+    assert.match(violations[0].budget, /html format produces exactly one edit/);
+    assert.match(violations[1].budget, /html format adds exactly/);
+  });
+
+  it('names chunk-guard-html.js as the html chunk (no silent rename)', () => {
+    assert.equal(HTML_FORMAT_CHUNK, 'chunk-guard-html.js');
   });
 
   it('flags a first format AT the budget (>= semantics, like perf.ts)', () => {

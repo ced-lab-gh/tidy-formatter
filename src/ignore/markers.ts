@@ -52,12 +52,45 @@ export interface MarkerScan {
   readonly protectedRanges: ProtectedRange[];
 }
 
+/**
+ * Quote characters that open a string literal, per language family.
+ *
+ * HTML IS NOT IN THIS LIST ON PURPOSE (v0.4.1, M3-4). In HTML *character data*
+ * an apostrophe is a letter, not a delimiter: `<p>don't</p>` is ordinary text.
+ * Treating it as a string opener made the scanner swallow everything from that
+ * apostrophe to the next one (or to end-of-file on an odd count), so a
+ * `<!-- tidy-ignore-start -->` after it was never seen, `protectedRanges` came
+ * back EMPTY, and Tidy reformatted bytes the user had explicitly protected
+ * WITHOUT even raising the "markers not applied" notice. Quotes still bind where
+ * HTML really does quote : inside a tag (attribute values) and inside the raw
+ * text of <script> / <style>, which `scanComments` tracks below.
+ */
+const JS_QUOTES: ReadonlySet<string> = new Set(['"', "'", '`']);
+const CSS_QUOTES: ReadonlySet<string> = new Set(['"', "'"]);
+/** JSON strings are double-quoted only: `'` and `` ` `` are not delimiters. */
+const JSON_QUOTES: ReadonlySet<string> = new Set(['"']);
+/** HTML attribute values may be single- or double-quoted (never backticked). */
+const HTML_ATTRIBUTE_QUOTES: ReadonlySet<string> = new Set(['"', "'"]);
+/** Nothing is a string delimiter in HTML character data. */
+const NO_QUOTES: ReadonlySet<string> = new Set();
+
 /** Which comment delimiters a language uses, for region/node detection. */
 interface CommentSyntax {
   /** Line-comment opener, e.g. "//" : undefined when the language has none. */
   readonly line?: string;
   /** Block-comment delimiters, e.g. ["/*", "*\/"] or ["<!--", "-->"]. */
   readonly block?: readonly [string, string];
+  /**
+   * Quote characters that open a string literal in this language's ordinary
+   * code. EMPTY for markup languages, where quoting is positional (see
+   * `markup` and the note on JS_QUOTES above).
+   */
+  readonly quotes: ReadonlySet<string>;
+  /**
+   * The language is MARKUP (html): `<tag …>` regions and <script>/<style> raw
+   * text have their own quoting rules, and character data has none at all.
+   */
+  readonly markup?: boolean;
 }
 
 /**
@@ -65,24 +98,33 @@ interface CommentSyntax {
  * HTML uses SGML comments; the JS family and JSON-with-comments use // and /* *\/.
  * Plain JSON technically has no comments, but Tidy treats JSONC-style comments
  * leniently here (the guard remains the source of truth on validity).
+ *
+ * The `quotes` field is what stops a stray quote from eating the scan; every
+ * language the scanner serves declares its own set explicitly, so widening the
+ * LangId union forces a decision here instead of silently inheriting the JS one.
  */
 function commentSyntaxFor(lang: LangId): CommentSyntax {
   switch (lang) {
     case 'html':
-      return { block: ['<!--', '-->'] };
+      return { block: ['<!--', '-->'], quotes: NO_QUOTES, markup: true };
     case 'css':
     case 'scss':
     case 'less':
       // SCSS/LESS also allow //, but block comments are universal across CSS.
-      return { line: lang === 'css' ? undefined : '//', block: ['/*', '*/'] };
+      return {
+        line: lang === 'css' ? undefined : '//',
+        block: ['/*', '*/'],
+        quotes: CSS_QUOTES
+      };
     case 'json':
     case 'jsonc':
+      return { line: '//', block: ['/*', '*/'], quotes: JSON_QUOTES };
     case 'javascript':
     case 'javascriptreact':
     case 'typescript':
     case 'typescriptreact':
     default:
-      return { line: '//', block: ['/*', '*/'] };
+      return { line: '//', block: ['/*', '*/'], quotes: JS_QUOTES };
   }
 }
 
@@ -172,11 +214,103 @@ interface CommentHit {
 }
 
 /**
+ * Where the markup scanner currently is. Non-markup languages never leave
+ * 'code'.
+ *   - 'code'    : ordinary source, or HTML character data (no quoting there);
+ *   - 'tag'     : between `<` and the `>` that closes it, where an attribute
+ *                 value IS quoted;
+ *   - 'rawtext' : inside <script> / <style>, where the embedded language's own
+ *                 quoting rules apply again.
+ */
+type ScanMode = 'code' | 'tag' | 'rawtext';
+
+/**
+ * The HTML elements whose content is raw text with its own quoting rules. A Map
+ * (not an object literal) so a tag literally named `constructor` or `toString`
+ * cannot be answered by Object.prototype.
+ */
+const RAW_TEXT_QUOTES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['script', JS_QUOTES],
+  ['style', CSS_QUOTES]
+]);
+
+/**
+ * The last line start at or before `to`, given that `from` was reached with
+ * `current` as the line start. Used after jumping over a span (a comment, a
+ * multi-line string) so a later hit still reports the line IT sits on.
+ */
+function trackLineStarts(
+  text: string,
+  from: number,
+  to: number,
+  current: number
+): number {
+  let lineStart = current;
+  for (let k = from; k < to; k += 1) {
+    if (text[k] === '\n') {
+      lineStart = k + 1;
+    }
+  }
+  return lineStart;
+}
+
+/** Character-class helpers on code points: this scanner runs per character. */
+function isAsciiLetter(code: number): boolean {
+  return (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+}
+function isAsciiAlphanumeric(code: number): boolean {
+  return isAsciiLetter(code) || (code >= 0x30 && code <= 0x39);
+}
+
+/**
+ * The lowercase tag name of the element opening at `open` (which must be the
+ * `<`), or undefined when `<` does not start a tag. Only an ASCII-letter start
+ * opens an element, so `a < b` in text stays text.
+ *
+ * The EMPTY STRING means "a `>`-terminated region whose name does not matter":
+ * a markup declaration or processing instruction (`<!DOCTYPE`, `<?xml`), and
+ * any element whose name cannot be `style` (5 letters) or `script` (6). The
+ * name is only materialised for those two lengths, so a page with 100 000 tags
+ * does not allocate 100 000 lowercase copies to learn nothing; the empty string
+ * is in neither RAW_TEXT_QUOTES nor `rawTextTag`, so it can only ever read as
+ * "an ordinary tag".
+ */
+function tagNameAt(text: string, open: number): string | undefined {
+  let i = open + 1;
+  const next = text.charCodeAt(i);
+  if (next === 0x2f /* / */) {
+    i += 1;
+  } else if (next === 0x21 /* ! */ || next === 0x3f /* ? */) {
+    return '';
+  }
+  const nameStart = i;
+  if (!isAsciiLetter(text.charCodeAt(i))) {
+    return undefined;
+  }
+  i += 1;
+  while (i < text.length && isAsciiAlphanumeric(text.charCodeAt(i))) {
+    i += 1;
+  }
+  const length = i - nameStart;
+  if (length !== 5 && length !== 6) {
+    return ''; // cannot be 'style' (5) or 'script' (6): name not needed.
+  }
+  return text.slice(nameStart, i).toLowerCase();
+}
+
+/**
  * Enumerate every comment in the document, in order. A best-effort lexical scan:
  * it understands the language's line/block delimiters and skips over string
  * literals so a "// ..." inside a JS string is not mistaken for a comment.
  * Conservative by design : it never claims a comment it is unsure about, so a
  * marker in odd contexts simply protects nothing (never over-deletes).
+ *
+ * QUOTING IS POSITIONAL IN MARKUP (v0.4.1, M3-4). For html the scanner walks a
+ * three-state machine so that an apostrophe in `<p>don't</p>` is a letter, while
+ * the quotes of `<a href='x'>` and of `var s = 'y';` inside a <script> still
+ * delimit. Before this, ONE apostrophe anywhere in HTML text opened a pseudo
+ * string that ran to the next apostrophe (or to end-of-file), hiding every
+ * marker behind it.
  */
 function scanComments(text: string, syntax: CommentSyntax): CommentHit[] {
   const hits: CommentHit[] = [];
@@ -188,6 +322,14 @@ function scanComments(text: string, syntax: CommentSyntax): CommentHit[] {
   const blockClose = syntax.block?.[1];
   const lineOpen = syntax.line;
 
+  let mode: ScanMode = 'code';
+  /** Quotes in force where the scanner stands: only changes with `mode`. */
+  let activeQuotes: ReadonlySet<string> = syntax.quotes;
+  /** Name of the raw-text element currently open, e.g. 'script'. */
+  let rawTextTag: string | undefined;
+  /** Raw-text element whose opening tag is being scanned right now. */
+  let pendingRawText: string | undefined;
+
   while (i < len) {
     const ch = text[i];
 
@@ -197,10 +339,26 @@ function scanComments(text: string, syntax: CommentSyntax): CommentHit[] {
       continue;
     }
 
-    // Skip string / template literals in JS-family + JSON so their contents are
-    // never mis-scanned as comments. CSS/HTML use only " and ' (handled too).
-    if (ch === '"' || ch === "'" || ch === '`') {
-      i = skipString(text, i, ch);
+    // Inside `<… >`: quotes delimit attribute values (which may span lines),
+    // and nothing else is a comment or a string there.
+    if (mode === 'tag') {
+      if (HTML_ATTRIBUTE_QUOTES.has(ch)) {
+        const end = stringEnd(text, i, ch, true);
+        if (end !== undefined) {
+          lineStart = trackLineStarts(text, i, end, lineStart);
+          i = end;
+          continue;
+        }
+      } else if (ch === '>') {
+        mode = pendingRawText === undefined ? 'code' : 'rawtext';
+        rawTextTag = pendingRawText;
+        activeQuotes =
+          pendingRawText === undefined
+            ? syntax.quotes
+            : (RAW_TEXT_QUOTES.get(pendingRawText) ?? NO_QUOTES);
+        pendingRawText = undefined;
+      }
+      i += 1;
       continue;
     }
 
@@ -210,11 +368,7 @@ function scanComments(text: string, syntax: CommentSyntax): CommentHit[] {
       const body = text.slice(i + blockOpen.length, closeAt === -1 ? len : closeAt);
       hits.push({ start: i, end, body, lineStart });
       // Advance line tracking across any newlines inside the block comment.
-      for (let k = i; k < end; k += 1) {
-        if (text[k] === '\n') {
-          lineStart = k + 1;
-        }
-      }
+      lineStart = trackLineStarts(text, i, end, lineStart);
       i = end;
       continue;
     }
@@ -228,6 +382,42 @@ function scanComments(text: string, syntax: CommentSyntax): CommentHit[] {
       continue;
     }
 
+    // Skip string / template literals so their contents are never mis-scanned
+    // as comments. In markup this set is empty in character data and carries
+    // the embedded language's quotes inside <script>/<style>.
+    if (activeQuotes.has(ch)) {
+      const end = stringEnd(text, i, ch, ch === '`');
+      if (end !== undefined) {
+        lineStart = trackLineStarts(text, i, end, lineStart);
+        i = end;
+        continue;
+      }
+      // No closing quote: it was not a string literal after all. Fall through
+      // and keep scanning from the next character, so the rest of the document
+      // still yields its markers.
+    }
+
+    if (syntax.markup && ch === '<') {
+      const name = tagNameAt(text, i);
+      if (name !== undefined) {
+        if (mode === 'rawtext') {
+          // Only the matching end tag closes a raw-text element.
+          if (text[i + 1] === '/' && name === rawTextTag) {
+            mode = 'tag';
+            rawTextTag = undefined;
+            i += 2 + name.length;
+            continue;
+          }
+        } else {
+          mode = 'tag';
+          pendingRawText =
+            text[i + 1] !== '/' && RAW_TEXT_QUOTES.has(name) ? name : undefined;
+          i += 1;
+          continue;
+        }
+      }
+    }
+
     i += 1;
   }
 
@@ -235,11 +425,23 @@ function scanComments(text: string, syntax: CommentSyntax): CommentHit[] {
 }
 
 /**
- * Advance past a string/template literal starting at `open` (the opening quote).
- * Honours backslash escapes; an unterminated string consumes to end-of-text so
- * the scanner stays conservative (treats the remainder as a string, not code).
+ * The offset just past the string literal opened at `open`, or undefined when
+ * there is no closing quote, in which case the caller treats the quote as an
+ * ordinary character.
+ *
+ * Honours backslash escapes. `multiline` is false for `'`/`"` literals, which
+ * cannot contain a raw line break in any language here (a backslash-escaped one
+ * is consumed by the escape branch), and true for template literals and HTML
+ * attribute values, which can. Refusing to run past the end of the line is what
+ * keeps ONE stray quote from hiding every marker below it: the scan resumes
+ * instead of treating the remainder of the file as string content.
  */
-function skipString(text: string, open: number, quote: string): number {
+function stringEnd(
+  text: string,
+  open: number,
+  quote: string,
+  multiline: boolean
+): number | undefined {
   let i = open + 1;
   while (i < text.length) {
     const ch = text[i];
@@ -250,9 +452,12 @@ function skipString(text: string, open: number, quote: string): number {
     if (ch === quote) {
       return i + 1;
     }
+    if (ch === '\n' && !multiline) {
+      return undefined;
+    }
     i += 1;
   }
-  return text.length;
+  return undefined;
 }
 
 /** Offset of the end of the line containing `offset` (the next "\n" or EOF). */

@@ -5,10 +5,21 @@
 // the single StatusBarItem. Everything in this file is covered by plain
 // mocha+tsx tests, including the exhaustive 12-status transient mapping.
 //
-// CONTENT-FREE CONTRACT: a view is built ONLY from LastFormatRecord fields
+// BOUNDED-DETAIL CONTRACT: a view is built ONLY from LastFormatRecord fields
 // (already sanitized by sanitizeDetail), configuration values, languageIds and
-// formatter ids. Document source can never reach the bar or the tooltip. Any
-// detail string is additionally Markdown-escaped before rendering.
+// formatter ids. Any detail string is additionally Markdown-escaped before
+// rendering.
+//
+// This block used to say "Document source can never reach the bar or the
+// tooltip", which is not true and was corrected in v0.4.1. A guard-rejection
+// detail keeps the PARSER'S FIRST LINE, and a parser commonly names the token it
+// choked on there, so the tooltip can show a few characters of the user's source
+// (observed: "guard-rejected: input did not parse: Identifier
+// 'CLIENT_SECRET_abc123' has already been declared. (2:7)"). What IS guaranteed,
+// and what this file relies on, is that the detail is a single line capped at 200
+// characters : the multi-line code frame a parser prints under its message, which
+// is a real excerpt of the file, never gets here. README ("No silent failures")
+// discloses the same thing; keep the two in agreement.
 import type { FormatStatus, LastFormatRecord } from './lastFormat';
 import { EXTENSION_ID } from '../commands/setDefaultFormatter';
 // Pure module (no 'vscode'): lets a too-large view name the cap that actually

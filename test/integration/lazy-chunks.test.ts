@@ -53,10 +53,17 @@ const CASES: readonly LazyCase[] = [
     preserved: 'color: red'
   },
   {
+    // The input MUST be something the formatter really changes. It used to be
+    // '<div><span>x</span></div>\n', which is the formatter's exact fixed point:
+    // that case only ever produced an edit because js-beautify was dropping the
+    // final newline, and this suite was silently asserting on that defect. Once
+    // the newline is preserved the format is a legitimate no-op, the pipeline
+    // short-circuits before the guard runs, and chunk-guard-html is never
+    // loaded, so the case could no longer prove the thing it exists to prove.
     note: 'html (chunk-guard-html)',
     lang: 'html',
     relPath: 'lazy/first.html',
-    content: '<div><span>x</span></div>\n',
+    content: '<div   ><span>x</span></div>\n',
     preserved: '<span>x</span>'
   },
   {

@@ -94,6 +94,23 @@ function makePlaceholder(index: number): string {
 }
 
 /**
+ * Every character a placeholder can be made of, derived from the two constants
+ * above plus the decimal digits of the index. Used by the linear restore to
+ * prove that splicing an island's original bytes back in cannot CREATE a
+ * placeholder across the join: if the original neither begins nor ends with one
+ * of these characters, no token can straddle either boundary.
+ */
+const PLACEHOLDER_CHARS: ReadonlySet<string> = new Set(
+  `${PLACEHOLDER_PREFIX}${PLACEHOLDER_SUFFIX}0123456789`.split('')
+);
+
+/** A fresh matcher for "any placeholder-shaped token", with its index captured. */
+function placeholderMatcher(): RegExp {
+  // Both constants are lowercase ASCII letters, so neither needs escaping.
+  return new RegExp(`${PLACEHOLDER_PREFIX}(\\d+)${PLACEHOLDER_SUFFIX}`, 'g');
+}
+
+/**
  * Decide whether the given HTML already contains a string that would collide
  * with our placeholder scheme. If so the caller must NOT rely on masking (we
  * cannot guarantee a clean restore) and should fall back to not formatting.
@@ -372,17 +389,16 @@ export function maskHtmlTemplateIslands(
 }
 
 /**
- * Checked restore, mirroring src/ignore/mask.ts:restoreMask semantics: returns
- * undefined when a placeholder is MISSING from the formatted text (the engine
- * dropped it) or appears MORE THAN ONCE (the engine duplicated it). The caller
- * then aborts with zero edits. Restores in reverse index order so a placeholder
- * token can never be a prefix of another.
- *
- * Supersedes the throwing restoreTemplateIslands for pipeline use: the legacy
- * function is kept for its existing unit tests only, and notably does NOT detect
- * duplication (its split/join would rewrite both occurrences).
+ * REFERENCE implementation of the checked restore: one search + one string
+ * rebuild per island, in reverse index order. Correct but O(bytes x islands),
+ * which is seconds of frozen UI on a big templated page (measured: 727 KB /
+ * 18001 islands = 13.2 s), so `restoreTemplateIslandsChecked` only falls back to
+ * it for island sets the linear pass cannot prove equivalent (see
+ * `canRestoreLinearly`). Those sets are unreachable from this module's own
+ * masking, which is why the fast path is the one that always runs in the
+ * product; this one stays as the definition of the behaviour.
  */
-export function restoreTemplateIslandsChecked(
+function restoreTemplateIslandsSequential(
   formatted: string,
   islands: readonly TemplateIsland[]
 ): string | undefined {
@@ -400,4 +416,134 @@ export function restoreTemplateIslandsChecked(
       result.slice(0, first) + original + result.slice(first + placeholder.length);
   }
   return result;
+}
+
+/**
+ * Whether the linear restore is provably byte-identical to the sequential one
+ * for this island set. The sequential restore searches the text it is BUILDING,
+ * so the two can only differ if restoring an island changes where a LATER
+ * placeholder is found. Four conditions rule that out, and every island this
+ * module produces satisfies all four:
+ *
+ *  1. the placeholder is the one this module mints for that index, so the
+ *     "exactly one occurrence" bookkeeping can be done by index;
+ *  2. the original is non-empty, so restoring it cannot join the text on either
+ *     side of the token into a new one;
+ *  3. the original does not CONTAIN a placeholder prefix, so it cannot inject a
+ *     token the sequential pass would then find;
+ *  4. the original neither begins nor ends with a character a placeholder is
+ *     made of, so no token can be FORMED across either splice boundary.
+ *
+ * An island is `{{ … }}`, `{% … %}`, `<% … %>` or a `---` front matter block:
+ * each one opens and closes on a character outside the placeholder alphabet.
+ */
+function canRestoreLinearly(islands: readonly TemplateIsland[]): boolean {
+  for (let i = 0; i < islands.length; i += 1) {
+    const { placeholder, original } = islands[i];
+    if (placeholder !== makePlaceholder(i)) {
+      return false;
+    }
+    if (typeof original !== 'string' || original.length === 0) {
+      return false;
+    }
+    if (original.includes(PLACEHOLDER_PREFIX)) {
+      return false;
+    }
+    if (
+      PLACEHOLDER_CHARS.has(original[0]) ||
+      PLACEHOLDER_CHARS.has(original[original.length - 1])
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Linear checked restore: ONE left-to-right scan of `formatted` locating every
+ * placeholder-shaped token, then ONE string build. Same verdicts as the
+ * reference above : a placeholder missing (dropped), split, or case-changed
+ * never matches, and a placeholder seen twice (duplicated) fails immediately.
+ * Only ever called when `canRestoreLinearly` holds, which is what makes the
+ * verdicts and the bytes identical to the sequential pass.
+ */
+function restoreTemplateIslandsLinear(
+  formatted: string,
+  islands: readonly TemplateIsland[]
+): string | undefined {
+  // String(i) rather than the parsed number: "tidytplisland007endisland" is NOT
+  // the token for island 7, and indexOf would not have found it either.
+  const indexByDigits = new Map<string, number>();
+  for (let i = 0; i < islands.length; i += 1) {
+    indexByDigits.set(String(i), i);
+  }
+
+  const found: boolean[] = new Array<boolean>(islands.length).fill(false);
+  const parts: string[] = [];
+  let cursor = 0;
+  const matcher = placeholderMatcher();
+  let match = matcher.exec(formatted);
+  while (match !== null) {
+    const index = indexByDigits.get(match[1]);
+    // A token whose index is not ours (a longer run of islands in a previous
+    // format, a literal in the document) is left exactly where it is, which is
+    // what the per-island indexOf did too.
+    if (index !== undefined) {
+      if (found[index]) {
+        return undefined; // engine duplicated the placeholder.
+      }
+      found[index] = true;
+      parts.push(formatted.slice(cursor, match.index), islands[index].original);
+      cursor = match.index + match[0].length;
+    }
+    match = matcher.exec(formatted);
+  }
+
+  for (let i = 0; i < islands.length; i += 1) {
+    if (!found[i]) {
+      return undefined; // engine dropped the placeholder.
+    }
+  }
+
+  parts.push(formatted.slice(cursor));
+  return parts.join('');
+}
+
+/**
+ * Checked restore, mirroring src/ignore/mask.ts:restoreMask semantics: returns
+ * undefined when a placeholder is MISSING from the formatted text (the engine
+ * dropped it) or appears MORE THAN ONCE (the engine duplicated it). The caller
+ * then aborts with zero edits.
+ *
+ * Supersedes the throwing restoreTemplateIslands for pipeline use: the legacy
+ * function is kept for its existing unit tests only, and notably does NOT detect
+ * duplication (its split/join would rewrite both occurrences).
+ *
+ * SPEED, NOT SEMANTICS (v0.4.1, M3-7). Searching and rebuilding the whole text
+ * once per island is O(bytes x islands): 237 KB / 12000 islands took 1570 ms and
+ * the cost quadrupled with every doubling, so the 5120 KB size cap never came
+ * near protecting the user. The work is now one scan and one join, with the
+ * SAME four failure modes (dropped, duplicated, split, case-changed) and the
+ * same bytes out; the reference implementation still runs for any island set the
+ * fast path cannot prove equivalent.
+ */
+export function restoreTemplateIslandsChecked(
+  formatted: string,
+  islands: readonly TemplateIsland[]
+): string | undefined {
+  // A non-string is a REFUSAL, answered in the shape this function declares.
+  // It used to fall through to the sequential reference implementation, which
+  // calls result.indexOf(...) on it and throws a TypeError: still fail-safe (a
+  // throw aborts the format with zero edits), but it contradicts the signature,
+  // and src/ignore/mask.ts:restoreMask answers `undefined` for exactly the same
+  // situation. Unreachable from the pipeline today, since Engine.format resolves
+  // to a string; the two checked restores agree anyway, so a future caller
+  // cannot get two different shapes out of one question.
+  if (typeof formatted !== 'string') {
+    return undefined;
+  }
+  if (!canRestoreLinearly(islands)) {
+    return restoreTemplateIslandsSequential(formatted, islands);
+  }
+  return restoreTemplateIslandsLinear(formatted, islands);
 }

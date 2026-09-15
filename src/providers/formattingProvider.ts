@@ -17,6 +17,26 @@
 //      the Prettier path, Prettier honours `// prettier-ignore` natively, so no
 //      region masking is done, and a tidy-ignore marker found there is REPORTED
 //      to the user (output channel + Explain) instead of being ignored silently;
+//   4b. for an HTML SELECTION only, refuse outright when a selection BOUNDARY
+//      falls inside a tag: such a slice is not a well-formed fragment at its
+//      edges and not a formattable unit. It used to be refused by accident (the
+//      engine repaired the half tag, the guard saw a changed tree and rejected
+//      it); once step 5b restores the slice's own leading whitespace that repair
+//      is invisible again and a break between two adjacent INLINE elements got
+//      written instead. Zero edits, and the user is told which selection to make;
+//   5b. for a SELECTION only, put the slice's own leading and trailing
+//      whitespace runs back around whatever the engine printed. Every
+//      printer trims the edges of the slice it is handed, and at range scope
+//      the bytes on either side stay in the buffer, so the trim JOINS the
+//      slice to its neighbour: "hello x y" was written as "hello xy", and a
+//      selection ending in a line break drifted without bound (G3-4 / M3-3).
+//      The guard cannot see either, because a whitespace-only text node
+//      between two inline elements is exactly what it normalises away. An
+//      explicit files.eol owns those restored runs, EXCEPT where they reach
+//      into a span step 5 just restored VERBATIM: a line ending inside an
+//      ignore region, a front matter block or a template island is never
+//      rewritten, which is the byte-for-byte promise README and CHANGELOG
+//      both make;
 //   6. run the safety Guard (semantic equivalence modulo whitespace) on the
 //      ORIGINAL input vs the (restored) output : so neither a region splice nor
 //      an island restore can ever slip a non-equivalent result through. A
@@ -58,6 +78,7 @@ import {
   JS_BEAUTIFY_ENGINE_ID,
   reportedEngineIdFor
 } from '../engine/jsbeautify';
+import { cutsThroughMarkup, withSliceEdges } from '../engine/sliceEdges';
 import { resolveDocumentIgnore } from '../ignore/ignoreGate';
 import { getTidyOutputChannel } from '../diagnostics/outputChannel';
 import {
@@ -83,13 +104,92 @@ export const SUPPORTED_LANGUAGES: readonly LangId[] = SUPPORTED_LANG_IDS;
 const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set(SUPPORTED_LANGUAGES);
 
 /**
- * Exact, user-facing message shown when a format is aborted (guard rejection,
- * engine error, or a failed ignore-region restore). Kept as a constant so the
- * wording stays consistent (and matches the product spec). English per the
- * v0.3.0 string migration (ADD-06); no em dash, ever.
+ * Exact, user-facing message shown when the equivalence guard RETURNED A
+ * VERDICT and that verdict was "not equivalent" (and for a failed protected-span
+ * restore, which is the same statement about the bytes that would be written).
+ * Kept as a constant so the wording stays consistent (and matches the product
+ * spec). English per the v0.3.0 string migration (ADD-06); no em dash, ever.
+ *
+ * It must NOT be shown when the guard never ran: see ENGINE_ERROR_WARNING_MESSAGE.
  */
-const ABORT_WARNING_MESSAGE =
+export const ABORT_WARNING_MESSAGE =
   'Tidy did not apply the format: the result could not be proven equivalent to your original. Your file is intact.';
+
+/**
+ * Message for an abort whose status is 'engine-error': the PRINTER failed
+ * (Prettier/js-beautify could not parse the text, or the chunk carrying it could
+ * not be loaded), or the guard itself threw. In every one of those cases NO
+ * equivalence verdict exists.
+ *
+ * Splitting this out of ABORT_WARNING_MESSAGE fixes a false accusation. A
+ * TypeScript SELECTION that straddles a template literal is not a standalone
+ * parse unit, Prettier throws "Unterminated template literal", and the output
+ * channel recorded engine-error correctly, while the toast told the user their
+ * file "could not be proven equivalent to your original": a statement about
+ * THEIR CODE that the verifier never made, because the verifier never ran. That
+ * is the same defect class v0.4.0 fixed for chunk-load failures in guard.ts
+ * (rethrowIfChunkLoadFailure), and this product's whole identity is not
+ * overstating what it knows.
+ *
+ * Zero edits happen on either branch, so this is a WORDING fix, not a behaviour
+ * change. Content-free like every other surfaced string: the engine's own
+ * message names the offending token from the user's file, so it goes to the
+ * output channel through sanitizeDetail and NEVER into this toast.
+ */
+export const ENGINE_ERROR_WARNING_MESSAGE =
+  'Tidy did not apply the format: the formatter could not read this code, so no equivalence check ran and nothing was changed. A selection that is not a complete piece of code is a common cause. Your file is intact.';
+
+/**
+ * Message for the one abort this provider decides ON ITS OWN, before any engine
+ * runs: an HTML selection whose BOUNDARY falls inside a tag (see
+ * cutsThroughMarkup). Same family as ENGINE_ERROR_WARNING_MESSAGE : no
+ * equivalence verdict exists, because nothing was formatted. It is split out for
+ * ONE reason, that here Tidy knows exactly what is wrong and can say what to do
+ * instead, which "the formatter could not read this code" cannot.
+ *
+ * Why this is a refusal and not a format: the slice starts or ends mid-tag, so
+ * the printer has to repair a half tag it was never given whole. That repair
+ * used to change the tree and the guard rejected it, which is the only reason
+ * such a request was safe. Restoring the slice's own leading whitespace run
+ * (step 5b) repairs the split first, and what reaches the guard is a line break
+ * inserted between two ADJACENT INLINE elements: a whitespace-only text node,
+ * exactly what the HTML guard normalises away. Accept, write, and the rendered
+ * text changes ("SaveCancel" becomes "Save Cancel"). Refusing the ill-formed
+ * request is the deliberate version of the protection that was there by luck.
+ *
+ * Content-free like every other surfaced string: it names no part of the file.
+ */
+export const TAG_SPLIT_WARNING_MESSAGE =
+  'Tidy did not apply the format: the selection cuts through a tag, so it is not a complete piece of markup, no equivalence check ran and nothing was changed. Select whole elements and try again. Your file is intact.';
+
+/**
+ * Reason recorded for that abort. A CONSTANT, because both the status mapping
+ * and the message choice key off it: prefix-matched exactly like the engine /
+ * guard / restore reasons that runFormat produces.
+ */
+export const TAG_SPLIT_REASON = 'selection boundary inside a tag';
+
+/**
+ * The toast to show for an aborted outcome.
+ *
+ * Two steps, in this order. First the aborts that carry their OWN sentence
+ * because the provider knows precisely what happened and what the user should do
+ * instead; today that is the tag-split refusal, matched on its reason constant.
+ * Then the same one switch as before on the status, so a future FormatStatus
+ * still cannot silently inherit the wrong claim: only a status that really
+ * carries a guard verdict may use ABORT_WARNING_MESSAGE.
+ *
+ * Every branch keeps the SAME shape ("Tidy did not apply the format: ... Your
+ * file is intact."), the same two action buttons and the same sanitisation.
+ */
+function abortMessageFor(status: FormatStatus, reason: string): string {
+  if (reason.startsWith(TAG_SPLIT_REASON)) {
+    return TAG_SPLIT_WARNING_MESSAGE;
+  }
+  return status === 'engine-error'
+    ? ENGINE_ERROR_WARNING_MESSAGE
+    : ABORT_WARNING_MESSAGE;
+}
 
 /** Button captions on the abort toast (exact labels from the ADD-06 spec). */
 const ABORT_ACTION_EXPLAIN = 'Explain';
@@ -270,6 +370,73 @@ function inDocumentContext(context: GuardContext, span: string): string {
 }
 
 /**
+ * Give a SELECTION back its own leading and trailing whitespace runs, byte for
+ * byte, before anything else looks at the candidate.
+ *
+ * Every printer trims the edges of the slice it is handed. At document scope
+ * that is the file's own edges, and the final-newline policy governs them. At
+ * selection scope the bytes on either side of the slice stay in the buffer, so
+ * a trimmed edge silently JOINS the slice to its neighbour:
+ *
+ *   DOC  "<p>hello <b>x</b> \n<i>y</i></p>"   selection [0,19)
+ *   the engine prints "<p>hello <b>x</b>", the splice writes
+ *   "<p>hello <b>x</b><i>y</i></p>", which RENDERS "hello x y" -> "hello xy".
+ *
+ * The guard cannot catch that and must not be asked to: a whitespace-only text
+ * node between two inline elements is exactly what it normalises away, so it
+ * says "equivalent" and the edit is applied (defect G3-4). Teaching the guard to
+ * care would mean giving it a render model (inline vs block); stopping the
+ * provider from handing it a trimmed slice closes the reachable path instead.
+ * The same trim is what let a selection whose last character is a line break
+ * drift without bound (defect M3-3).
+ *
+ * This runs AFTER the mask restore, so it works in the CALLER's coordinate
+ * space and never the engine's: it composes with engineSpanFor untouched, and a
+ * selection that starts or ends inside a protected span already has its
+ * protected bytes back in place when the edges are re-attached. It is
+ * idempotent, so an engine that already obeys the rule (the js-beautify range
+ * branch does) passes through unchanged, while every other printer on this seam
+ * -- the Prettier path and the ADD-01 postcss fallback -- is held to it too.
+ *
+ * Applied to a whole document it would fight the final-newline policy, so it is
+ * deliberately scoped to a selection.
+ *
+ * The RESOLVED endOfLine and the two document halves travel with the call. An
+ * explicit `files.eol` is the user saying what every line ending in the span
+ * should be, including the ones in a restored edge; leaving those verbatim while
+ * the engine converted the interior is what made a full-span Format Selection
+ * write a MIXED slice (C-04's shape). The halves let the rule leave a line
+ * ending that straddles the boundary alone. Both decisions live in
+ * src/engine/sliceEdges.ts; this seam only supplies the facts.
+ *
+ * THE MASK'S PROTECTED SPANS TRAVEL WITH IT TOO, and they are the third fact.
+ * This runs after the restore, so an edge run can contain bytes the mask just
+ * handed back VERBATIM from an ignore region, a front matter block or a template
+ * island; normalising those to an explicit `files.eol` rewrote line endings
+ * INSIDE a protected span, which README and CHANGELOG both promise never
+ * happens. It changed no meaning, so the guard accepted it and nothing else
+ * could have caught it. The spans are in the input's own coordinate space,
+ * which is the space this seam works in (see EngineMask.protectedSpans).
+ */
+function honourSliceEdges(
+  scope: FormatScope,
+  input: string,
+  output: string,
+  options: ResolvedOptions,
+  guardContext: GuardContext,
+  mask: EngineMask | undefined
+): string {
+  return scope === 'selection'
+    ? withSliceEdges(input, output, {
+        endOfLine: options.endOfLine,
+        before: guardContext.prefix,
+        after: guardContext.suffix,
+        protectedSpans: mask?.protectedSpans
+      })
+    : output;
+}
+
+/**
  * Append a content-free notice line to the Tidy output channel, in the same
  * shape as a format record line. Used when a documented directive present in the
  * text is NOT applied by the active path: staying silent there would be the
@@ -301,6 +468,11 @@ function joinDetail(
  * FormatStatus. Kept beside runFormat so the two never drift.
  */
 function statusFromReason(reason: string): FormatStatus {
+  // No engine ran and no guard verdict exists, which is what 'engine-error'
+  // means for every consumer of the record; the toast above says the precise
+  // thing, and the recorded detail names the reason. No new FormatStatus, so the
+  // Explain command's exhaustive switch keeps compiling.
+  if (reason.startsWith(TAG_SPLIT_REASON)) return 'engine-error';
   if (reason.startsWith('engine error')) return 'engine-error';
   if (reason.startsWith('guard error')) return 'engine-error';
   if (reason.startsWith('ignore-region restore failed')) return 'restore-failed';
@@ -398,6 +570,13 @@ async function runFormat(
     }
     output = restored.text;
   }
+
+  // A range format may reprint the slice's CONTENT, never the slice's own edge
+  // whitespace. Applied here, before the no-op check and before the guard, so
+  // the guard judges exactly the bytes that would be written. The mask travels
+  // with the call so the rule can tell the slice's own whitespace from bytes the
+  // restore above put back verbatim.
+  output = honourSliceEdges(scope, input, output, options, guardContext, mask);
 
   // No textual change: nothing to apply, but this is a success (not an abort).
   if (output === input) {
@@ -538,6 +717,10 @@ async function tryCssFallback(
     output = restored.text;
   }
 
+  // Same edge rule as the primary candidate, mask included: the second chance is
+  // held to the promise the first one is held to, never a laxer one.
+  output = honourSliceEdges(scope, input, output, options, guardContext, mask);
+
   if (output === input) {
     return {
       applied: false,
@@ -599,18 +782,21 @@ function outcomeToEdits(
     if (reason === 'cancelled') {
       recordOutcome(document, languageId, scope, 'cancelled', { engineId });
     } else {
-      recordOutcome(document, languageId, scope, statusFromReason(reason), {
+      const status = statusFromReason(reason);
+      recordOutcome(document, languageId, scope, status, {
         engineId,
         detail: reason
       });
       // Non-blocking, non-modal: the file is intact, we just inform. Same toast
-      // frequency as before (guard-rejected / engine-error / restore-failed);
-      // ADD-06 only adds one-click remedies. recordOutcome ran just above, so
-      // 'Explain' explains exactly THIS abort. Fire-and-forget: never blocks the
-      // provider, never hangs a headless host.
+      // FREQUENCY as before (guard-rejected / engine-error / restore-failed) and
+      // the same two remedies; only the WORDING now depends on whether an
+      // equivalence verdict actually exists (abortMessageFor). ADD-06 added the
+      // one-click remedies. recordOutcome ran just above, so 'Explain' explains
+      // exactly THIS abort. Fire-and-forget: never blocks the provider, never
+      // hangs a headless host.
       void vscode.window
         .showWarningMessage(
-          ABORT_WARNING_MESSAGE,
+          abortMessageFor(status, reason),
           ABORT_ACTION_EXPLAIN,
           ABORT_ACTION_REPORT_ISSUE
         )
@@ -742,6 +928,32 @@ async function provideEdits(
   const endOffset = range ? document.offsetAt(range.end) : fullText.length;
   const input = range ? document.getText(range) : fullText;
 
+  // A selection whose boundary lands INSIDE A TAG is not a formattable unit, so
+  // Tidy declines it here, before any engine or mask work, with zero edits and a
+  // sentence that says which selection to make instead. Deliberate where it used
+  // to be accidental: the guard rejected such a request only because the engine
+  // had to repair the half tag it was handed, and restoring the slice's own edge
+  // whitespace (step 5b) repairs it first, leaving a break between two adjacent
+  // inline elements that the guard normalises away and therefore ACCEPTS.
+  // Measured over four ordinary snippets, 14 of 10141 selections turned from a
+  // rejection into a write that changed the rendered text. Scoped to HTML and to
+  // a range: this is a statement about markup, and a whole document has no
+  // boundary of its own to cut anything.
+  // NOTE ON WHERE THIS IS DECIDED. The refusal is computed here but APPLIED
+  // after the format, against the result: refusing up front was over-broad,
+  // because most boundaries that land inside markup produce no edit at all.
+  // Selecting the word "layout" inside an HTML comment, or an attribute VALUE,
+  // cuts a tag by this test and used to be a silent no-op; refusing early turned
+  // those into a warning toast whose sentence ("the selection cuts through a
+  // tag") is not even accurate for a comment. Measured over an exhaustive
+  // boundary sweep, 33 874 of 80 433 selections went from silent already-tidy to
+  // a warning. Only a format that would really WRITE can carry the defect, so
+  // only that one is refused.
+  const cutsMarkup =
+    range !== undefined &&
+    languageId === 'html' &&
+    cutsThroughMarkup(fullText, startOffset, endOffset);
+
   // Build the protect-and-restore plan:
   //   - in-source ignore REGIONS: the js-beautify path, BOTH scopes. The marker
   //     ranges come from the document scan above and are clipped to the span
@@ -813,11 +1025,25 @@ async function provideEdits(
     return [];
   }
 
+  // The selection cut through markup AND the pipeline wants to write: that is
+  // the only shape that carries the defect this rule exists for, so it is the
+  // only one refused. A no-op stays a silent no-op and an abort keeps its own,
+  // more specific reason. New object, never a mutation.
+  const judged: FormatOutcome =
+    cutsMarkup && outcome.applied
+      ? {
+          applied: false,
+          aborted: true,
+          reason: TAG_SPLIT_REASON,
+          engineId: outcome.engineId
+        }
+      : outcome;
+
   // New object, never a mutation of the outcome the pipeline returned.
   const reported: FormatOutcome =
     plan.unhonouredIgnore === undefined
-      ? outcome
-      : { ...outcome, detail: joinDetail(outcome.detail, plan.unhonouredIgnore) };
+      ? judged
+      : { ...judged, detail: joinDetail(judged.detail, plan.unhonouredIgnore) };
 
   return outcomeToEdits(document, languageId, scope, startOffset, endOffset, reported);
 }

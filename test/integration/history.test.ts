@@ -13,6 +13,7 @@ import {
   activateExtension,
   flushEventLoop,
   openFixture,
+  removeFixtureDir,
   workspaceRoot
 } from './helpers';
 import { SHOW_FORMAT_HISTORY_COMMAND_ID } from '../../src/commands/showFormatHistory';
@@ -31,16 +32,7 @@ describe('Tidy format history (ADD-14) : registration + read-only', function () 
   after(async () => {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await flushEventLoop();
-    // Windows keeps the fixture handle open for a beat after the editor closes
-    // (file watcher / hot-exit backup), so a bare rmSync loses the race with
-    // EPERM. Node's own retry loop covers exactly that case; the call still
-    // throws if the directory is genuinely stuck, so a real leak stays loud.
-    fs.rmSync(path.join(workspaceRoot(), FIXTURE_DIR), {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 100
-    });
+    removeFixtureDir(FIXTURE_DIR);
   });
 
   it('tidy.showFormatHistory is registered in the host', async () => {

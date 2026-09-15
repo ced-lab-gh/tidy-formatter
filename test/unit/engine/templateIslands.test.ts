@@ -11,8 +11,12 @@ import {
   findHtmlTemplateIslandSpans,
   maskHtmlTemplateIslands,
   maskTemplateIslandSpans,
-  restoreTemplateIslandsChecked
+  restoreTemplateIslandsChecked,
+  type TemplateIsland
 } from '../../../src/config/templates';
+// The OTHER checked restore: the v0.4.1 shape fix is asserted against it, not
+// against a hard-coded expectation, so "the two agree" is the thing under test.
+import { restoreMask } from '../../../src/ignore/mask';
 import {
   frontMatterFixtures,
   nonFrontMatterFixtures,
@@ -195,6 +199,69 @@ describe('config/templates : restoreTemplateIslandsChecked (ADD-02)', () => {
   it('an empty island list is an identity transform', () => {
     assert.equal(restoreTemplateIslandsChecked('<p>x</p>', []), '<p>x</p>');
   });
+
+  /* ---------------------------------------------------------------- */
+  /* v0.4.1: the two checked restores answer a non-string the same way */
+  /* ---------------------------------------------------------------- */
+
+  // The `typeof formatted !== 'string'` branch used to fall through to the
+  // sequential reference implementation, which calls result.indexOf(...) on the
+  // value and throws a TypeError. Nothing was ever unsafe (a throw is a refusal
+  // too: the provider aborts with ZERO edits), and the branch is unreachable
+  // from the pipeline, since Engine.format resolves to a string. But the
+  // signature says `string | undefined`, and src/ignore/mask.ts:restoreMask
+  // returns undefined for exactly the same situation, so one question had two
+  // shapes of answer depending on which checked restore you asked.
+  const NOT_STRINGS: readonly unknown[] = [
+    undefined,
+    null,
+    42,
+    true,
+    { text: '<p>x</p>' },
+    ['<p>x</p>'],
+    Symbol('formatted')
+  ];
+
+  for (const value of NOT_STRINGS) {
+    const label = typeof value === 'symbol' ? 'a symbol' : JSON.stringify(value) ?? String(value);
+    it(`returns undefined (never throws) for ${label}`, () => {
+      assert.equal(
+        restoreTemplateIslandsChecked(value as unknown as string, islands),
+        undefined
+      );
+    });
+  }
+
+  it('agrees with ignore/mask.ts restoreMask on every non-string', () => {
+    // The property itself, asserted against the other implementation rather
+    // than against a hard-coded `undefined`, so the two cannot drift apart
+    // again without this failing.
+    const restorations = [
+      { token: 'tidytplisland0endisland', original: '{{ a }}', startedLine: false }
+    ];
+    for (const value of NOT_STRINGS) {
+      assert.equal(
+        restoreTemplateIslandsChecked(value as unknown as string, islands),
+        restoreMask(value as unknown as string, restorations),
+        `the two checked restores disagreed for ${String(value)}`
+      );
+    }
+  });
+
+  it('a non-string is refused BEFORE the island set is inspected', () => {
+    // Both restore paths (linear and the sequential reference) are behind the
+    // check, so an island set that forces the slow path cannot smuggle the
+    // value through.
+    const forcesSequential: TemplateIsland[] = [
+      // A placeholder that is not the one makePlaceholder(0) mints, which is
+      // what canRestoreLinearly refuses.
+      { placeholder: 'tidytplisland7endisland', original: '{{ a }}' }
+    ];
+    assert.equal(
+      restoreTemplateIslandsChecked(undefined as unknown as string, forcesSequential),
+      undefined
+    );
+  });
 });
 
 describe('config/templates : findHtmlTemplateIslandSpans (island scope fix)', () => {
@@ -307,5 +374,204 @@ describe('config/templates : maskTemplateIslandSpans (island scope fix)', () => 
       }))
     ]);
     assert.deepEqual(viaEntryPoint, viaSpans);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* v0.4.1 M3-7 : the checked restore is linear, and identical byte for byte     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The v0.4.0 implementation, kept here as the ORACLE. Every assertion below
+ * compares the shipped restore against it: this change is a speed change, so
+ * anything it returns differently is a bug, including the undefined verdicts.
+ */
+function sequentialOracle(
+  formatted: string,
+  islands: readonly TemplateIsland[]
+): string | undefined {
+  let result = formatted;
+  for (let i = islands.length - 1; i >= 0; i -= 1) {
+    const { placeholder, original } = islands[i];
+    const first = result.indexOf(placeholder);
+    if (first === -1) {
+      return undefined;
+    }
+    if (result.indexOf(placeholder, first + placeholder.length) !== -1) {
+      return undefined;
+    }
+    result =
+      result.slice(0, first) + original + result.slice(first + placeholder.length);
+  }
+  return result;
+}
+
+/** Every way an engine could plausibly damage a masked text. */
+function damagedForms(
+  masked: string,
+  islands: readonly TemplateIsland[]
+): ReadonlyArray<readonly [string, string]> {
+  const forms: Array<readonly [string, string]> = [['pristine', masked]];
+  if (islands.length === 0) {
+    return forms;
+  }
+  const first = islands[0].placeholder;
+  const last = islands[islands.length - 1].placeholder;
+  forms.push(['dropped the first placeholder', masked.replace(first, '')]);
+  forms.push(['dropped the last placeholder', masked.replace(last, '')]);
+  forms.push(['duplicated a placeholder', `${masked}\n${first}\n`]);
+  forms.push([
+    'split a placeholder',
+    masked.replace(first, `${first.slice(0, 6)} ${first.slice(6)}`)
+  ]);
+  forms.push(['case-changed a placeholder', masked.replace(first, first.toUpperCase())]);
+  forms.push(['re-indented a placeholder', masked.replace(first, `    ${first}`)]);
+  forms.push(['reordered the lines', masked.split('\n').reverse().join('\n')]);
+  forms.push(['added a foreign index', `${masked}\ntidytplisland9999endisland\n`]);
+  forms.push(['added a bare prefix', `${masked}\ntidytplisland\n`]);
+  forms.push(['zero-padded an index', masked.replace(first, 'tidytplisland00endisland')]);
+  return forms;
+}
+
+describe('config/templates : restoreTemplateIslandsChecked is linear (M3-7)', () => {
+  it('agrees with the v0.4.0 implementation on every declared fixture, damaged or not', () => {
+    const documents = [
+      ...templateFixtures.map((fixture) => fixture.html),
+      ...frontMatterFixtures.map((fixture) => fixture.html),
+      ...nonFrontMatterFixtures.map((fixture) => fixture.html)
+    ];
+    let compared = 0;
+    for (const html of documents) {
+      for (const includeFrontMatter of [true, false]) {
+        const outcome = maskHtmlTemplateIslands(html, includeFrontMatter);
+        if (outcome.kind !== 'masked') {
+          continue;
+        }
+        for (const [damage, text] of damagedForms(outcome.masked, outcome.islands)) {
+          compared += 1;
+          assert.equal(
+            restoreTemplateIslandsChecked(text, outcome.islands),
+            sequentialOracle(text, outcome.islands),
+            `${damage}: the linear restore must answer exactly what the reference answers`
+          );
+        }
+      }
+    }
+    assert.ok(compared > 100, `the comparison must actually run, got ${compared}`);
+  });
+
+  it('keeps every failure mode: dropped, duplicated, split, case-changed', () => {
+    const html = '<div>{{ a }}<p>{% b %}</p><i><% c %></i></div>';
+    const outcome = maskHtmlTemplateIslands(html, false);
+    assert.equal(outcome.kind, 'masked');
+    if (outcome.kind !== 'masked') return;
+    const { masked, islands } = outcome;
+    const token = islands[1].placeholder;
+
+    assert.equal(restoreTemplateIslandsChecked(masked, islands), html, 'the clean case');
+    assert.equal(
+      restoreTemplateIslandsChecked(masked.replace(token, ''), islands),
+      undefined,
+      'dropped'
+    );
+    assert.equal(
+      restoreTemplateIslandsChecked(`${masked}${token}`, islands),
+      undefined,
+      'duplicated'
+    );
+    assert.equal(
+      restoreTemplateIslandsChecked(masked.replace(token, 'tidytplisland 1endisland'), islands),
+      undefined,
+      'split'
+    );
+    assert.equal(
+      restoreTemplateIslandsChecked(masked.replace(token, token.toUpperCase()), islands),
+      undefined,
+      'case-changed'
+    );
+    assert.equal(
+      restoreTemplateIslandsChecked(masked.replace(token, 'tidytplisland01endisland'), islands),
+      undefined,
+      'a zero-padded index is NOT island 1'
+    );
+  });
+
+  it('a placeholder-shaped token that is not ours is left exactly where it is', () => {
+    const islands = [{ placeholder: 'tidytplisland0endisland', original: '{{ a }}' }];
+    assert.equal(
+      restoreTemplateIslandsChecked(
+        '<p>tidytplisland0endisland</p><p>tidytplisland7endisland</p>',
+        islands
+      ),
+      '<p>{{ a }}</p><p>tidytplisland7endisland</p>'
+    );
+  });
+
+  it('falls back to the reference when an island could interact with the tokens', () => {
+    // Every one of these breaks a precondition of the linear pass; the answer
+    // must still be the reference implementation's, byte for byte.
+    const cases: ReadonlyArray<readonly [string, string, TemplateIsland[]]> = [
+      [
+        'an original that contains a placeholder',
+        '<p>tidytplisland0endisland</p><p>tidytplisland1endisland</p>',
+        [
+          { placeholder: 'tidytplisland0endisland', original: 'x tidytplisland1endisland y' },
+          { placeholder: 'tidytplisland1endisland', original: '{{ b }}' }
+        ]
+      ],
+      [
+        'an original that injects a lower-indexed placeholder',
+        '<p>tidytplisland1endisland</p>',
+        [
+          { placeholder: 'tidytplisland0endisland', original: '{{ a }}' },
+          { placeholder: 'tidytplisland1endisland', original: 'tidytplisland0endisland' }
+        ]
+      ],
+      [
+        'an empty original',
+        '<p>tidytplisland0endisland</p>',
+        [{ placeholder: 'tidytplisland0endisland', original: '' }]
+      ],
+      [
+        'a placeholder this module would never mint',
+        '<p>ZZZ</p>',
+        [{ placeholder: 'ZZZ', original: '{{ a }}' }]
+      ],
+      [
+        'an original made of placeholder characters',
+        '<p>tidytplisland0endisland</p>',
+        [{ placeholder: 'tidytplisland0endisland', original: 'plain' }]
+      ]
+    ];
+    for (const [label, formatted, islands] of cases) {
+      assert.equal(
+        restoreTemplateIslandsChecked(formatted, islands),
+        sequentialOracle(formatted, islands),
+        label
+      );
+    }
+  });
+
+  it('restores a document with 18001 islands without the quadratic freeze', () => {
+    // Not a micro-benchmark: the v0.4.0 restore took 13.2 s on this exact shape
+    // (727 KB / 18001 islands) and the 5120 KB size cap never came near stopping
+    // it. The bound is ~100x the measured linear cost, so only the return of the
+    // O(bytes x islands) behaviour can trip it.
+    const lines: string[] = ['<div>'];
+    for (let i = 0; i < 18000; i += 1) {
+      lines.push(`  <p>${'x'.repeat(20)}{{ v${i} }}</p>`);
+    }
+    lines.push('</div>', '');
+    const html = lines.join('\n');
+    const outcome = maskHtmlTemplateIslands(html, false);
+    assert.equal(outcome.kind, 'masked');
+    if (outcome.kind !== 'masked') return;
+    assert.ok(outcome.islands.length >= 18000, 'the document really does carry the islands');
+
+    const started = Date.now();
+    const restored = restoreTemplateIslandsChecked(outcome.masked, outcome.islands);
+    const elapsed = Date.now() - started;
+    assert.equal(restored, html, 'and the bytes are the input, exactly');
+    assert.ok(elapsed < 2000, `restore must stay linear, took ${elapsed} ms`);
   });
 });

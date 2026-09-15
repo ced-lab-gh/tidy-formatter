@@ -17,7 +17,9 @@
 //   - a real TypeScript format through the registered document provider, the
 //     resulting edit text, and which chunks that format loaded;
 //   - a real JSON format afterwards, and whether it loaded any FURTHER chunk
-//     (it must not: jsonc-parser ships inside the host bundle).
+//     (it must not: jsonc-parser ships inside the host bundle);
+//   - a real CSS format and a real HTML format, each of which must add exactly
+//     its own guard chunk (chunk-guard-css.js, then chunk-guard-html.js).
 //
 // Prints ONE JSON line on stdout and nothing else; the parent (startup.ts)
 // parses it and applies the budgets. Plain CommonJS: runs under plain Node with
@@ -165,6 +167,14 @@ async function main() {
   const css = await formatOnce('css', 'css', '.a{color:red}');
   const chunksAfterCss = cachedChunks();
 
+  // Scenario 5: HTML pulls exactly the parse5 guard chunk, nothing more. The
+  // input must be something the formatter really rewrites ('<div   >' collapses
+  // to '<div>'): a document that is already at its fixed point short-circuits
+  // before the guard runs and would load NO chunk, which is exactly the drift
+  // that went unnoticed while nothing asserted this delta.
+  const html = await formatOnce('html', 'html', '<div   ><span>x</span></div>\n');
+  const chunksAfterHtml = cachedChunks();
+
   // Dispose everything activate() registered, including the idle preload timer:
   // without this the child would linger for the full preload delay.
   for (const subscription of context.subscriptions) {
@@ -186,9 +196,11 @@ async function main() {
       chunksAfterTypescript,
       chunksAfterJson,
       chunksAfterCss,
+      chunksAfterHtml,
       typescript,
       json,
       css,
+      html,
       warnings: globalThis.__tidyActivationStub.warnings
     })}\n`
   );

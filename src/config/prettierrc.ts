@@ -22,8 +22,12 @@
 // load code, or alter anything the guard does not already accept.
 //
 // BOUNDED WALK: the upward search stops at the workspace folder root (stopDir,
-// inclusive), so a config planted above the trusted workspace can never govern
-// (the findSoukformatrc unbounded-walk defect is NOT reproduced here). The
+// inclusive), so a config planted above the trusted workspace can never govern.
+// This bound MIRRORS findSoukformatrc's, which has been bounded the same three
+// fail-closed ways since v0.4.0 (start inside stopDir, stop after searching
+// stopDir, and containment re-checked at every step). Until v0.4.1 this comment
+// still described that walk as an open defect, contradicting the sibling comment
+// on MAX_WALK_DEPTH below, which already says the bound is shared. The
 // bound is real PATH CONTAINMENT (isWithinDir), never string equality: a
 // case-mismatched drive letter, a trailing separator, a mixed separator or a
 // '..' segment must not be able to let the walk escape to the filesystem root.

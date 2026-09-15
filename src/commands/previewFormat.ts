@@ -49,6 +49,69 @@ export const PREVIEW_FORMAT_COMMAND_ID = 'tidy.previewFormat';
 /** URI scheme of the read-only virtual document holding the formatted preview. */
 export const PREVIEW_SCHEME = 'tidy-preview';
 
+/* -------------------------------------------------------------------------- */
+/* Preview URI identity (pure; the fix for C-10)                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * WHY EVERY PREVIEW GETS ITS OWN URI (v0.4.1, C-10).
+ *
+ * VS Code resolves a TextDocumentContentProvider ONCE per URI: the virtual
+ * document is then cached, and only an `onDidChange` event naming that exact URI
+ * makes the editor ask again. Until v0.4.1 every preview of a given file reused
+ * one URI and there was no event at all, so previewing the same file twice showed
+ * the FIRST preview's text in the diff while "Apply" wrote the second, current
+ * one : the one thing this command exists to prevent (measured: preview 2
+ * displayed ".a {\n  color: red\n}" while Apply wrote the whole two-rule file).
+ *
+ * Of the two available fixes, this is the URI-uniqueness one, chosen over an
+ * EventEmitter + onDidChange because it cannot race: a URI that has never been
+ * resolved before MUST be resolved now, so the diff cannot open on cached text no
+ * matter when the host delivers events, whether an older preview of the same file
+ * is still open in another tab, or how aggressively the host caches. It also adds
+ * no event surface and nothing to dispose. The cost is a small bounded store of
+ * recent previews (see {@link PREVIEW_STORE_LIMIT}) instead of exactly one entry.
+ */
+
+/**
+ * How many recent previews the read-only provider keeps addressable. The diff
+ * only ever reads the newest one; older entries are kept so a preview tab the
+ * user left open still renders, and evicted beyond that so a long session cannot
+ * accumulate document copies. Nothing here feeds "Apply": the text Apply writes
+ * is the one captured with the preview, never a store lookup.
+ */
+export const PREVIEW_STORE_LIMIT = 8;
+
+/**
+ * Build the read-only preview URI for ONE invocation. PURE.
+ *
+ * `token` is what makes it unique, and it rides in the QUERY so the path keeps
+ * naming the real file (the diff title and the preview pane's syntax highlighting
+ * both read better for it). VS Code keys TextDocuments by the WHOLE URI, query
+ * included, so a new token is a new document and therefore a fresh provider call.
+ */
+export function buildPreviewUriString(
+  documentPath: string,
+  languageId: string,
+  token: number
+): string {
+  return `${PREVIEW_SCHEME}:${documentPath}?lang=${encodeURIComponent(
+    languageId
+  )}&v=${token}`;
+}
+
+/**
+ * The provider's store key for a preview URI. PURE. It must distinguish two URIs
+ * that share a path and differ only in query : keying on the path alone is
+ * exactly what let one stale entry serve every preview of a file.
+ */
+export function previewContentKey(uri: {
+  readonly path: string;
+  readonly query?: string;
+}): string {
+  return `${uri.path}?${uri.query ?? ''}`;
+}
+
 /** Label of the single action button shown on the diff (explicit apply only). */
 export const APPLY_BUTTON_LABEL = 'Apply';
 
@@ -289,10 +352,24 @@ export function evaluateApplyGate(
 }
 
 /**
- * Compose the user-facing rejection message. The guard's `reason` is a short,
- * code-free summary (the guard never embeds source); we prepend a stable,
- * consistent prefix so the message reads the same regardless of which guard
- * strategy fired, while still surfacing the specific cause when present.
+ * Compose the user-facing rejection message. The guard's `reason` is a SHORT,
+ * single-line summary : it keeps the parser's own first line and drops the
+ * multi-line code frame under it, which is where a parser prints an excerpt of
+ * the file. It is NOT source-free, and this comment used to claim it was.
+ * A parser routinely NAMES the token it choked on in that first line, so the
+ * reason really can quote a few characters of the user's document, for example:
+ *   "input did not parse: Identifier 'CLIENT_SECRET_abc123' has already been
+ *   declared. (2:7)" (babel), or
+ *   "input did not parse: <css input>:1:9: Unknown word CLIENT_SECRET_abc123"
+ *   (postcss).
+ * README ("No silent failures") discloses exactly this, and the two statements
+ * must stay in agreement : nothing ELSE of the document is ever recorded, and
+ * `sanitizeDetail` still caps the whole thing at one line of 200 characters.
+ * Making the redaction stronger would be a behaviour change, not a comment fix.
+ *
+ * We prepend a stable, consistent prefix so the message reads the same
+ * regardless of which guard strategy fired, while still surfacing the specific
+ * cause when present.
  */
 function guardRejectionReason(verdict: GuardVerdict): string {
   const detail = verdict.reason?.trim();
@@ -338,20 +415,30 @@ function toSupportedLangId(languageId: string): LangId | undefined {
 
 /**
  * A read-only content provider for the 'tidy-preview' scheme. It serves the
- * formatted text for exactly one preview at a time, keyed by the preview URI's
- * path, so the diff's right-hand side is virtual and never written to disk. The
- * user cannot edit it (VS Code treats provider-backed documents as read-only).
+ * formatted text of the most recent previews, keyed by the preview URI's FULL
+ * identity (path + query, see {@link previewContentKey}), so the diff's
+ * right-hand side is virtual and never written to disk. The user cannot edit it
+ * (VS Code treats provider-backed documents as read-only).
  */
 interface PreviewContentProvider {
-  set(uriPath: string, content: string): void;
-  provideTextDocumentContent(uri: { path: string }): string;
+  set(key: string, content: string): void;
+  provideTextDocumentContent(uri: { path: string; query?: string }): string;
 }
 
 let previewProvider: (PreviewContentProvider & { registered: boolean }) | undefined;
 
 /**
+ * Monotonic per-session counter making each preview URI unique (C-10). A counter
+ * rather than a clock: two previews within the same millisecond must still get
+ * different URIs, and a deterministic sequence is testable.
+ */
+let previewToken = 0;
+
+/**
  * Lazily create + register the read-only preview content provider, once per
- * session. Subsequent previews reuse it and just swap the served content.
+ * session. Subsequent previews reuse it and add their own entry: entries are
+ * never overwritten (each preview owns a unique URI) and the oldest are evicted
+ * past {@link PREVIEW_STORE_LIMIT}.
  */
 function ensurePreviewProvider(vscode: any): PreviewContentProvider {
   if (previewProvider && previewProvider.registered) {
@@ -361,11 +448,19 @@ function ensurePreviewProvider(vscode: any): PreviewContentProvider {
   const store = new Map<string, string>();
   const provider: PreviewContentProvider & { registered: boolean } = {
     registered: false,
-    set(uriPath: string, content: string): void {
-      store.set(uriPath, content);
+    set(key: string, content: string): void {
+      store.set(key, content);
+      // Map iterates in insertion order, so the first key is the oldest preview.
+      while (store.size > PREVIEW_STORE_LIMIT) {
+        const oldest = store.keys().next();
+        if (oldest.done === true) {
+          break;
+        }
+        store.delete(oldest.value);
+      }
     },
-    provideTextDocumentContent(uri: { path: string }): string {
-      return store.get(uri.path) ?? '';
+    provideTextDocumentContent(uri: { path: string; query?: string }): string {
+      return store.get(previewContentKey(uri)) ?? '';
     }
   };
 
@@ -430,12 +525,16 @@ async function showDiffAndOfferApply(
 
   // A per-document preview path keeps the served content addressable and keeps
   // the diff title readable. We carry the languageId as a query so VS Code picks
-  // the right syntax highlighting for the preview pane.
+  // the right syntax highlighting for the preview pane, plus a per-invocation
+  // token so THIS preview is a document the host has never resolved before and
+  // must therefore read from us now (C-10: without it, preview 2 of a file showed
+  // preview 1's cached text while Apply wrote preview 2's).
   const baseName = basenameOf(document.uri.path) || 'document';
+  previewToken += 1;
   const previewUri = vscode.Uri.parse(
-    `${PREVIEW_SCHEME}:${document.uri.path}?lang=${encodeURIComponent(languageId)}`
+    buildPreviewUriString(document.uri.path, languageId, previewToken)
   );
-  provider.set(previewUri.path, formatted);
+  provider.set(previewContentKey(previewUri), formatted);
 
   const title = `Tidy preview: ${baseName} (read-only)`;
   await vscode.commands.executeCommand(

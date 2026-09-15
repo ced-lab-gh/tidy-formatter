@@ -52,7 +52,8 @@ describe('ignore/mask : applyMask + restoreMask (pure round-trip)', () => {
     assert.ok(mask);
 
     // Simulate an engine that reflows everything around the placeholder but keeps
-    // the placeholder token intact (it is a bare identifier).
+    // the placeholder token intact (it is a block comment, which every engine on
+    // this path preserves).
     const reflowed = mask!.masked
       .replace('const a=1', 'const a = 1;')
       .replace('const b=3', 'const b = 3;');
@@ -269,5 +270,111 @@ describe('ignore/mask : restoreMask re-establishes the span line structure', () 
       .replace(`${second.token}\n.b`, `${second.token} .b`);
     const restored = restoreMask(formatted, mask!.restorations);
     assert.equal(restored, input);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* v0.4.1 M3-2 : the placeholder is shaped like a comment                      */
+/* -------------------------------------------------------------------------- */
+
+describe('ignore/mask : the placeholder token is a legal block comment (M3-2)', () => {
+  /** The token the masker actually used for the single range in `input`. */
+  function tokenOf(input: string, lang: Parameters<typeof scanMarkers>[1]): string {
+    const { mask } = maskFromMarkers(input, lang);
+    assert.ok(mask, 'a region should produce a mask');
+    assert.equal(mask!.restorations.length, 1);
+    return mask!.restorations[0].token;
+  }
+
+  const cssInput =
+    '.a{color:red}\n/* tidy-ignore-start */\n.RAW  {  a : b  }\n/* tidy-ignore-end */\n';
+
+  it('wraps the placeholder body in /* */ so it parses where CSS expects a node', () => {
+    const token = tokenOf(cssInput, 'css');
+    assert.equal(token, '/*__TIDY_IGNORE_PLACEHOLDER_0__*/');
+    assert.ok(token.startsWith('/*') && token.endsWith('*/'));
+    // A bare identifier is exactly what postcss rejected with "Unknown word".
+    assert.ok(!/^[A-Za-z_]/.test(token), 'the token must not be a bare identifier');
+  });
+
+  it('the token contains no whitespace, so no printer can wrap or split it', () => {
+    assert.ok(!/\s/.test(tokenOf(cssInput, 'css')));
+  });
+
+  it('numbers the tokens per index and keeps them mutually distinct', () => {
+    const input =
+      '/* tidy-ignore-start */\n.k1{}\n/* tidy-ignore-end */\n' +
+      '.gap{}\n' +
+      '/* tidy-ignore-start */\n.k2{}\n/* tidy-ignore-end */\n';
+    const { mask } = maskFromMarkers(input, 'css');
+    assert.ok(mask);
+    const tokens = mask!.restorations.map((restoration) => restoration.token);
+    assert.deepEqual(tokens, [
+      '/*__TIDY_IGNORE_PLACEHOLDER_0__*/',
+      '/*__TIDY_IGNORE_PLACEHOLDER_1__*/'
+    ]);
+    assert.equal(new Set(tokens).size, tokens.length);
+    assert.ok(!tokens[1].includes(tokens[0]), 'no token may contain another');
+  });
+
+  it('the collision pre-flight still fires on the BARE body, wrapper or not', () => {
+    // Both shapes must be refused: the bare body is what a document is most
+    // likely to mention, and the wrapped token is what restore searches for.
+    for (const collide of [
+      '__TIDY_IGNORE_PLACEHOLDER_0__',
+      '/*__TIDY_IGNORE_PLACEHOLDER_0__*/'
+    ]) {
+      const input =
+        '.a{color:red}\n' +
+        '/* tidy-ignore-start */\n' +
+        `.x{content:"${collide}"}\n` +
+        '/* tidy-ignore-end */\n';
+      const scan = scanMarkers(input, 'css');
+      assert.equal(scan.protectedRanges.length, 1);
+      assert.equal(
+        applyMask(input, scan.protectedRanges),
+        undefined,
+        `a document already carrying ${collide} must refuse to mask`
+      );
+    }
+  });
+
+  it('the collision pre-flight fires on a LATER index too', () => {
+    const input =
+      '/* tidy-ignore-start */\n.k1{}\n/* tidy-ignore-end */\n' +
+      '.gap{content:"__TIDY_IGNORE_PLACEHOLDER_1__"}\n' +
+      '/* tidy-ignore-start */\n.k2{}\n/* tidy-ignore-end */\n';
+    const scan = scanMarkers(input, 'css');
+    assert.equal(scan.protectedRanges.length, 2);
+    assert.equal(applyMask(input, scan.protectedRanges), undefined);
+  });
+
+  it('round-trips byte-identically with the comment token, every language', () => {
+    const cases: ReadonlyArray<readonly [Parameters<typeof scanMarkers>[1], string]> = [
+      ['css', cssInput],
+      ['scss', cssInput],
+      ['less', cssInput],
+      [
+        'javascript',
+        'const a=1\n// tidy-ignore-start\nconst   RAW = 2\n// tidy-ignore-end\nconst b=3\n'
+      ],
+      [
+        'json',
+        '{\n// tidy-ignore-start\n  "a" :  1,\n// tidy-ignore-end\n"b":2\n}\n'
+      ],
+      [
+        'html',
+        '<div>\n<!-- tidy-ignore-start -->\n    <pre>RAW  ME</pre>\n<!-- tidy-ignore-end -->\n</div>\n'
+      ]
+    ];
+    for (const [lang, input] of cases) {
+      const { mask } = maskFromMarkers(input, lang);
+      assert.ok(mask, `${lang}: a region should produce a mask`);
+      assert.ok(
+        mask!.masked.includes('/*__TIDY_IGNORE_PLACEHOLDER_0__*/'),
+        `${lang}: the comment token stands in for the region`
+      );
+      assert.equal(restoreMask(mask!.masked, mask!.restorations), input, `${lang}: round trip`);
+    }
   });
 });

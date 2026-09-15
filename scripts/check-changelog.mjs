@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// check-changelog.mjs — anti-empty-bump guard.
+// check-changelog.mjs : anti-empty-bump guard.
 //
 // Enforces the release rule of thumb: never ship a version bump without a
 // documented change. Reads the "version" from package.json and asserts that
@@ -30,7 +30,7 @@ function readFileOrFail(path, label) {
     return readFileSync(path, "utf8");
   } catch (err) {
     fail(`could not read ${label} at ${path}: ${err.message}`);
-    return ""; // unreachable — fail() has already exited the process.
+    return ""; // unreachable: fail() has already exited the process.
   }
 }
 

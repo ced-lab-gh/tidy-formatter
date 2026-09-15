@@ -32,8 +32,18 @@ export type FormatScope = 'document' | 'selection';
 
 /**
  * A plain, vscode-free snapshot of one format attempt. `detail` carries the
- * status-specific specifics (guard reason, error message, the KB limit, ...); by
- * contract it never contains any document content.
+ * status-specific specifics (guard reason, error message, the KB limit, ...).
+ *
+ * WHAT THE CONTRACT REALLY IS (corrected in v0.4.1; it used to say "never
+ * contains any document content"): `detail` is always run through
+ * {@link sanitizeDetail}, so it is ONE line of at most 200 characters and can
+ * never carry a parser's multi-line code frame : the block where a parser prints
+ * an excerpt of the file. What survives is the parser's own FIRST line, and a
+ * parser often names the offending token there, so a detail can legitimately
+ * quote a few characters of the user's source (observed: "input did not parse:
+ * Identifier 'CLIENT_SECRET_abc123' has already been declared. (2:7)"). That
+ * bounded leak is disclosed in README ("No silent failures"); nothing else of
+ * the document is ever recorded, nothing is persisted and nothing is sent.
  */
 export interface LastFormatRecord {
   readonly uri: string;

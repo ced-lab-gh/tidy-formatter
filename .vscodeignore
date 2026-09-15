@@ -34,6 +34,16 @@ media/**/*.mjs
 media/*.mjs
 scripts/**
 
+# ── Audit / verification scratch directories ──
+# MIRROR of .gitignore, and NOT redundant for the same reason as the secrets
+# block below: vsce packages from the working directory, not from git. Every
+# adversarial pass drops a _probe*/ directory of fixtures and notes next to
+# the sources; `vsce ls` was observed listing _probe_bh/fixture.css,
+# fixture.json and NOTES.md among the packaged files, because only the blanket
+# **/*.ts rule below happened to keep the rest of such a directory out.
+_probe*/**
+**/_probe*/**
+
 # ── Repo doc not needed inside the VSIX ──
 PUBLISHING.md
 

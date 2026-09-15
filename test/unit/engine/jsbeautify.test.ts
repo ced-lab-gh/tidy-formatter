@@ -10,6 +10,7 @@ import {
 } from '../../../src/engine/jsbeautify';
 import { guard } from '../../../src/safety/guard';
 import { HTML_PREFORMATTED_TAGS } from '../../../src/safety/htmlPreformatted';
+import { splitSliceEdges } from '../../../src/engine/sliceEdges';
 import { resolved } from '../../helpers/options';
 import type { LangId } from '../../../src/types';
 
@@ -489,4 +490,387 @@ describe('engine/jsbeautify : preformatted HTML is never reflowed', () => {
     assert.ok(out.includes('alpha\n\tTABBED'), `got ${JSON.stringify(out)}`);
     assert.equal(guard.check('html', code, out).equivalent, true);
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/* C-04 : ONE whitespace policy, so no bare LF lands in a CRLF document         */
+/* -------------------------------------------------------------------------- */
+//
+// This adapter used to carry its OWN copy of the post-processing pass, and the
+// copy drifted from src/engine/postProcess.ts: its final-newline branch appended
+// a hard-coded LF instead of the DOCUMENT's line ending. At the DEFAULT
+// configuration (files.eol "auto", i.e. endOfLine undetermined, plus
+// insertFinalNewline true) a CRLF document therefore came back with one lone LF
+// glued to its last line. A whitespace-only difference is equivalent to the
+// guard, so that mixed-EOL result was WRITTEN. The whole js-beautify family was
+// affected. These tests lock the reuse, not the copy.
+
+/** Count CRLF pairs, and the LFs that are NOT part of a CRLF pair. */
+function eolCounts(text: string): { crlf: number; bareLf: number } {
+  const crlf = (text.match(/\r\n/g) ?? []).length;
+  const bareLf = (text.replace(/\r\n/g, '').match(/\n/g) ?? []).length;
+  return { crlf, bareLf };
+}
+
+describe('engine/jsbeautify : one final-newline policy, never a bare LF (C-04)', () => {
+  const CRLF_SOURCES: ReadonlyArray<{ lang: LangId; code: string }> = [
+    { lang: 'css', code: '.a{color:red}\r\n.b{color:blue}\r\n' },
+    { lang: 'scss', code: '.a{color:red}\r\n.b{color:blue}\r\n' },
+    { lang: 'less', code: '.a{color:red}\r\n.b{color:blue}\r\n' },
+    { lang: 'html', code: '<div><p>a</p></div>\r\n<span>b</span>\r\n' },
+    { lang: 'javascript', code: 'const a={x:1};\r\nconst b=2;\r\n' },
+    { lang: 'json', code: '{"a":1,\r\n"b":2}\r\n' },
+    { lang: 'jsonc', code: '{"a":1,\r\n"b":2}\r\n' }
+  ];
+
+  for (const source of CRLF_SOURCES) {
+    it(`${source.lang}: a CRLF document keeps CRLF at the DEFAULT eol (auto)`, async () => {
+      // endOfLine is deliberately left undetermined: that is files.eol "auto",
+      // the shipped default, and the exact configuration the defect needed.
+      const out = await engine.format({
+        languageId: source.lang,
+        code: source.code,
+        options: resolved({ insertFinalNewline: true })
+      });
+      const counts = eolCounts(out);
+      assert.equal(
+        counts.bareLf,
+        0,
+        `a lone LF reached a CRLF document: ${JSON.stringify(out)}`
+      );
+      assert.ok(counts.crlf > 0, 'the document is still CRLF');
+      assert.ok(out.endsWith('\r\n'), `got ${JSON.stringify(out)}`);
+      assert.equal(guard.check(source.lang, source.code, out).equivalent, true);
+    });
+  }
+
+  it('an LF document keeps LF at the default eol', async () => {
+    const code = '.a{color:red}\n.b{color:blue}\n';
+    const out = await engine.format({
+      languageId: 'css',
+      code,
+      options: resolved({ insertFinalNewline: true })
+    });
+    assert.equal(eolCounts(out).crlf, 0, `got ${JSON.stringify(out)}`);
+    assert.ok(out.endsWith('\n'));
+  });
+
+  it('a MIXED-EOL document comes out consistent, never more mixed', async () => {
+    const code = '.a{color:red}\r\n.b{color:blue}\n';
+    const out = await engine.format({
+      languageId: 'css',
+      code,
+      options: resolved({ insertFinalNewline: true })
+    });
+    const counts = eolCounts(out);
+    assert.ok(
+      counts.crlf === 0 || counts.bareLf === 0,
+      `still mixed: ${JSON.stringify(out)}`
+    );
+  });
+
+  it('an explicit endOfLine still wins over the document', async () => {
+    const out = await engine.format({
+      languageId: 'css',
+      code: '.a{color:red}\n.b{color:blue}\n',
+      options: resolved({ insertFinalNewline: true, endOfLine: 'crlf' })
+    });
+    assert.equal(eolCounts(out).bareLf, 0, `got ${JSON.stringify(out)}`);
+    assert.ok(out.endsWith('\r\n'));
+  });
+
+  it('no opinion adds no final newline to a document that had none', async () => {
+    // insertFinalNewline undefined must mean NO EDIT, in both directions.
+    for (const code of [
+      '.a{color:red}\r\n.b{color:blue}',
+      '.a{color:red}\n.b{color:blue}'
+    ]) {
+      // eslint-disable-next-line no-await-in-loop
+      const out = await engine.format({
+        languageId: 'css',
+        code,
+        options: resolved()
+      });
+      assert.ok(
+        !/[\r\n]$/.test(out),
+        `no opinion invented a final newline: ${JSON.stringify(out)}`
+      );
+      const counts = eolCounts(out);
+      assert.ok(
+        counts.crlf === 0 || counts.bareLf === 0,
+        `mixed EOL: ${JSON.stringify(out)}`
+      );
+    }
+  });
+
+  it('insertFinalNewline false still strips it, CRLF document included', async () => {
+    const out = await engine.format({
+      languageId: 'css',
+      code: '.a{color:red}\r\n',
+      options: resolved({ insertFinalNewline: false })
+    });
+    assert.ok(!/[\r\n]$/.test(out), `got ${JSON.stringify(out)}`);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* M3-3 / G3-4 : a range never rewrites the slice's own edge whitespace         */
+/* -------------------------------------------------------------------------- */
+//
+// js-beautify trims the edges of whatever slice it is handed. At selection scope
+// the bytes on either side stay in the buffer, so the trim JOINS the slice to
+// its neighbour: a selection whose last character is a line break came back one
+// line shorter, the splice glued the next line on, and the following pass had a
+// DIFFERENT slice to format. Measured before the fix: edits 1,1,1,1,1,1 with
+// pass3 == pass5 and pass4 == pass6, in javascript, html, json AND css. The
+// guard accepts every step because the change is whitespace-only, so this drifts
+// WITHOUT BOUND against a README that promises format(format(x)) == format(x).
+
+/** The bytes a range format actually wrote in place of [start, end). */
+function writtenSpan(
+  code: string,
+  out: string,
+  start: number,
+  end: number
+): string {
+  const before = code.slice(0, start);
+  const after = code.slice(end);
+  assert.ok(out.startsWith(before), 'prefix must be preserved byte for byte');
+  assert.ok(out.endsWith(after), 'suffix must be preserved byte for byte');
+  return out.slice(before.length, out.length - after.length);
+}
+
+/** Offsets of whole lines [firstLine, lastLine], including the final EOL. */
+function lineSpan(
+  text: string,
+  firstLine: number,
+  lastLine: number
+): { start: number; end: number } {
+  const starts: number[] = [0];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '\n') {
+      starts.push(i + 1);
+    }
+  }
+  const start = starts[Math.min(firstLine, starts.length - 1)];
+  const end = lastLine + 1 < starts.length ? starts[lastLine + 1] : text.length;
+  return { start, end };
+}
+
+describe('engine/jsbeautify : a range keeps its own edge whitespace (M3-3, G3-4)', () => {
+  const EDGE_CASES: ReadonlyArray<{
+    lang: LangId;
+    id: string;
+    code: string;
+    start: number;
+    end: number;
+  }> = [
+    {
+      lang: 'css',
+      id: 'trailing line break',
+      code: '.a{color:red}\n.b{color:blue}\n',
+      start: 0,
+      end: 14
+    },
+    {
+      lang: 'javascript',
+      id: 'trailing line break',
+      code: 'const a={x:1};\nconst b=2;\n',
+      start: 0,
+      end: 15
+    },
+    {
+      lang: 'html',
+      id: 'trailing line break',
+      code: '<div><p>a</p></div>\n<span>b</span>\n',
+      start: 0,
+      end: 20
+    },
+    {
+      lang: 'json',
+      id: 'trailing line break',
+      code: '{"a":1,\n"b":2}\n',
+      start: 0,
+      end: 8
+    },
+    {
+      lang: 'html',
+      id: 'leading AND trailing space',
+      code: '<p>hello <b>x</b> world</p>',
+      start: 8,
+      end: 18
+    },
+    {
+      lang: 'css',
+      id: 'leading indent and a trailing blank line',
+      code: 'body{margin:0}\n  .a{color:red}\n\n.b{color:blue}\n',
+      start: 15,
+      end: 32
+    },
+    {
+      lang: 'css',
+      id: 'CRLF edges',
+      code: '.a{color:red}\r\n.b{color:blue}\r\n',
+      start: 0,
+      end: 15
+    }
+  ];
+
+  for (const edge of EDGE_CASES) {
+    it(`${edge.lang} (${edge.id}): both runs come back byte for byte`, async () => {
+      const slice = edge.code.slice(edge.start, edge.end);
+      const wanted = splitSliceEdges(slice);
+      const out = await engine.format({
+        languageId: edge.lang,
+        code: edge.code,
+        options: resolved(),
+        range: { startOffset: edge.start, endOffset: edge.end }
+      });
+      const written = writtenSpan(edge.code, out, edge.start, edge.end);
+      const got = splitSliceEdges(written);
+      assert.equal(
+        got.leading,
+        wanted.leading,
+        `leading run changed: ${JSON.stringify(written)}`
+      );
+      assert.equal(
+        got.trailing,
+        wanted.trailing,
+        `trailing run changed: ${JSON.stringify(written)}`
+      );
+    });
+  }
+
+  it('a slice that is nothing but whitespace is never touched', async () => {
+    // In HTML that run IS a rendered space, so collapsing it changes what the
+    // reader sees while the guard calls it equivalent.
+    const code = '<p>hello <b>x</b> \n <i>y</i></p>';
+    const start = code.indexOf('</b>') + '</b>'.length;
+    const end = code.indexOf('<i>');
+    assert.equal(code.slice(start, end).trim(), '', 'the fixture must be blank');
+    const out = await engine.format({
+      languageId: 'html',
+      code,
+      options: resolved(),
+      range: { startOffset: start, endOffset: end }
+    });
+    assert.equal(out, code, `a blank slice was rewritten: ${JSON.stringify(out)}`);
+  });
+
+  it('the CONTENT of the slice is still really formatted', async () => {
+    // The edge rule must never turn a range format into a silent no-op.
+    const code = '.a{color:red}\n.b{color:blue}\n';
+    const out = await engine.format({
+      languageId: 'css',
+      code,
+      options: resolved({ tabSize: 2 }),
+      range: { startOffset: 0, endOffset: 14 }
+    });
+    const written = writtenSpan(code, out, 0, 14);
+    assert.ok(
+      written.includes('color: red'),
+      `not formatted: ${JSON.stringify(written)}`
+    );
+    assert.ok(written.endsWith('\n'), 'and the trailing break is still there');
+  });
+});
+
+describe('engine/jsbeautify : a line-anchored range converges on pass 2 (M3-3)', () => {
+  const FRAMINGS: ReadonlyArray<{
+    lang: LangId;
+    id: string;
+    code: string;
+    firstLine: number;
+    lastLine: number;
+  }> = [
+    {
+      lang: 'javascript',
+      id: 'first line',
+      code: 'const a={x:1};\nconst b=2;\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'javascript',
+      id: 'inner line, framed both sides',
+      code: 'let z=0;\nfunction f(){return 1;}\nlet w=1;\n',
+      firstLine: 1,
+      lastLine: 1
+    },
+    {
+      lang: 'html',
+      id: 'first line',
+      code: '<div><p>a</p></div>\n<span>b</span>\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'html',
+      id: 'inner line',
+      code: '<header>h</header>\n<div><p>a</p></div>\n<footer>f</footer>\n',
+      firstLine: 1,
+      lastLine: 1
+    },
+    {
+      lang: 'json',
+      id: 'first line',
+      code: '{"a":1,\n"b":2}\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'jsonc',
+      id: 'first line with a comment below',
+      code: '{"a":1,\n// keep\n"b":2}\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'css',
+      id: 'first line',
+      code: '.a{color:red}\n.b{color:blue}\n',
+      firstLine: 0,
+      lastLine: 0
+    },
+    {
+      lang: 'css',
+      id: 'inner line, framed both sides',
+      code: 'body{margin:0}\n.a{color:red}\n.b{color:blue}\n',
+      firstLine: 1,
+      lastLine: 1
+    },
+    {
+      lang: 'css',
+      id: 'two lines at once',
+      code: 'body{margin:0}\n.a{color:red}\n.b{color:blue}\n',
+      firstLine: 0,
+      lastLine: 1
+    }
+  ];
+
+  for (const framing of FRAMINGS) {
+    it(`${framing.lang} (${framing.id}): pass 2 onwards is a byte no-op`, async () => {
+      let text = framing.code;
+      const states: string[] = [];
+      for (let pass = 0; pass < 6; pass += 1) {
+        const span = lineSpan(text, framing.firstLine, framing.lastLine);
+        // eslint-disable-next-line no-await-in-loop
+        text = await engine.format({
+          languageId: framing.lang,
+          code: text,
+          options: resolved(),
+          range: { startOffset: span.start, endOffset: span.end }
+        });
+        states.push(text);
+      }
+      for (let pass = 1; pass < states.length; pass += 1) {
+        assert.equal(
+          states[pass],
+          states[0],
+          `pass ${pass + 1} drifted from the pass-1 fixed point: ` +
+            `${JSON.stringify(states[0])} -> ${JSON.stringify(states[pass])}`
+        );
+      }
+    });
+  }
 });
