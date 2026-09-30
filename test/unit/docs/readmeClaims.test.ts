@@ -1525,11 +1525,25 @@ describe('walkthrough : the pages use the manifest command titles', () => {
         displayName: string;
       }
     ).displayName;
-    assert.equal(displayName, 'Tidy: JS/CSS/HTML Formatter & Beautifier');
+    // The displayName is an EXPERIMENT VARIABLE (the v0.4.2 title test, see
+    // _internal/growth/TEST_TITRE_A1.md) and may be rolled back, so it is not
+    // pinned to a literal here. What is pinned is the invariant that matters:
+    // every place that tells the user what to click agrees with the manifest.
+    assert.ok(displayName.startsWith('Tidy'), 'the brand stays the first token');
     assert.ok(
       body.includes(displayName),
       'the "Configure Default Formatter" step must use the picker name'
     );
+  });
+
+  it('README names the extension by its real displayName', () => {
+    const displayName = (
+      JSON.parse(readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')) as {
+        displayName: string;
+      }
+    ).displayName;
+    const firstLine = README.split(/\r?\n/, 1)[0];
+    assert.equal(firstLine, `# ${displayName}`);
   });
 });
 

@@ -16,7 +16,7 @@ That write touches `editor.defaultFormatter` and nothing else. Format on save is
 
 Prefer to do it by hand? You can always use the standard VS Code flow instead:
 
-- Right-click in an editor → **Format Document With…** → **Configure Default Formatter…** → choose **Tidy: JS/CSS/HTML Formatter & Beautifier** (the name the picker and the Marketplace both show).
+- Right-click in an editor → **Format Document With…** → **Configure Default Formatter…** → choose **Tidy HTML Formatter** (the name the picker and the Marketplace both show).
 
 Or set it per language in `settings.json`:
 
@@ -27,4 +27,4 @@ Or set it per language in `settings.json`:
 }
 ```
 
-You can also just run **Format Document** (`Shift+Alt+F`) on any supported file : if another formatter is already your default, pick Tidy once via **Format Document With… → Tidy: JS/CSS/HTML Formatter & Beautifier**. No default-formatter change required.
+You can also just run **Format Document** (`Shift+Alt+F`) on any supported file : if another formatter is already your default, pick Tidy once via **Format Document With… → Tidy HTML Formatter**. No default-formatter change required.

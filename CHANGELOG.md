@@ -1,8 +1,17 @@
 # Changelog
 
-All notable changes to **Tidy Formatter : JS/CSS/HTML** are documented in this
+All notable changes to **Tidy** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [0.4.2] - 2026-09-30
+
+A metadata-only release. **No code changed**: the extension formats exactly as 0.4.1 does.
+
+### Changed
+
+- **The extension is now listed as `Tidy HTML Formatter`**, shorter than the previous `Tidy: JS/CSS/HTML Formatter & Beautifier`. Nothing about what it does has changed: it still formats JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML and JSON, as the description says. The extension id `ced-lab.tidy-formatter` is unchanged, so your installation, your settings and your updates are unaffected.
+- If you pick a formatter by hand through *Format Document With...* or *Configure Default Formatter...*, look for **Tidy HTML Formatter** in the list. The walkthrough and README use the new name.
 
 ## [0.4.1] - 2026-09-15
 
