@@ -357,6 +357,37 @@ describe('commands/showConfig : ignore & coexistence (Axe 4.T8)', () => {
     assert.match(report, /\.soukformatignore excludes this file : yes/);
   });
 
+  it('says WHY when the exclusion is a fail-closed one (which line, and the reason)', () => {
+    const problem =
+      'line 3: pattern "vendor\\" cannot be evaluated (it ends with a lone backslash); ' +
+      "every file under this ignore file's folder is excluded until the line is fixed or removed.";
+    const report = reportFor('css', resolved(), {
+      ignoreStatus: {
+        ...baseStatus,
+        fileIgnoredByList: true,
+        soukformatignorePath: '/proj/.soukformatignore',
+        ignoreFileProblem: problem
+      }
+    });
+    assert.match(report, /\.soukformatignore excludes this file : yes/);
+    const lines = report.split('\n');
+    assert.ok(lines.includes('  .soukformatignore problem : ' + problem));
+    // The problem line sits right under the "excludes this file" line it explains.
+    const at = lines.findIndex((line) => line.includes('excludes this file : yes'));
+    assert.ok(lines[at + 1].startsWith('  .soukformatignore problem : line 3:'));
+  });
+
+  it('prints no problem line for an ordinary exclusion', () => {
+    const report = reportFor('css', resolved(), {
+      ignoreStatus: {
+        ...baseStatus,
+        fileIgnoredByList: true,
+        soukformatignorePath: '/proj/.soukformatignore'
+      }
+    });
+    assert.ok(!report.includes('.soukformatignore problem'));
+  });
+
   it('surfaces a head file-ignore marker as a SKIP', () => {
     const report = reportFor('css', resolved(), {
       ignoreStatus: { ...baseStatus, fileIgnoredByMarker: true }

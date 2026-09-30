@@ -1,11 +1,13 @@
-// Pure lonefy -> Tidy option mapper (ROADMAP Axe 1, task 1.T1; SPEC §6 "Compat
+// Pure lonefy -> Tidy KEY mapper (ROADMAP Axe 1, task 1.T1; SPEC §6 "Compat
 // .jsbeautifyrc" + §13.14, Non-goal §11 ".jsbeautifyrc best-effort").
 //
-// The abandoned incumbent (lonefy.vscode-JS-CSS-HTML-formatter) read a legacy
-// `.jsbeautifyrc` (plain js-beautify vocabulary). This module turns such a config
+// This is the FLAT key vocabulary: one js-beautify options object (a
+// `.jsbeautifyrc`, or ONE section of the incumbent's `formatter.json`) turned
 // into the subset of Tidy `tidy.*` settings that have a faithful, in-domain
 // equivalent, so an OPT-IN migration can PREVIEW exactly what it would write
-// before the user confirms.
+// before the user confirms. The incumbent's real file shape (sections plus
+// `onSave`) is handled one level up, in lonefyConfig.ts, which REUSES this mapper
+// once per section.
 //
 // PURE: this module MUST NOT import 'vscode' (modelled on src/config/editorconfig.ts).
 // It performs no I/O and never throws : every external value is validated and any
@@ -114,6 +116,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Whether a parsed object had its prototype REPLACED, which is what a JSON key
+ * literally named `__proto__` does to the parser's plain object: the key then
+ * vanishes from `Object.keys`. A formatter config has no business carrying one,
+ * so callers report it as a key that was not carried over rather than losing it.
+ */
+export function hasForeignPrototype(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype !== null && prototype !== Object.prototype;
+}
+
+/**
  * Mutable accumulator used while mapping. Encapsulated so the per-key handlers
  * stay small and the public result is assembled once, immutably, at the end.
  */
@@ -132,7 +145,7 @@ function mapKnownKey(key: string, value: unknown, acc: Accumulator): void {
         acc.settings[TIDY_INDENT] = n;
       } else {
         acc.warnings.push(
-          `indent_size: ignored value ${describe(value)} (expected an integer in [${INDENT_MIN}, ${INDENT_MAX}]).`
+          `indent_size: ignored value ${describeValue(value)} (expected an integer in [${INDENT_MIN}, ${INDENT_MAX}]).`
         );
       }
       return;
@@ -142,7 +155,7 @@ function mapKnownKey(key: string, value: unknown, acc: Accumulator): void {
         acc.settings[TIDY_BRACE_STYLE] = value;
       } else {
         acc.warnings.push(
-          `brace_style: ignored value ${describe(value)} (expected one of ${listEnum(BRACE_STYLE_ENUM)}).`
+          `brace_style: ignored value ${describeValue(value)} (expected one of ${listEnum(BRACE_STYLE_ENUM)}).`
         );
       }
       return;
@@ -153,7 +166,7 @@ function mapKnownKey(key: string, value: unknown, acc: Accumulator): void {
         acc.settings[TIDY_WRAP_LINE_LENGTH] = n;
       } else {
         acc.warnings.push(
-          `wrap_line_length: ignored value ${describe(value)} (expected a non-negative integer).`
+          `wrap_line_length: ignored value ${describeValue(value)} (expected a non-negative integer).`
         );
       }
       return;
@@ -163,7 +176,7 @@ function mapKnownKey(key: string, value: unknown, acc: Accumulator): void {
         acc.settings[TIDY_WRAP_ATTRIBUTES] = value;
       } else {
         acc.warnings.push(
-          `wrap_attributes: ignored value ${describe(value)} (expected one of ${listEnum(WRAP_ATTRIBUTES_ENUM)}).`
+          `wrap_attributes: ignored value ${describeValue(value)} (expected one of ${listEnum(WRAP_ATTRIBUTES_ENUM)}).`
         );
       }
       return;
@@ -174,7 +187,7 @@ function mapKnownKey(key: string, value: unknown, acc: Accumulator): void {
         acc.settings[TIDY_SPACE_AFTER_ANON_FUNCTION] = b;
       } else {
         acc.warnings.push(
-          `space_after_anon_function: ignored value ${describe(value)} (expected a boolean).`
+          `space_after_anon_function: ignored value ${describeValue(value)} (expected a boolean).`
         );
       }
       return;
@@ -186,7 +199,7 @@ function mapKnownKey(key: string, value: unknown, acc: Accumulator): void {
 }
 
 /** Compact, safe rendering of an arbitrary value for a warning message. */
-function describe(value: unknown): string {
+export function describeValue(value: unknown): string {
   if (typeof value === 'string') {
     return JSON.stringify(value);
   }
@@ -228,7 +241,7 @@ export function mapLonefyOptions(raw: unknown): LonefyMappingResult {
       settings: {},
       unmapped: [],
       warnings: [
-        `Expected a JSON object of js-beautify options but received ${describe(raw)}; nothing was mapped.`
+        `Expected a JSON object of js-beautify options but received ${describeValue(raw)}; nothing was mapped.`
       ]
     };
   }
@@ -242,6 +255,9 @@ export function mapLonefyOptions(raw: unknown): LonefyMappingResult {
       acc.unmapped.push(key);
     }
   }
+  if (hasForeignPrototype(raw)) {
+    acc.unmapped.push('__proto__');
+  }
 
   return {
     settings: acc.settings,
@@ -250,30 +266,32 @@ export function mapLonefyOptions(raw: unknown): LonefyMappingResult {
   };
 }
 
+/** Outcome of {@link parseConfigText}: the parsed value, or why there is none. */
+export type ParsedConfigText =
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly warning: string };
+
 /**
- * Parse `.jsbeautifyrc` text (tolerating comments and trailing commas, as the
- * file is JSONC in practice) and map it to Tidy settings in one step.
+ * Parse a config file's TEXT as DATA and never as code. Tolerates comments and
+ * trailing commas (the guard's lenient JSONC parsing; these files are JSONC in
+ * practice), which is a superset of the strict JSON the incumbent loads with
+ * `require`. Tidy must NEVER `require()` or evaluate the file: this parser only
+ * builds plain values.
  *
- * Never throws: a parse failure becomes a warning and yields an empty mapping, so
- * a broken/legacy config can never abort an opt-in migration. On success the
- * parsed value is handed to `mapLonefyOptions`, which itself validates that the
- * value is actually an object.
+ * Never throws: a non-string input or a parse failure becomes a `warning` that
+ * names the file by `label`, so a broken config can never abort an opt-in
+ * migration and the user is told which file was the problem.
  */
-export function mapLonefyRcText(text: unknown): LonefyMappingResult {
+export function parseConfigText(text: unknown, label: string): ParsedConfigText {
   if (typeof text !== 'string') {
     return {
-      settings: {},
-      unmapped: [],
-      warnings: [
-        `Expected .jsbeautifyrc contents as a string but received ${describe(text)}; nothing was mapped.`
-      ]
+      ok: false,
+      warning: `Expected ${label} contents as a string but received ${describeValue(text)}; nothing was mapped.`
     };
   }
 
   const errors: ParseError[] = [];
-  // allowTrailingComma + comments mirror the lenient parsing the guard uses for
-  // the JSON family; a `.jsbeautifyrc` in the wild may carry either.
-  const parsed = parseJsonc(text, errors, {
+  const value = parseJsonc(text, errors, {
     allowTrailingComma: true,
     disallowComments: false
   });
@@ -281,13 +299,26 @@ export function mapLonefyRcText(text: unknown): LonefyMappingResult {
   if (errors.length > 0) {
     const first = errors[0];
     return {
-      settings: {},
-      unmapped: [],
-      warnings: [
-        `Could not parse .jsbeautifyrc: ${printParseErrorCode(first.error)} at offset ${first.offset}; nothing was mapped.`
-      ]
+      ok: false,
+      warning: `Could not parse ${label}: ${printParseErrorCode(first.error)} at offset ${first.offset}; nothing was mapped.`
     };
   }
+  return { ok: true, value };
+}
 
-  return mapLonefyOptions(parsed);
+/**
+ * Parse `.jsbeautifyrc` text and map it, FLAT keys only, to Tidy settings in one
+ * step. Never throws: a parse failure becomes a warning and yields an empty
+ * mapping. On success the parsed value is handed to `mapLonefyOptions`, which
+ * itself validates that the value is actually an object.
+ *
+ * (The migration flow itself goes through lonefyConfig.ts, which also understands
+ * sections and `onSave`; this entry point is the flat-only vocabulary.)
+ */
+export function mapLonefyRcText(text: unknown): LonefyMappingResult {
+  const parsed = parseConfigText(text, '.jsbeautifyrc');
+  if (!parsed.ok) {
+    return { settings: {}, unmapped: [], warnings: [parsed.warning] };
+  }
+  return mapLonefyOptions(parsed.value);
 }

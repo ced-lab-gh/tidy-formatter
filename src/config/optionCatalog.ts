@@ -12,10 +12,12 @@
 //   - the catalogue's validation helpers reject any out-of-type / out-of-enum
 //     value so an invalid setting is never propagated to an engine.
 //
-// Indentation (tabSize / insertSpaces) is intentionally NOT in this catalogue:
-// it comes from VS Code FormattingOptions + the [lang] editor settings and flows
-// through the typed fields of ResolvedOptions (see resolver.ts). Duplicating it
-// here would create two competing sources of truth for the same value.
+// Indentation (tabSize / insertSpaces) is NOT redeclared here as such: it flows
+// through the typed fields of ResolvedOptions (see resolver.ts), and the only
+// indentation entry, tidy.indent, is an ALIAS of the typed tabSize field (its
+// engineKey `indent_size` is resolved into tabSize), never a second copy of it.
+// vscodeConfig.ts places an explicitly set tidy.indent ABOVE the live
+// FormattingOptions layer so it can actually take effect (defect C-12).
 
 /**
  * Which part of the format pipeline an option drives.
@@ -92,12 +94,33 @@ const CSS_LANGS: readonly CatalogLang[] = ['css', 'scss', 'less'];
 // js-beautify JS family (plain js only; ts/tsx/jsx go through prettier).
 const JSBEAUTIFY_JS_LANGS: readonly CatalogLang[] = ['javascript'];
 // Prettier stylistic options apply to the real-parser languages.
-const PRETTIER_LANGS: readonly CatalogLang[] = [
+//
+// Exported because the resolver needs the same answer to "can Prettier print
+// this language": it collapses the two width keys into one only there (see
+// resolver.ts). 'javascript' is included because a plain .js file that contains
+// JSX is re-routed to Prettier; the resolver cannot tell which .js files those
+// are, and for the rest the extra value is simply never read by js-beautify.
+export const PRETTIER_LANGS: readonly CatalogLang[] = [
   'typescript',
   'typescriptreact',
   'javascriptreact',
   'javascript'
 ];
+// The blank-line and empty-line options below are js-beautify options with no
+// Prettier and no jsonc-parser equivalent. Declaring them for 'all' made them
+// silently inert on json, jsonc, typescript, typescriptreact and javascriptreact
+// (defect C-14), so they are declared for the families that really read them.
+const JSBEAUTIFY_NEWLINE_LANGS: readonly CatalogLang[] = [
+  'css',
+  'scss',
+  'less',
+  'html',
+  'javascript'
+];
+// Shared sentence for the three descriptions that use JSBEAUTIFY_NEWLINE_LANGS,
+// so the caveat cannot drift between them.
+const NEWLINE_OPTION_SCOPE_NOTE =
+  'Applies to CSS, SCSS, LESS, HTML and JavaScript; it has no effect on JSON, or on files Prettier prints (TypeScript, TSX, JSX, and JavaScript that contains JSX).';
 
 /**
  * The complete, curated catalogue. Ordering groups by family for readability;
@@ -119,7 +142,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     languages: 'all',
     scope: 'language-overridable',
     description:
-      'Indentation size used when neither the editor nor a project config provides one (js-beautify indent_size).'
+      'Indentation size in spaces. When you set it, it overrides the editor tab size (editor.tabSize, or the size VS Code detected in the file); a project config (.editorconfig, .prettierrc, .soukformatrc) still wins over it. Spaces versus tabs stays governed by editor.insertSpaces.'
   },
   {
     settingKey: 'tidy.brace_style',
@@ -130,7 +153,8 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     enum: ['collapse', 'expand', 'end-expand', 'none', 'collapse-preserve-inline'],
     languages: JSBEAUTIFY_JS_LANGS,
     scope: 'language-overridable',
-    description: 'Brace placement style (js-beautify brace_style).'
+    description:
+      'Brace placement style for JavaScript files printed by js-beautify (js-beautify brace_style). It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier prints those with its own brace placement.'
   },
   {
     settingKey: 'tidy.wrap_line_length',
@@ -141,7 +165,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     languages: 'all',
     scope: 'language-overridable',
     description:
-      'Maximum characters per line before wrapping; 0 disables wrapping (js-beautify wrap_line_length).'
+      "Maximum characters per line before wrapping; 0 disables wrapping. Used for HTML and JavaScript (js-beautify wrap_line_length) and, as the print width, for TypeScript, TSX and JSX (Prettier). It has no effect on JSON, and js-beautify does not wrap CSS, SCSS or LESS by width. For the Prettier languages an unset value keeps Prettier's default of 80. It shares one value with tidy.prettier.printWidth: whichever is set in the higher layer wins."
   },
   {
     settingKey: 'tidy.wrap_attributes',
@@ -193,10 +217,9 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     engineKey: 'preserve_newlines',
     type: 'boolean',
     default: true,
-    languages: 'all',
+    languages: JSBEAUTIFY_NEWLINE_LANGS,
     scope: 'language-overridable',
-    description:
-      'Keep existing blank lines between statements/rules (js-beautify preserve_newlines).'
+    description: `Keep existing blank lines between statements/rules (js-beautify preserve_newlines). ${NEWLINE_OPTION_SCOPE_NOTE}`
   },
   {
     settingKey: 'tidy.max_preserve_newlines',
@@ -204,10 +227,9 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     engineKey: 'max_preserve_newlines',
     type: 'integer',
     default: 10,
-    languages: 'all',
+    languages: JSBEAUTIFY_NEWLINE_LANGS,
     scope: 'language-overridable',
-    description:
-      'Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines).'
+    description: `Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines). ${NEWLINE_OPTION_SCOPE_NOTE}`
   },
   {
     settingKey: 'tidy.indent_empty_lines',
@@ -215,10 +237,9 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     engineKey: 'indent_empty_lines',
     type: 'boolean',
     default: false,
-    languages: 'all',
+    languages: JSBEAUTIFY_NEWLINE_LANGS,
     scope: 'language-overridable',
-    description:
-      'Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines).'
+    description: `Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines). ${NEWLINE_OPTION_SCOPE_NOTE}`
   },
 
   // --- js-beautify: JavaScript-specific ------------------------------------
@@ -377,7 +398,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     languages: PRETTIER_LANGS,
     scope: 'language-overridable',
     description:
-      'Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only.'
+      'Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only. It shares one value with tidy.wrap_line_length: whichever is set in the higher layer wins.'
   },
   {
     settingKey: 'tidy.prettier.semi',

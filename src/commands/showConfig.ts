@@ -108,6 +108,13 @@ export interface IgnoreStatus {
   readonly fileIgnoredByList: boolean;
   /** Absolute path of the .soukformatignore consulted, if any. */
   readonly soukformatignorePath?: string;
+  /**
+   * Set when the file is excluded because the .soukformatignore (or one of its
+   * lines) could not be evaluated, so Tidy failed closed: one sentence naming the
+   * line and the reason. Absent for a normal exclusion, so a rule the user wrote
+   * is never described as a failure.
+   */
+  readonly ignoreFileProblem?: string;
   /** True when a head/file-level in-source marker leaves the whole file verbatim. */
   readonly fileIgnoredByMarker: boolean;
   /** Count of in-source REGION/NODE protected spans found (0 when none). */
@@ -384,6 +391,9 @@ function renderIgnoreStatus(status: IgnoreStatus): string[] {
   lines.push(
     `  .soukformatignore excludes this file : ${status.fileIgnoredByList ? 'yes' : 'no'}`
   );
+  if (status.ignoreFileProblem !== undefined) {
+    lines.push(`  .soukformatignore problem : ${status.ignoreFileProblem}`);
+  }
   lines.push(
     `  in-source file-ignore marker : ${status.fileIgnoredByMarker ? 'yes' : 'no'}`
   );
@@ -452,7 +462,9 @@ export async function showEffectiveConfiguration(): Promise<void> {
   const { readResolvedOptionsWithDiagnostics, readSizeLimit } = require('../config/vscodeConfig');
   const { scanMarkers } = require('../ignore/markers');
   const { resolveDocumentIgnore } = require('../ignore/ignoreGate');
-  const { detectCompetingFormatters } = require('../deference/detect');
+  // The unconditional scan: this report states what the workspace contains, so it
+  // does not defer to tidy.deferToOtherFormatters the way activation does.
+  const { scanCompetingFormatters } = require('../deference/detect');
   const { normalizeSetting, DEFERENCE_SETTING_KEY } = require('../deference/decide');
 
   const editor = vscode.window.activeTextEditor;
@@ -525,13 +537,14 @@ export async function showEffectiveConfiguration(): Promise<void> {
     const fullText = document.getText();
     const scan = scanMarkers(fullText, languageId);
     const listLookup = resolveDocumentIgnore(document);
-    const competingFormatters = await detectCompetingFormatters();
+    const competingFormatters = await scanCompetingFormatters();
     const deferenceSetting = normalizeSetting(
       vscode.workspace.getConfiguration().get(DEFERENCE_SETTING_KEY)
     );
     ignoreStatus = {
       fileIgnoredByList: listLookup.ignored === true,
       soukformatignorePath: listLookup.path,
+      ignoreFileProblem: listLookup.failClosed?.explanation,
       fileIgnoredByMarker: scan.ignoreFile === true,
       protectedRegionCount: scan.protectedRanges.length,
       competingFormatters,

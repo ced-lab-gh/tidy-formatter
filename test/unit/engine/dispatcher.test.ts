@@ -9,7 +9,7 @@ import {
   dispatchFormat,
   resolveEngineIdForSource
 } from '../../../src/engine/dispatcher';
-import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import { preserveFixtures, routingFixtures } from '../../fixtures/engineFixtures';
 import { resolved } from '../../helpers/options';
 
@@ -44,7 +44,7 @@ describe('engine/dispatcher : JSX re-routing for plain .js (SPEC §4 note)', () 
     assert.ok(out.includes('<App />'), `expected intact JSX, got: ${JSON.stringify(out)}`);
     assert.ok(!/<\s+App/.test(out), 'tag-open must not be split');
     // And the guard must accept the result.
-    assert.equal(guard.check('javascript', 'const a = <App />;', out).equivalent, true);
+    assert.equal(guardCheckNoFastPath('javascript', 'const a = <App />;', out).equivalent, true);
   });
 
   it('does NOT mis-route plain JS with comparison operators as JSX', async () => {
@@ -52,7 +52,7 @@ describe('engine/dispatcher : JSX re-routing for plain .js (SPEC §4 note)', () 
     // and round-trip safely.
     const code = 'const r = (a < b) > c;';
     const out = await dispatchFormat({ languageId: 'javascript', code, options: resolved() });
-    assert.equal(guard.check('javascript', code, out).equivalent, true);
+    assert.equal(guardCheckNoFastPath('javascript', code, out).equivalent, true);
   });
 });
 
@@ -84,7 +84,7 @@ describe('engine/dispatcher : JSX names may start with _ or $ (M3-5)', () => {
         !/<\s+[A-Za-z_$]/.test(out),
         `tag-open must not be split, got: ${JSON.stringify(out)}`
       );
-      const verdict = guard.check('javascript', code, out);
+      const verdict = guardCheckNoFastPath('javascript', code, out);
       assert.equal(
         verdict.equivalent,
         true,
@@ -125,7 +125,7 @@ describe('engine/dispatcher : modern-syntax preservation + guard round-trip', ()
         );
       }
       // The whole point: a correct engine output must pass the safety guard.
-      const verdict = guard.check(f.lang, f.input, out);
+      const verdict = guardCheckNoFastPath(f.lang, f.input, out);
       assert.equal(
         verdict.equivalent,
         true,

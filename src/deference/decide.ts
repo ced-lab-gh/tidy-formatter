@@ -17,25 +17,18 @@
 // PURE: no 'vscode', no I/O, no throw. Fully unit-testable under mocha+tsx.
 
 import { FORMATTER_ESLINT } from './detect';
+import type { DeferenceSetting } from './setting';
 
-/**
- * The user-facing preference (the `tidy.deferToOtherFormatters` enum, added to
- * package.json later in integration; the values are owned here so they cannot
- * drift). Default is 'notify'.
- *
- *  - 'notify'        : surface a one-shot notification when a competitor is found.
- *  - 'silent-defer'  : do not notify, but acknowledge a competitor exists (the host
- *                      may quietly step back WITHOUT writing any setting); never a
- *                      nag, never a silent disable of Tidy's settings.
- *  - 'off'           : ignore detection entirely (no notification, no deference).
- */
-export type DeferenceSetting = 'notify' | 'silent-defer' | 'off';
-
-/** The default preference: surface the choice, decide nothing for the user. */
-export const DEFAULT_DEFERENCE_SETTING: DeferenceSetting = 'notify';
-
-/** The full VS Code setting key (owned here so callers/tests share one source). */
-export const DEFERENCE_SETTING_KEY = 'tidy.deferToOtherFormatters';
+// The setting itself (values, key, normalisation, and when detection matters) is
+// owned by ./setting so that detect.ts can use it without importing this module.
+// Re-exported here because this is where callers have always imported it from.
+export {
+  DEFAULT_DEFERENCE_SETTING,
+  DEFERENCE_SETTING_KEY,
+  detectionCanChangeOutcome,
+  normalizeSetting
+} from './setting';
+export type { DeferenceSetting } from './setting';
 
 /**
  * The globalState key under which the host records that the deference prompt has
@@ -48,7 +41,9 @@ export const DEFERENCE_PROMPTED_KEY = 'tidy.deference.prompted';
  *
  *  - 'notify' : show the one-shot notification (message is provided).
  *  - 'defer'  : a competitor exists and the user chose 'silent-defer'; the host may
- *               step back quietly. NO write, NO notification.
+ *               step back quietly. NO write, NO notification. No host code acts on
+ *               it today, which is why activation does not even scan the workspace
+ *               in this mode (see detectionCanChangeOutcome in ./setting).
  *  - 'none'   : nothing to do (no competitor, 'off', or already prompted).
  */
 export type DeferenceAction = 'notify' | 'defer' | 'none';
@@ -61,17 +56,6 @@ export interface DeferenceDecision {
   readonly action: DeferenceAction;
   /** Present iff action === 'notify'. */
   readonly message?: string;
-}
-
-/**
- * Normalise an arbitrary setting value to a known {@link DeferenceSetting},
- * defaulting unknown / missing values to {@link DEFAULT_DEFERENCE_SETTING}. PURE.
- * Lets the host pass the raw config value without pre-validating it.
- */
-export function normalizeSetting(value: unknown): DeferenceSetting {
-  return value === 'notify' || value === 'silent-defer' || value === 'off'
-    ? value
-    : DEFAULT_DEFERENCE_SETTING;
 }
 
 /**

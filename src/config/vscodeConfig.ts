@@ -8,6 +8,8 @@
 //   (1) builtin defaults            -> seeded inside resolveOptions
 //   (2) VS Code settings (global tidy.* + [lang] editor settings)
 //       + live FormattingOptions (tabSize / insertSpaces injected per call)
+//       + an EXPLICITLY set tidy.indent, which sits above the live
+//       FormattingOptions (see buildLayers)
 // Layer (3) .editorconfig is wired below (read from disk via the pure
 // editorconfig module). Layers (4) .soukformatrc and (5) glob overrides are
 // added by later stages; they simply append further ConfigLayers after the ones
@@ -23,6 +25,7 @@ import { getTidyOutputChannel } from '../diagnostics/outputChannel';
 import {
   OPTION_CATALOG,
   appliesToLanguage,
+  findBySettingKey,
   validateValue,
   type CatalogLang,
   type OptionEntry
@@ -76,6 +79,16 @@ function resolverKey(entry: OptionEntry): string {
  * Read a value from a configuration section only when it was explicitly set by
  * the user (any scope), so that an unset key does not inject a default that
  * would shadow a higher-precedence layer. Returns undefined when not set.
+ *
+ * "By the user" is literal. VS Code also reports a per-language DEFAULT that an
+ * extension contributes through `configurationDefaults`
+ * (`defaultLanguageValue`), and that is not something the user chose: another
+ * extension can ship `{"[css]": {"files.insertFinalNewline": true}}` without
+ * the user ever having seen it. Reading it here attributed the value to "VS Code
+ * settings ([lang] editor)" and applied it as if it were a preference (defect
+ * LOW-05), so it is deliberately not read. What VS Code itself decided for the
+ * document still reaches Tidy through the live FormattingOptions layer, which is
+ * the right channel for the editor's own defaults.
  */
 function readExplicit<T>(
   config: vscode.WorkspaceConfiguration,
@@ -89,7 +102,6 @@ function readExplicit<T>(
     inspected.workspaceFolderLanguageValue ??
     inspected.workspaceLanguageValue ??
     inspected.globalLanguageValue ??
-    inspected.defaultLanguageValue ??
     inspected.workspaceFolderValue ??
     inspected.workspaceValue ??
     inspected.globalValue;
@@ -151,6 +163,9 @@ function buildTidyGlobalLayer(
   const config = vscode.workspace.getConfiguration('tidy', document.uri);
   const values: Record<string, unknown> = {};
   for (const entry of OPTION_CATALOG) {
+    if (entry.settingKey === INDENT_SETTING_KEY) {
+      continue; // placed above FormattingOptions instead: buildTidyIndentLayers
+    }
     if (!appliesToLanguage(entry, languageId as CatalogLang)) {
       continue;
     }
@@ -179,6 +194,9 @@ function buildTidyLanguageLayer(
   });
   const values: Record<string, unknown> = {};
   for (const entry of OPTION_CATALOG) {
+    if (entry.settingKey === INDENT_SETTING_KEY) {
+      continue; // placed above FormattingOptions instead: buildTidyIndentLayers
+    }
     if (entry.scope !== 'language-overridable') {
       continue;
     }
@@ -192,6 +210,62 @@ function buildTidyLanguageLayer(
     }
   }
   return { source: langScopedSource(languageId), values };
+}
+
+/**
+ * The one catalogue entry that is NOT layered with its siblings: `tidy.indent`
+ * (an alias of the typed tabSize field, see resolver.ts).
+ */
+const INDENT_SETTING_KEY = 'tidy.indent';
+
+/**
+ * Build the layers for an EXPLICITLY set `tidy.indent` (global, then [lang]).
+ *
+ * They are placed ABOVE the live FormattingOptions layer (see buildLayers). VS
+ * Code injects a tabSize into every provider call, so a `tidy.indent` sitting
+ * below that layer could never win: the setting was inert on every format (defect
+ * C-12). Only a value the user really set is contributed (an unset key is a
+ * default, not a choice, and must not override what the editor says), and a
+ * project config (.editorconfig, .prettierrc, .soukformatrc) still sits above it,
+ * so a team's indentation is never overruled by one person's setting.
+ */
+function buildTidyIndentLayers(
+  document: vscode.TextDocument,
+  languageId: LangId
+): ConfigLayer[] {
+  const entry = findBySettingKey(INDENT_SETTING_KEY);
+  if (!entry || !appliesToLanguage(entry, languageId as CatalogLang)) {
+    return [];
+  }
+  const suffix = settingSuffix(entry);
+  const key = resolverKey(entry);
+  const layers: ConfigLayer[] = [];
+
+  const globalValue = validateValue(
+    entry,
+    readGlobalExplicit<unknown>(
+      vscode.workspace.getConfiguration('tidy', document.uri),
+      suffix
+    )
+  );
+  if (globalValue !== undefined) {
+    layers.push({ source: SOURCE_VSCODE_GLOBAL, values: { [key]: globalValue } });
+  }
+
+  const languageValue = validateValue(
+    entry,
+    readLanguageExplicit<unknown>(
+      vscode.workspace.getConfiguration('tidy', { uri: document.uri, languageId }),
+      suffix
+    )
+  );
+  if (languageValue !== undefined) {
+    layers.push({
+      source: langScopedSource(languageId),
+      values: { [key]: languageValue }
+    });
+  }
+  return layers;
 }
 
 /**
@@ -249,7 +323,10 @@ function buildLanguageEditorLayer(
  * Build the live FormattingOptions layer. VS Code injects tabSize/insertSpaces
  * on every provider call; per SPEC §6 these sit at the top of layer (2) so they
  * govern in the absence of .editorconfig / project config, yet remain
- * surclassable by those higher layers added later in the chain.
+ * surclassable by those higher layers added later in the chain. The one setting
+ * of Tidy's own that is layered above them is an explicit tidy.indent (see
+ * buildTidyIndentLayers): the editor always supplies a tab size, so a setting
+ * beneath it would never apply.
  */
 function buildFormattingOptionsLayer(
   formattingOptions: vscode.FormattingOptions
@@ -522,11 +599,17 @@ function buildPrettierrcLayer(
  *   1. tidy.* global engine options          ┐ layer (2)
  *   2. tidy.* [lang] overrides               │ VS Code settings
  *   3. [lang] editor settings (eol/newline)  │
- *   4. live FormattingOptions (per call)     ┘ + FormattingOptions
- *   5. .editorconfig cascade        (layer 3) : team config wins over VS Code
- *   6. .prettierrc project config   (layer 3.5, ADD-13, Prettier path only)
- *   7. .soukformatrc language section (layer 4)
- *   8. .soukformatrc glob overrides  (layer 5) : most specific, win last
+ *   4. live FormattingOptions (per call)     │
+ *   5. tidy.indent, global then [lang]       ┘ only when EXPLICITLY set (C-12)
+ *   6. .editorconfig cascade        (layer 3) : team config wins over VS Code
+ *   7. .prettierrc project config   (layer 3.5, ADD-13, Prettier path only)
+ *   8. .soukformatrc language section (layer 4)
+ *   9. .soukformatrc glob overrides  (layer 5) : most specific, win last
+ *
+ * The resolver collapses the two line-width keys (wrap_line_length, which is
+ * also where .editorconfig max_line_length lands, and prettier.printWidth) into
+ * one value by the order above, so a width from a higher layer always wins over
+ * one from a lower layer whichever key spelled it (C-15).
  *
  * All three project-config families (.editorconfig, .prettierrc, .soukformatrc)
  * are gated by their opt-out setting, Workspace Trust, and an on-disk URI; when
@@ -547,7 +630,10 @@ function buildLayers(
     buildTidyGlobalLayer(document, languageId),
     buildTidyLanguageLayer(document, languageId),
     buildLanguageEditorLayer(document, languageId),
-    buildFormattingOptionsLayer(formattingOptions)
+    buildFormattingOptionsLayer(formattingOptions),
+    // An explicit tidy.indent, ABOVE the live FormattingOptions (C-12) and
+    // below every project config appended next.
+    ...buildTidyIndentLayers(document, languageId)
   ];
 
   const editorconfig = buildEditorConfigLayer(document);

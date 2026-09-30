@@ -29,8 +29,17 @@
 // able to let the walk escape. `stopDir` is REQUIRED: without a trusted
 // boundary there is nothing to walk within, so the layer is simply absent.
 //
-// FAIL-SOFT: a missing file yields no layer; a malformed file yields no layer
-// plus a warning (never a throw) so formatting falls back to the lower layers.
+// FAIL-SOFT: a missing file yields no layer; a malformed or oversized file yields
+// no layer plus a warning (never a throw) so formatting falls back to the lower
+// layers.
+//
+// COST BOUND (LOW-07): the file is size-capped (MAX_SOUKFORMATRC_BYTES) using the
+// stat the upward walk already made, so the cap adds no syscall, and the parsed
+// document is memoised by (path, mtime, size) so an unchanged file is neither
+// re-read nor re-parsed on every format. The per-format cost is then only the
+// walk's stat per directory level: it cannot be cached without missing a nearer
+// .soukformatrc that appeared since. `overrides[].files` globs go through the
+// shared LINEAR matcher of ../ignore/glob, never a RegExp.
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { parse as parseJsonc, type ParseError, printParseErrorCode } from 'jsonc-parser';
@@ -42,6 +51,10 @@ import type { ConfigLayer } from './resolver';
 // disagree about where the trusted workspace ends. Both modules are pure (no
 // 'vscode'), so this adds no host coupling and no import cycle.
 import { comparableDir, isWithinDir } from './prettierrc';
+// The ONE glob matcher, shared with .soukformatignore: linear, gitignore
+// semantics (a slash-less pattern matches at any depth), fail-closed on a
+// pattern it cannot evaluate. Pure and dependency-free, so no host coupling.
+import { compileFilesGlob, describeUnevaluable, patternMatches } from '../ignore/glob';
 import {
   OPTION_CATALOG,
   appliesToLanguage,
@@ -62,6 +75,25 @@ export const SOUKFORMATRC_FILENAME = '.soukformatrc';
  * bound is the workspace containment test.
  */
 const MAX_WALK_DEPTH = 64;
+
+/**
+ * Largest .soukformatrc that is read at all (1 MiB, the same bound the
+ * .prettierrc layer applies). A real config is a few hundred bytes; a larger
+ * file is refused with a warning rather than read and parsed synchronously on
+ * the extension host's thread on every format.
+ */
+export const MAX_SOUKFORMATRC_BYTES = 1_048_576;
+
+/**
+ * A file modified less than this long before it was read is NOT memoised. Two
+ * writes inside one timestamp tick can leave (mtime, size) unchanged, so a
+ * fresh file could otherwise be served stale; waiting until it has settled (the
+ * same idea as git's "racily clean" entries) makes the memo exact.
+ */
+const RACY_WINDOW_MS = 2000;
+
+/** Most parsed configs kept in memory at once (one per distinct file path). */
+const MAX_CACHED_CONFIGS = 32;
 
 /** Origin label prefix surfaced verbatim in "Show Effective Configuration". */
 export const SOURCE_SOUKFORMATRC = '.soukformatrc';
@@ -168,52 +200,6 @@ function mapSection(
 }
 
 /**
- * Convert a glob pattern (gitignore-lite, supporting ** / * / ?) into a RegExp
- * matched against a POSIX-style relative path. Kept minimal and dependency-free
- * (no new npm dep this pass): `**` matches any path segments, `*` any run within
- * a segment, `?` a single char. Anchored full-match.
- */
-function globToRegExp(glob: string): RegExp {
-  let out = '';
-  for (let i = 0; i < glob.length; i += 1) {
-    const ch = glob[i];
-    if (ch === '*') {
-      if (glob[i + 1] === '*') {
-        // `**` => any characters including path separators.
-        out += '.*';
-        i += 1;
-        // Skip a trailing slash after ** so `src/**/x` matches `src/x` too.
-        if (glob[i + 1] === '/') {
-          i += 1;
-        }
-      } else {
-        // single `*` => any chars except a path separator.
-        out += '[^/]*';
-      }
-    } else if (ch === '?') {
-      out += '[^/]';
-    } else if ('\\^$.|+()[]{}'.includes(ch)) {
-      out += `\\${ch}`;
-    } else {
-      out += ch;
-    }
-  }
-  return new RegExp(`^${out}$`);
-}
-
-/**
- * Whether a glob matches the file's path relative to the config file's directory.
- * Both are normalised to forward slashes so patterns are portable across OSes.
- */
-function globMatches(glob: string, relativePosixPath: string): boolean {
-  try {
-    return globToRegExp(glob).test(relativePosixPath);
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Build the ordered override layers that match `relativePosixPath`, validating
  * each override's options against the catalogue for `lang`. Non-array `overrides`
  * or malformed entries are skipped with a warning (fail-soft).
@@ -259,7 +245,24 @@ function mapOverrides(
       });
       return;
     }
-    if (!globMatches(files, relativePosixPath)) {
+    const glob = compileFilesGlob(files);
+    if (glob === undefined) {
+      warnings.push({
+        message: `${SOURCE_SOUKFORMATRC}: overrides[${index}].files must be a non-empty glob; ignored.`
+      });
+      return;
+    }
+    const problem = describeUnevaluable(glob, 'the override is skipped');
+    if (problem !== undefined) {
+      // An override only carries OPTIONS, it cannot exclude a file, so it is
+      // skipped rather than applied to a guess. Never silently: the warning is
+      // listed in "Show Effective Configuration".
+      warnings.push({
+        message: `${SOURCE_SOUKFORMATRC}: overrides[${index}].files ${problem}`
+      });
+      return;
+    }
+    if (!patternMatches(glob, relativePosixPath)) {
       return;
     }
     const where = `${SOURCE_SOUKFORMATRC} overrides[${index}] (${files})`;
@@ -272,19 +275,16 @@ function mapOverrides(
 }
 
 /**
- * Parse already-read JSONC text into ordered ConfigLayers for one language.
- * PURE: takes the raw text (no I/O), so it is directly unit-testable.
- *
- * `relativePosixPath` is the file's path relative to the config dir, used only to
- * evaluate glob overrides; pass undefined to skip override matching.
+ * The outcome of parsing a config's TEXT, independent of language and file path:
+ * either the JSON object at its root, or the warning explaining why the file is
+ * ignored. This is what is memoised, so it holds no per-format state.
  */
-export function parseSoukformatrc(
-  text: string,
-  lang: CatalogLang,
-  sourcePath: string,
-  relativePosixPath?: string
-): { layers: ConfigLayer[]; warnings: SoukWarning[] } {
-  const warnings: SoukWarning[] = [];
+type ParsedRoot =
+  | { readonly root: Readonly<Record<string, unknown>> }
+  | { readonly failure: string };
+
+/** Parse JSONC text into its root object, or the reason the file is ignored. */
+function parseRoot(text: string, sourcePath: string): ParsedRoot {
   const errors: ParseError[] = [];
   const parsed = parseJsonc(text, errors, {
     allowTrailingComma: true,
@@ -293,21 +293,31 @@ export function parseSoukformatrc(
 
   if (errors.length > 0) {
     const first = errors[0];
-    warnings.push({
-      message: `${SOURCE_SOUKFORMATRC} at ${sourcePath}: malformed JSONC (${printParseErrorCode(
+    return {
+      failure: `${SOURCE_SOUKFORMATRC} at ${sourcePath}: malformed JSONC (${printParseErrorCode(
         first.error
       )} at offset ${first.offset}); file ignored.`
-    });
-    return { layers: [], warnings };
+    };
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    warnings.push({
-      message: `${SOURCE_SOUKFORMATRC} at ${sourcePath}: root must be a JSON object; file ignored.`
-    });
-    return { layers: [], warnings };
+    return {
+      failure: `${SOURCE_SOUKFORMATRC} at ${sourcePath}: root must be a JSON object; file ignored.`
+    };
   }
+  return { root: parsed as Record<string, unknown> };
+}
 
-  const root = parsed as Record<string, unknown>;
+/**
+ * Turn a parsed root into ordered ConfigLayers for one language (the language
+ * section, then each matching glob override), appending any warnings. Reads
+ * `root` and never mutates it, so a memoised root can be shared across formats.
+ */
+function layersFromRoot(
+  root: Readonly<Record<string, unknown>>,
+  lang: CatalogLang,
+  relativePosixPath: string | undefined
+): { layers: ConfigLayer[]; warnings: SoukWarning[] } {
+  const warnings: SoukWarning[] = [];
   const layers: ConfigLayer[] = [];
 
   // Language section (layer 4).
@@ -332,13 +342,85 @@ export function parseSoukformatrc(
   return { layers, warnings };
 }
 
-/** Whether a path exists and is a regular file; stat errors are fail-soft. */
-function isFile(candidate: string): boolean {
-  try {
-    return statSync(candidate, { throwIfNoEntry: false })?.isFile() === true;
-  } catch {
-    return false;
+/**
+ * Parse already-read JSONC text into ordered ConfigLayers for one language.
+ * PURE: takes the raw text (no I/O), so it is directly unit-testable.
+ *
+ * `relativePosixPath` is the file's path relative to the config dir, used only to
+ * evaluate glob overrides; pass undefined to skip override matching.
+ */
+export function parseSoukformatrc(
+  text: string,
+  lang: CatalogLang,
+  sourcePath: string,
+  relativePosixPath?: string
+): { layers: ConfigLayer[]; warnings: SoukWarning[] } {
+  const parsed = parseRoot(text, sourcePath);
+  if ('failure' in parsed) {
+    return { layers: [], warnings: [{ message: parsed.failure }] };
   }
+  return layersFromRoot(parsed.root, lang, relativePosixPath);
+}
+
+/** A .soukformatrc found by the walk, with the stat that found it. */
+interface LocatedConfig {
+  readonly path: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
+/**
+ * Stat a candidate ONCE: it answers "is it a regular file" and, for the file
+ * that wins, hands the size and mtime on to the cap and the memo so neither
+ * needs a second syscall. Stat errors are fail-soft (no such file).
+ */
+function statConfigFile(candidate: string): Omit<LocatedConfig, 'path'> | undefined {
+  try {
+    const stats = statSync(candidate, { throwIfNoEntry: false });
+    return stats?.isFile() === true ? { size: stats.size, mtimeMs: stats.mtimeMs } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Walk up from a file's directory to the workspace root (`stopDir`, INCLUSIVE)
+ * looking for the nearest .soukformatrc, and return it with the stat that found
+ * it. See findSoukformatrc for the bound, which is enforced here.
+ */
+function locateSoukformatrc(startFsPath: string, stopDir: string): LocatedConfig | undefined {
+  if (typeof startFsPath !== 'string' || startFsPath.trim() === '') {
+    return undefined;
+  }
+  if (typeof stopDir !== 'string' || stopDir.trim() === '') {
+    return undefined;
+  }
+
+  let dir = dirname(resolve(startFsPath));
+  if (!isWithinDir(dir, stopDir)) {
+    return undefined; // the document is not inside the trusted workspace.
+  }
+
+  // Guard against pathological inputs / symlink loops with a generous bound.
+  for (let depth = 0; depth < MAX_WALK_DEPTH; depth += 1) {
+    const candidate = join(dir, SOUKFORMATRC_FILENAME);
+    const found = statConfigFile(candidate);
+    if (found !== undefined) {
+      return { path: candidate, ...found };
+    }
+    if (comparableDir(dir) === comparableDir(stopDir)) {
+      return undefined; // workspace root reached (and searched): stop.
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return undefined; // filesystem root
+    }
+    if (!isWithinDir(parent, stopDir)) {
+      return undefined; // one step further would leave the workspace.
+    }
+    dir = parent;
+  }
+  return undefined;
 }
 
 /**
@@ -363,37 +445,59 @@ export function findSoukformatrc(
   startFsPath: string,
   stopDir: string
 ): string | undefined {
-  if (typeof startFsPath !== 'string' || startFsPath.trim() === '') {
-    return undefined;
+  return locateSoukformatrc(startFsPath, stopDir)?.path;
+}
+
+/** A parsed config kept in memory, valid while (mtime, size) are unchanged. */
+interface CachedConfig {
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly parsed: ParsedRoot;
+}
+
+/** Insertion-ordered, so the oldest entry is the first key (evicted first). */
+const configCache = new Map<string, CachedConfig>();
+
+/** Forget every memoised config. Tests use it; a normal session never needs it. */
+export function clearSoukformatrcCache(): void {
+  configCache.clear();
+}
+
+/**
+ * The parsed root of a located config: from the memo when the file is unchanged
+ * (same mtime and size), otherwise read and parsed once. Returns undefined when
+ * the file cannot be read. Only a SETTLED file is memoised (see RACY_WINDOW_MS).
+ */
+function loadRoot(located: LocatedConfig): ParsedRoot | undefined {
+  const cached = configCache.get(located.path);
+  if (
+    cached !== undefined &&
+    cached.size === located.size &&
+    cached.mtimeMs === located.mtimeMs
+  ) {
+    return cached.parsed;
   }
-  if (typeof stopDir !== 'string' || stopDir.trim() === '') {
+
+  let text: string;
+  try {
+    text = readFileSync(located.path, 'utf8');
+  } catch {
+    configCache.delete(located.path);
     return undefined;
   }
 
-  let dir = dirname(resolve(startFsPath));
-  if (!isWithinDir(dir, stopDir)) {
-    return undefined; // the document is not inside the trusted workspace.
+  const parsed = parseRoot(text, located.path);
+  configCache.delete(located.path);
+  if (Date.now() - located.mtimeMs > RACY_WINDOW_MS) {
+    if (configCache.size >= MAX_CACHED_CONFIGS) {
+      const oldest = configCache.keys().next();
+      if (oldest.done !== true) {
+        configCache.delete(oldest.value);
+      }
+    }
+    configCache.set(located.path, { size: located.size, mtimeMs: located.mtimeMs, parsed });
   }
-
-  // Guard against pathological inputs / symlink loops with a generous bound.
-  for (let depth = 0; depth < MAX_WALK_DEPTH; depth += 1) {
-    const candidate = join(dir, SOUKFORMATRC_FILENAME);
-    if (isFile(candidate)) {
-      return candidate;
-    }
-    if (comparableDir(dir) === comparableDir(stopDir)) {
-      return undefined; // workspace root reached (and searched): stop.
-    }
-    const parent = dirname(dir);
-    if (parent === dir) {
-      return undefined; // filesystem root
-    }
-    if (!isWithinDir(parent, stopDir)) {
-      return undefined; // one step further would leave the workspace.
-    }
-    dir = parent;
-  }
-  return undefined;
+  return parsed;
 }
 
 /**
@@ -416,20 +520,38 @@ export function readSoukformatrcLayers(
     return { layers: [], warnings: [] };
   }
 
-  const configPath = findSoukformatrc(fsPath, stopDir);
-  if (configPath === undefined) {
+  const located = locateSoukformatrc(fsPath, stopDir);
+  if (located === undefined) {
     return { layers: [], warnings: [] };
   }
+  const configPath = located.path;
 
-  let text: string;
-  try {
-    text = readFileSync(configPath, 'utf8');
-  } catch {
+  // The cap uses the stat the walk already made: no extra syscall, and an
+  // oversized file is never read.
+  if (located.size > MAX_SOUKFORMATRC_BYTES) {
+    return {
+      path: configPath,
+      layers: [],
+      warnings: [
+        {
+          message:
+            `${SOURCE_SOUKFORMATRC} at ${configPath}: file too large ` +
+            `(${located.size} bytes; the limit is ${MAX_SOUKFORMATRC_BYTES}); file ignored.`
+        }
+      ]
+    };
+  }
+
+  const parsed = loadRoot(located);
+  if (parsed === undefined) {
     return {
       path: configPath,
       layers: [],
       warnings: [{ message: `${SOURCE_SOUKFORMATRC} at ${configPath}: unreadable; ignored.` }]
     };
+  }
+  if ('failure' in parsed) {
+    return { path: configPath, layers: [], warnings: [{ message: parsed.failure }] };
   }
 
   // Path of the formatted file relative to the config file's directory, in POSIX
@@ -438,6 +560,6 @@ export function readSoukformatrcLayers(
   const rel = relative(configDir, fsPath);
   const relativePosixPath = rel.split(sep).join('/');
 
-  const { layers, warnings } = parseSoukformatrc(text, lang, configPath, relativePosixPath);
+  const { layers, warnings } = layersFromRoot(parsed.root, lang, relativePosixPath);
   return { path: configPath, layers, warnings };
 }

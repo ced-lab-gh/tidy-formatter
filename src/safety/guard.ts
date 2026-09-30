@@ -391,10 +391,18 @@ export const JSX_TEXT_WHITESPACE_REASON =
  *   silent no-op on any real-world .tsx component with wrapped attributes : the
  *   "safe but does nothing" failure the SPEC forbids (§12 "faux positif de la
  *   garde"). The closing `>` carries no boundary-integrity signal a formatter is
- *   not allowed to touch, so it is excluded. Every genuine boundary corruption
- *   (`< Foo`, `< Foo>`, `</Foo>` -> `< /Foo>`, `<Foo / >`) detaches an OPENING
- *   `<` and is still caught by the open-adjacency check; tag renames and dropped
- *   attributes are caught independently by the structural AST diff.
+ *   not allowed to touch, so it is excluded. What the open-adjacency check
+ *   catches is a detached OPENING `<`: `< Foo`, `< Foo>` and `</Foo>` -> `< /Foo>`.
+ *   It looks at nothing else in a tag's punctuation. In particular `<Foo / >`
+ *   keeps its `<` glued to `Foo`, so this check does NOT flag it, and it does not
+ *   need to: `<Foo / >` is valid JSX, @babel/parser and esbuild both accept it
+ *   with the same AST as `<Foo />`, so the guard treats the two as equivalent.
+ *   Tag renames and dropped attributes are caught independently by the
+ *   structural AST diff.
+ *
+ * Two call sites, one rule: `astEqualJs` (a .js/.jsx/.tsx file) and
+ * `canonicalizeEmbeddedCode` (the body of an EXECUTABLE `<script>` in an HTML
+ * document, ADD-12b), so a detached opening `<` is refused wherever the JSX lives.
  */
 function jsxBoundaryFingerprint(code: string, plugins: BabelPlugins): string {
   const { parse: babelParse } = requireGuardJsChunk();
@@ -1046,7 +1054,16 @@ function canonicalizeEmbeddedCode(
       // embedded script losing an `eslint-disable` or a licence header is a
       // content loss, and the structural AST alone cannot see it.
       const parsed = parseJs(body, BABEL_PLUGINS_JSX);
-      return `js:${JSON.stringify(canonicalizeAst(parsed.program))}|c:${JSON.stringify(parsed.comments)}`;
+      // ADD-12b: the same JSX tag-boundary fingerprint `astEqualJs` applies to a
+      // .jsx/.tsx file, folded into the canonical form as a LAST field so it can
+      // only ever make two bodies compare DIFFERENT, never equal. Without it a
+      // detached opening `<` (`<App x={1} />` -> `< App x = {1} />`) has the same
+      // AST and was accepted here while the identical text is refused in a .jsx
+      // file. It reads the opening `<` only: `<Foo / >` and `</ Foo>` keep their
+      // `<` glued, are valid JSX with the same AST, and stay accepted. A failure
+      // to fingerprint lands in the catch below (verbatim), which is stricter.
+      const boundaries = jsxBoundaryFingerprint(body, BABEL_PLUGINS_JSX);
+      return `js:${JSON.stringify(canonicalizeAst(parsed.program))}|c:${JSON.stringify(parsed.comments)}|jsx:${boundaries}`;
     } catch (error: unknown) {
       rethrowIfChunkLoadFailure(error);
       return `verbatim:${raw}`;

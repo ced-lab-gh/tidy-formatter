@@ -29,6 +29,7 @@
 import assert from 'node:assert/strict';
 import { dispatchFormat } from '../../../src/engine/dispatcher';
 import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import {
   cssInJsAcceptFixtures,
   cssInJsCorruptionFixtures
@@ -66,7 +67,7 @@ describe('polyglot CSS-in-JS : embedded foreign template literals preserved + gu
         }
 
         // 1. ACCEPT : a correct format must NOT be rejected by the guard.
-        const verdict = guard.check(f.lang, f.input, out);
+        const verdict = guardCheckNoFastPath(f.lang, f.input, out);
         assert.equal(
           verdict.equivalent,
           true,
@@ -78,10 +79,11 @@ describe('polyglot CSS-in-JS : embedded foreign template literals preserved + gu
         const out = await format(f.lang, f.input);
         const reformatted = await format(f.lang, out);
 
-        const selfVerdict = guard.check(f.lang, out, out);
+        // guard.check(out, out) would short-circuit without parsing anything.
+        const selfVerdict = guardCheckNoFastPath(f.lang, out, out);
         assert.equal(selfVerdict.equivalent, true, selfVerdict.reason ?? '');
 
-        const roundVerdict = guard.check(f.lang, f.input, reformatted);
+        const roundVerdict = guardCheckNoFastPath(f.lang, f.input, reformatted);
         assert.equal(
           roundVerdict.equivalent,
           true,

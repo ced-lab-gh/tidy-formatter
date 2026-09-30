@@ -227,9 +227,15 @@ describe('safety/guard : labelling changes no verdict', () => {
     });
   }
 
-  it('an identical file is still equivalent to itself', () => {
+  it('a file whose double-spaced JSX text is untouched is still equivalent to itself', () => {
+    // guard.check(LANG, src, src) would return on string equality alone, before
+    // any parse, so it could not fail. The second side re-spaces only the code
+    // AROUND the text, so both sides are really parsed and the untouched
+    // `hello  there` run (two spaces) is really compared.
     const src = 'const a = <p>hello  there</p>;';
-    assert.equal(guard.check(LANG, src, src).equivalent, true);
+    const respaced = 'const a   =   <p>hello  there</p>;';
+    assert.notEqual(src, respaced);
+    assert.equal(guard.check(LANG, src, respaced).equivalent, true);
   });
 
   it('the sentence is single-line, English and free of an em dash', () => {

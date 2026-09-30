@@ -1,5 +1,8 @@
-// Unit tests for the pure gitignore-style glob matcher (Axe 4 : extends the
-// minimal glob of config/soukformatrc.ts without a new npm dependency).
+// Unit tests for the pure gitignore-style glob matcher (Axe 4). The matcher is
+// LINEAR (no RegExp) and is shared with the .soukformatrc `overrides[].files`
+// globs. The fixed defects (I-L08/09/10), the fail-closed rule and the regex
+// oracle live in globSemantics.test.ts; the adversarial timing of both paths in
+// globLinear.test.ts.
 import assert from 'node:assert/strict';
 import {
   compileIgnorePattern,
@@ -42,7 +45,12 @@ describe('ignore/glob : compileIgnorePattern + patternMatches', () => {
     assert.ok(pattern);
     assert.equal((pattern as IgnorePattern).directoryOnly, true);
     assert.equal(match('dist/', 'dist/bundle.js'), true);
-    assert.equal(match('dist/', 'dist'), true);
+    // I-L08: this used to assert `match('dist/', 'dist') === true`, which pinned
+    // the defect. A path handed to patternMatches is a FILE unless the caller
+    // says otherwise, and "dist/" never names a file: it matches the directory
+    // (isDirectory = true) and what is under it.
+    assert.equal(match('dist/', 'dist'), false, 'a FILE named dist is not the dist/ directory');
+    assert.equal(patternMatches(pattern as IgnorePattern, 'dist', true), true);
   });
 
   it('the "**" wildcard crosses path segments, including zero', () => {

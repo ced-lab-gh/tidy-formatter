@@ -16,6 +16,7 @@
 import assert from 'node:assert/strict';
 import { PrettierEngine } from '../../../src/engine/prettier';
 import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import { resolved } from '../../helpers/options';
 import type { LangId } from '../../../src/types';
 
@@ -37,7 +38,10 @@ async function fmt(code: string, bag: Record<string, unknown>, lang: LangId = 't
  * write, leaving the file untouched).
  */
 function assertGuardEquivalent(lang: LangId, input: string, output: string, label: string): void {
-  const verdict = guard.check(lang, input, output);
+  // guardCheckNoFastPath: for an input already written in one of the two
+  // styles, that style's output equals the input and guard.check would answer
+  // without parsing anything.
+  const verdict = guardCheckNoFastPath(lang, input, output);
   assert.equal(
     verdict.equivalent,
     true,

@@ -18,7 +18,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dispatchFormat } from '../../../src/engine/dispatcher';
-import { guard, htmlTreeEqual } from '../../../src/safety/guard';
+import { htmlTreeEqual } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import type { ResolvedOptions } from '../../../src/types';
 
 const OPTS: ResolvedOptions = {
@@ -50,7 +51,7 @@ async function formatHtml(code: string): Promise<string> {
  */
 async function assertSafeAndIdempotent(code: string): Promise<string> {
   const out = await formatHtml(code);
-  const verdict = guard.check('html', code, out);
+  const verdict = guardCheckNoFastPath('html', code, out);
   assert.equal(
     verdict.equivalent,
     true,
@@ -82,7 +83,9 @@ describe('complex HTML corpus : format + guard + idempotence', () => {
       // (format-on-save of an unchanged file): it must be a no-op.
       const again = await formatHtml(pretty);
       assert.equal(again, pretty, 'second format of pretty output must be a no-op');
-      assert.equal(guard.check('html', pretty, again).equivalent, true);
+      // `again === pretty` was just asserted, so this is the identical-text case:
+      // guardCheckNoFastPath makes the HTML comparator actually run on it.
+      assert.equal(guardCheckNoFastPath('html', pretty, again).equivalent, true);
     });
   });
 

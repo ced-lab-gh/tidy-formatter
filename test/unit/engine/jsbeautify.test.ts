@@ -9,6 +9,7 @@ import {
   reportedEngineIdFor
 } from '../../../src/engine/jsbeautify';
 import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import { HTML_PREFORMATTED_TAGS } from '../../../src/safety/htmlPreformatted';
 import { splitSliceEdges } from '../../../src/engine/sliceEdges';
 import { resolved } from '../../helpers/options';
@@ -190,7 +191,7 @@ async function proveEffect(testCase: EffectCase): Promise<void> {
     );
   }
 
-  const verdict = guard.check(testCase.lang, testCase.code, tuned);
+  const verdict = guardCheckNoFastPath(testCase.lang, testCase.code, tuned);
   assert.equal(
     verdict.equivalent,
     true,

@@ -10,13 +10,21 @@
 // SPLIT OF CONCERNS: `detectFromFilenames` is a PURE function (no 'vscode', no I/O)
 // that maps a flat list of workspace-root entry names to the set of competing
 // formatters they imply, so the recognition table is unit-testable under mocha+tsx.
-// The thin `detectCompetingFormatters` wrapper loads 'vscode' lazily and reads the
-// workspace (Workspace Trust gated) only in the extension host.
+// The thin `scanCompetingFormatters` wrapper loads 'vscode' lazily and reads the
+// workspace (Workspace Trust gated) only in the extension host;
+// `detectCompetingFormatters` is the activation-time entry point and skips even
+// that scan when tidy.deferToOtherFormatters means its answer cannot matter.
 //
 // CFG-07: a `.prettierignore` on its own DOES NOT imply Prettier is configured as a
 // formatter (it only narrows what Prettier would touch IF it were configured), so it
 // never activates deference by itself. Same rule for `.eslintignore` (ADD-07): an
 // ignore file alone never activates ESLint deference.
+
+import {
+  DEFERENCE_SETTING_KEY,
+  detectionCanChangeOutcome,
+  normalizeSetting
+} from './setting';
 
 /**
  * Canonical labels for the competing formatters Tidy recognises. Stable strings
@@ -282,10 +290,15 @@ async function listRootEntries(vscode: any, folderUri: any): Promise<string[]> {
  * return the distinct formatters detected, stably ordered. Workspace-Trust gated
  * (Restricted Mode => [], no reads). Never throws: any failure yields [].
  *
+ * UNCONDITIONAL: it does not look at `tidy.deferToOtherFormatters`. It is what
+ * "Show Effective Configuration" uses, because that report states what the
+ * workspace contains whatever the setting says, and the user asked for it. The
+ * activation-time path is {@link detectCompetingFormatters}.
+ *
  * Reads only directory listings + (best-effort) the package.json `prettier` and
  * `eslintConfig` keys; it executes no workspace code and writes nothing.
  */
-export async function detectCompetingFormatters(): Promise<string[]> {
+export async function scanCompetingFormatters(): Promise<string[]> {
   try {
     const vscode = require('vscode');
     if (!isWorkspaceTrusted(vscode)) {
@@ -302,6 +315,36 @@ export async function detectCompetingFormatters(): Promise<string[]> {
       perFolder.push(detectFromFilenames(names, signals.prettier, signals.eslintConfig));
     }
     return mergeDetected(...perFolder);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Host-only: the detection that feeds the activation-time deference decision.
+ * Same result as {@link scanCompetingFormatters}, except that it answers [] WITHOUT
+ * touching the workspace when `tidy.deferToOtherFormatters` makes the answer
+ * unable to change anything the user sees ({@link detectionCanChangeOutcome}):
+ * 'off', and 'silent-defer', where the host acts on nothing (no toast, no setting,
+ * no globalState) and the scan used to cost a directory listing plus a
+ * package.json read per folder for no effect (probe P14). Never throws.
+ *
+ * Do not use it for anything that reports what the workspace contains: an empty
+ * answer here means "nothing to act on", not "no competitor". That is what
+ * {@link scanCompetingFormatters} is for.
+ */
+export async function detectCompetingFormatters(): Promise<string[]> {
+  try {
+    const vscode = require('vscode');
+    const setting = normalizeSetting(
+      vscode.workspace.getConfiguration().get(DEFERENCE_SETTING_KEY)
+    );
+    // The one-shot flag lives in the host's globalState, which the caller already
+    // consulted before getting here, so only the setting is checked.
+    if (!detectionCanChangeOutcome(setting, false)) {
+      return [];
+    }
+    return await scanCompetingFormatters();
   } catch {
     return [];
   }

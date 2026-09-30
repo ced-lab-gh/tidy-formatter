@@ -113,9 +113,16 @@ describe('safety/guard CSS : the whitespace set is the one CSS defines', () => {
   for (const lang of CSS_LANGS) {
     for (const slot of SLOTS) {
       for (const cp of CSS_WHITESPACE) {
-        it(`${lang} ${slot.name}: ${u(cp)} IS CSS whitespace, so a rewrite to U+0020 stays equivalent`, () => {
+        // Rewriting U+0020 to U+0020 is the identical pair: guard.check answers
+        // "equivalent" on string equality alone and no comparator would run, so
+        // that row would pass even with every comparator broken. U+0020 is
+        // rewritten to U+0009 (another CSS whitespace character) instead, which
+        // makes the comparison real. Every other row is unchanged.
+        const target = cp === 0x0020 ? 0x0009 : 0x0020;
+        it(`${lang} ${slot.name}: ${u(cp)} IS CSS whitespace, so a rewrite to ${u(target)} stays equivalent`, () => {
           const input = slot.build(String.fromCodePoint(cp));
-          const output = slot.build(' ');
+          const output = slot.build(String.fromCodePoint(target));
+          assert.notEqual(input, output, 'the rewrite must differ or the guard fast path answers');
           const verdict = guard.check(lang, input, output);
           assert.equal(verdict.equivalent, true, verdict.reason);
         });

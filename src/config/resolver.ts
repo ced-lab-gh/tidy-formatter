@@ -10,6 +10,7 @@
 // ResolvedOptions.sources so the "Show Effective Configuration" command can
 // explain exactly where each value came from.
 import type { LangId, ResolvedOptions } from '../types';
+import { PRETTIER_LANGS, type CatalogLang } from './optionCatalog';
 
 /**
  * One precedence layer of raw settings, tagged with where it came from.
@@ -145,7 +146,19 @@ interface Accumulator {
   endOfLine?: { value: 'lf' | 'crlf'; source: string };
   trimTrailingWhitespace?: { value: boolean; source: string };
   insertFinalNewline?: { value: boolean; source: string };
-  engineOptions: Map<string, { value: unknown; source: string }>;
+  engineOptions: Map<string, EngineEntry>;
+}
+
+/**
+ * One pass-through engine option, with the position of the layer that set it.
+ * `rank` is the index of the winning layer in the caller's general -> specific
+ * order; it exists only so two DIFFERENT keys that carry the same quantity (the
+ * two width keys, see unifyPrintWidth) can be compared by layer order.
+ */
+interface EngineEntry {
+  value: unknown;
+  source: string;
+  rank: number;
 }
 
 /**
@@ -159,7 +172,8 @@ function applyEntry(
   acc: Accumulator,
   rawKey: string,
   rawValue: unknown,
-  source: string
+  source: string,
+  rank: number
 ): void {
   const key = canonicalKey(rawKey);
 
@@ -206,11 +220,84 @@ function applyEntry(
       // Pass-through engine option. undefined values are treated as "not set"
       // so a layer cannot blank out a lower layer by accident.
       if (rawValue !== undefined) {
-        acc.engineOptions.set(key, { value: rawValue, source });
+        acc.engineOptions.set(key, { value: rawValue, source, rank });
       }
       return;
     }
   }
+}
+
+/**
+ * The two keys that both carry "the line width": the shared `wrap_line_length`
+ * (js-beautify vocabulary; also where .editorconfig `max_line_length` lands) and
+ * the Prettier-specific `prettier.printWidth`. Two keys, one quantity.
+ */
+const WRAP_LINE_LENGTH_KEY = 'wrap_line_length';
+const PRINT_WIDTH_KEY = 'prettier.printWidth';
+
+/**
+ * The value stored for "no width-driven wrapping". The shared key spells it `0`
+ * ("0 disables wrapping"); `prettier.printWidth` has no such spelling (its
+ * minimum is 1), so the unified width carries the unbounded width itself, which
+ * is also what Prettier is handed. It reads as `Infinity` in "Show Effective
+ * Configuration", which says what happens.
+ */
+const UNBOUNDED_WIDTH = Number.POSITIVE_INFINITY;
+
+const PRETTIER_PRINTED: ReadonlySet<string> = new Set<string>(PRETTIER_LANGS);
+
+/**
+ * Collapse the two width keys into ONE value, chosen by LAYER ORDER, before any
+ * engine sees the options (defect C-15).
+ *
+ * The Prettier adapter used to receive both keys already flattened into one bag,
+ * with no way to tell which layer had set which. It applied the shared width and
+ * then overwrote it with `prettier.printWidth` whenever that key had a value, so
+ * a plain `tidy.prettier.printWidth` from VS Code settings beat an .editorconfig
+ * `max_line_length` and a .soukformatrc `wrap_line_length`, the opposite of the
+ * documented order. Here the winner is the value from the HIGHER layer; the two
+ * keys tie only inside one layer, where the Prettier-specific key is the more
+ * specific statement and keeps winning, as it always did.
+ *
+ * Only for languages Prettier can print. Elsewhere `wrap_line_length` is the
+ * only width key and js-beautify reads it directly, and adding a
+ * `prettier.printWidth` source there would put a Prettier line in the
+ * effective-configuration report of a language Prettier never prints.
+ *
+ * Values that cannot be a width never take part (a non-integer, a negative, or
+ * a `prettier.printWidth` below 1): they neither win nor block a valid value
+ * from a lower layer, exactly as an uncoercible tabSize is ignored above.
+ *
+ * `wrap_line_length` stays in the bag untouched: js-beautify reads it for a
+ * plain .js file, which the resolver cannot tell apart from one that holds JSX.
+ */
+function unifyPrintWidth(acc: Accumulator, languageId: LangId): void {
+  if (!PRETTIER_PRINTED.has(languageId as CatalogLang)) {
+    return;
+  }
+  const shared = acc.engineOptions.get(WRAP_LINE_LENGTH_KEY);
+  if (
+    shared === undefined ||
+    typeof shared.value !== 'number' ||
+    !Number.isInteger(shared.value) ||
+    shared.value < 0
+  ) {
+    return;
+  }
+  const specific = acc.engineOptions.get(PRINT_WIDTH_KEY);
+  const specificUsable =
+    specific !== undefined &&
+    typeof specific.value === 'number' &&
+    Number.isInteger(specific.value) &&
+    specific.value > 0;
+  if (specificUsable && specific.rank >= shared.rank) {
+    return; // the Prettier key is in the same or a higher layer: it stands.
+  }
+  acc.engineOptions.set(PRINT_WIDTH_KEY, {
+    value: shared.value === 0 ? UNBOUNDED_WIDTH : shared.value,
+    source: shared.source,
+    rank: shared.rank
+  });
 }
 
 /**
@@ -224,23 +311,25 @@ function applyEntry(
  */
 export function resolveOptions(input: ResolveInput): ResolvedOptions {
   const acc: Accumulator = {
-    engineOptions: new Map<string, { value: unknown; source: string }>()
+    engineOptions: new Map<string, EngineEntry>()
   };
 
   // Seed with built-in defaults so mandatory typed fields are always present.
   acc.tabSize = { value: BUILTIN_TAB_SIZE, source: BUILTIN_SOURCE };
   acc.insertSpaces = { value: BUILTIN_INSERT_SPACES, source: BUILTIN_SOURCE };
 
-  for (const layer of input.layers) {
+  for (const [rank, layer] of input.layers.entries()) {
     if (!layer || typeof layer.values !== 'object' || layer.values === null) {
       // Defensive: a malformed layer must not abort resolution; skip it so the
       // remaining (and lower) layers still govern. CFG-06 fallback principle.
       continue;
     }
     for (const [rawKey, rawValue] of Object.entries(layer.values)) {
-      applyEntry(acc, rawKey, rawValue, layer.source);
+      applyEntry(acc, rawKey, rawValue, layer.source, rank);
     }
   }
+
+  unifyPrintWidth(acc, input.languageId);
 
   const sources: Record<string, string> = {};
   const engineOptions: Record<string, unknown> = {};
