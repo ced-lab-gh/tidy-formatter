@@ -1,14 +1,11 @@
-// The VS Code gate of the .soukformatignore lookup (resolveDocumentIgnore), with
-// the workspace bound the walk now has.
-//
-// soukformatignoreBound.test.ts proves the PURE walk is bounded. This file proves
-// the bound takes effect through the REAL gate, which is what the provider, the
-// preview, the status bar and Show Effective Configuration all call: the gate
-// must hand the walk the document's workspace folder, or the bound is dead code.
-//   - an ignore file ABOVE the workspace folder is NOT applied to a document;
-//   - one INSIDE it (at the folder, or nearer the file) IS;
-//   - a document in no workspace folder consults no ignore file at all;
-//   - multi-root: a folder's ignore file does not reach a sibling folder;
+// The VS Code gate of the .soukformatignore lookup (resolveDocumentIgnore). The
+// walk goes up to the root of the disk, like git (soukformatignoreBound.test.ts
+// proves the PURE walk); this file proves it through the REAL gate, which is what
+// the provider, the preview, the status bar and Show Effective Configuration call:
+//   - an ignore file ABOVE the opened workspace folder IS applied to a document;
+//   - the nearest one wins, inside the folder or above it;
+//   - a document in no workspace folder is checked too;
+//   - multi-root: only the ancestors of the document count;
 //   - the gates that were there before are unchanged: Restricted Mode, the
 //     tidy.respectSoukformatignore opt-out, non-file documents, a throwing host.
 //
@@ -110,7 +107,7 @@ function documentAt(fsPath: string, scheme = 'file'): unknown {
   return { uri: { scheme, fsPath } };
 }
 
-describe('ignore/ignoreGate : resolveDocumentIgnore and the workspace bound', () => {
+describe('ignore/ignoreGate : resolveDocumentIgnore (walk to the root)', () => {
   const loader = Module as unknown as { _load: LoadFn };
   let originalLoad: LoadFn;
   let cachedBefore: Set<string>;
@@ -169,10 +166,12 @@ describe('ignore/ignoreGate : resolveDocumentIgnore and the workspace bound', ()
     return target;
   }
 
-  describe('the workspace bound takes effect through the gate', () => {
-    it('an ignore file ABOVE the workspace folder is NOT applied to the document', () => {
-      ignoreIn(root);
-      assert.deepEqual(gate.resolveDocumentIgnore(documentAt(file)), { ignored: false });
+  describe('the walk goes up to the root, through the gate', () => {
+    it('an ignore file ABOVE the opened workspace folder IS applied to the document', () => {
+      const above = ignoreIn(root);
+      const lookup = gate.resolveDocumentIgnore(documentAt(file));
+      assert.equal(lookup.ignored, true);
+      assert.equal(lookup.path, above);
     });
 
     it('an ignore file INSIDE the workspace folder IS applied', () => {
@@ -182,7 +181,7 @@ describe('ignore/ignoreGate : resolveDocumentIgnore and the workspace bound', ()
       assert.equal(lookup.path, inside);
     });
 
-    it('one nearer the file applies too, and shadows the one at the workspace folder', () => {
+    it('the nearest wins: one nearer the file shadows the one at the workspace folder', () => {
       ignoreIn(ws, '*.css\n');
       const nearer = ignoreIn(join(ws, 'src'), 'dist/\n');
       const lookup = gate.resolveDocumentIgnore(documentAt(file));
@@ -190,7 +189,7 @@ describe('ignore/ignoreGate : resolveDocumentIgnore and the workspace bound', ()
       assert.equal(lookup.ignored, false);
     });
 
-    it('with both, the one inside applies and the one above stays out of it', () => {
+    it('the nearest wins over one above the workspace folder too', () => {
       ignoreIn(root, '*.css\n');
       const inside = ignoreIn(ws, 'dist/\n');
       const lookup = gate.resolveDocumentIgnore(documentAt(file));
@@ -198,65 +197,50 @@ describe('ignore/ignoreGate : resolveDocumentIgnore and the workspace bound', ()
       assert.equal(lookup.ignored, false);
     });
 
-    it('nothing above the workspace folder is even looked at (2 levels, 2 stats)', () => {
-      ignoreIn(root);
-      assert.equal(countStats(() => gate.resolveDocumentIgnore(documentAt(file))), 2);
+    it('the gate never asks the host for a workspace folder (it needs none)', () => {
+      ignoreIn(ws);
+      host.getWorkspaceFolderThrows = true;
+      assert.equal(gate.resolveDocumentIgnore(documentAt(file)).ignored, true);
+      assert.equal(host.getWorkspaceFolderCalls, 0);
     });
 
-    it('an oversized ignore file inside fails closed through the gate, with the reason', () => {
-      writeFileSync(join(ws, SOUKFORMATIGNORE_FILENAME), Buffer.alloc(MAX_SOUKFORMATIGNORE_BYTES + 1, 0x23));
+    it('an oversized ignore file fails closed through the gate, inside the folder or above it', () => {
+      const big = Buffer.alloc(MAX_SOUKFORMATIGNORE_BYTES + 1, 0x23);
+      writeFileSync(join(ws, SOUKFORMATIGNORE_FILENAME), big);
+      const inside = gate.resolveDocumentIgnore(documentAt(file));
+      assert.equal(inside.ignored, true);
+      assert.ok(inside.failClosed?.detail.includes('too large to read'));
+      rmSync(join(ws, SOUKFORMATIGNORE_FILENAME));
+      writeFileSync(join(root, SOUKFORMATIGNORE_FILENAME), big);
+      const above = gate.resolveDocumentIgnore(documentAt(file));
+      assert.equal(above.ignored, true);
+      assert.ok(above.failClosed?.detail.includes('too large to read'));
+    });
+  });
+
+  describe('a document in no workspace folder is checked too', () => {
+    it('an ignore file beside it applies, with no workspace folder at all', () => {
+      host.folders = [];
+      const beside = ignoreIn(join(ws, 'src'));
       const lookup = gate.resolveDocumentIgnore(documentAt(file));
       assert.equal(lookup.ignored, true);
-      assert.ok(lookup.failClosed?.detail.includes('too large to read'));
+      assert.equal(lookup.path, beside);
+      assert.equal(host.getWorkspaceFolderCalls, 0);
     });
 
-    it('an oversized ignore file above is not consulted, so it does not exclude anything', () => {
-      writeFileSync(join(root, SOUKFORMATIGNORE_FILENAME), Buffer.alloc(MAX_SOUKFORMATIGNORE_BYTES + 1, 0x23));
-      assert.deepEqual(gate.resolveDocumentIgnore(documentAt(file)), { ignored: false });
-    });
-
-    it('the bound holds whatever the case or separators of the folder the host reports (Windows)', function () {
-      if (process.platform !== 'win32') {
-        this.skip();
-      }
-      ignoreIn(root);
-      const spellings = [ws.toUpperCase(), ws.split('\\').join('/'), ws + '\\'];
-      for (const spelling of spellings) {
-        host.folders = [spelling];
-        assert.deepEqual(gate.resolveDocumentIgnore(documentAt(file)), { ignored: false }, spelling);
-      }
-      const inside = ignoreIn(ws);
-      for (const spelling of spellings) {
-        host.folders = [spelling];
-        assert.equal(gate.resolveDocumentIgnore(documentAt(file)).path, inside, spelling);
-      }
-    });
-  });
-
-  describe('a document in no workspace folder', () => {
-    it('consults no ignore file at all: not one stat, even with one right beside it', () => {
-      host.folders = [];
-      ignoreIn(join(ws, 'src'));
-      let lookup: IgnoreLookup | undefined;
-      const stats = countStats(() => {
-        lookup = gate.resolveDocumentIgnore(documentAt(file));
-      });
-      assert.deepEqual(lookup, { ignored: false });
-      assert.equal(stats, 0);
-      assert.equal(host.getWorkspaceFolderCalls, 1, 'the folder was asked for');
-    });
-
-    it('a document in a folder that is not its own workspace folder is not governed by it either', () => {
+    it('so does one above it, and a folder that is not its own changes nothing', () => {
       const elsewhere = join(root, 'elsewhere');
       mkdirSync(elsewhere);
-      ignoreIn(ws);
+      const above = ignoreIn(ws);
       host.folders = [elsewhere];
-      assert.deepEqual(gate.resolveDocumentIgnore(documentAt(file)), { ignored: false });
+      const lookup = gate.resolveDocumentIgnore(documentAt(file));
+      assert.equal(lookup.ignored, true);
+      assert.equal(lookup.path, above);
     });
   });
 
-  describe('multi-root: each folder is its own bound', () => {
-    it('an ignore file in one workspace folder does not reach a document in a sibling folder', () => {
+  describe('multi-root: only the ancestors of the document count', () => {
+    it('an ignore file in one folder does not reach a document in a sibling folder', () => {
       const other = join(root, 'other');
       mkdirSync(join(other, 'src'), { recursive: true });
       const otherFile = join(other, 'src', 'b.css');
@@ -267,16 +251,15 @@ describe('ignore/ignoreGate : resolveDocumentIgnore and the workspace bound', ()
       assert.deepEqual(gate.resolveDocumentIgnore(documentAt(otherFile)), { ignored: false });
     });
 
-    it('an ignore file at the root of a folder nested inside another applies to its own folder only', () => {
-      const inner = join(ws, 'packages', 'inner');
-      mkdirSync(join(inner, 'src'), { recursive: true });
-      const innerFile = join(inner, 'src', 'c.css');
-      writeFileSync(innerFile, '');
-      ignoreIn(ws, 'dist/\n');
-      host.folders = [inner];
-      // The host reports `inner` as this document's folder: the ignore file in the
-      // outer folder lies above it and is not consulted.
-      assert.deepEqual(gate.resolveDocumentIgnore(documentAt(innerFile)), { ignored: false });
+    it('a file shared by both folders (their common parent) governs both', () => {
+      const other = join(root, 'other');
+      mkdirSync(join(other, 'src'), { recursive: true });
+      const otherFile = join(other, 'src', 'b.css');
+      writeFileSync(otherFile, '');
+      ignoreIn(root);
+      host.folders = [ws, other];
+      assert.equal(gate.resolveDocumentIgnore(documentAt(file)).ignored, true);
+      assert.equal(gate.resolveDocumentIgnore(documentAt(otherFile)).ignored, true);
     });
   });
 
@@ -290,7 +273,6 @@ describe('ignore/ignoreGate : resolveDocumentIgnore and the workspace bound', ()
       });
       assert.deepEqual(lookup, { ignored: false });
       assert.equal(stats, 0);
-      assert.equal(host.getWorkspaceFolderCalls, 0, 'the gate stops before anything else');
     });
 
     it('tidy.respectSoukformatignore = false: not ignored, nothing read', () => {
@@ -314,13 +296,11 @@ describe('ignore/ignoreGate : resolveDocumentIgnore and the workspace bound', ()
       ignoreIn(ws);
       assert.deepEqual(gate.resolveDocumentIgnore(documentAt(file, 'untitled')), { ignored: false });
       assert.deepEqual(gate.resolveDocumentIgnore(documentAt(file, 'vscode-vfs')), { ignored: false });
-      assert.equal(host.getWorkspaceFolderCalls, 0);
     });
 
-    it('a host that throws while looking up the folder is fail-safe: not ignored, no throw', () => {
-      ignoreIn(ws);
-      host.getWorkspaceFolderThrows = true;
-      assert.deepEqual(gate.resolveDocumentIgnore(documentAt(file)), { ignored: false });
+    it('a directory named .soukformatignore is not an ignore file: not ignored, no throw', () => {
+      mkdirSync(join(ws, SOUKFORMATIGNORE_FILENAME));
+      assert.equal(gate.resolveDocumentIgnore(documentAt(file)).ignored, false);
     });
   });
 });

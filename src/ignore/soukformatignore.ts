@@ -13,10 +13,14 @@
 // matcher, shared with the `overrides[].files` globs of .soukformatrc. No npm
 // dependency is involved.
 //
-// BOUNDED WALK: the upward search stops at the workspace folder (stopDir,
-// inclusive), like .soukformatrc and .prettierrc. A .soukformatignore ABOVE the
-// workspace is a file the user never opened and must not silently change what
-// Tidy does. The bound is real path containment, shared with those two walks.
+// UNBOUNDED WALK, like git: the upward search goes from the file's folder to the
+// root of the disk and the nearest .soukformatignore wins. Reading an exclusion
+// file can only make Tidy format LESS, so a file above the opened folder is safe
+// to read; Workspace Trust, the opt-out setting and the size cap still apply.
+//
+// CASE: each line is compiled twice, case-sensitive and case-insensitive, and the
+// two verdicts are merged on the safe side (see ./glob, evaluatePatterns): what git
+// excludes under either core.ignorecase value is excluded here, on every OS.
 //
 // FAIL CLOSED, AND SAY WHY: a line that ./glob cannot evaluate (over its length
 // cap, or ending in a lone backslash) and an ignore file over
@@ -27,21 +31,16 @@
 // by .soukformatignore" on every file.
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-// Path containment, REUSED from the .prettierrc layer (the same helpers the
-// .soukformatrc walk uses) rather than reinvented: one implementation of the
-// workspace bound means one place where drive-letter case, trailing and mixed
-// separators, '..' segments and UNC shares have to be proven right.
-import { comparableDir, isWithinDir } from '../config/prettierrc';
 import {
   compileIgnorePattern,
   describeBudgetExceeded,
   describeUnevaluable,
   evaluatePatterns,
-  type GlobOptions,
+  withFoldedTwin,
   type IgnorePattern
 } from './glob';
 
-/** The on-disk filename Tidy looks for, walking from a file up to its workspace folder. */
+/** The on-disk filename Tidy looks for, walking from a file up to the root of the disk. */
 export const SOUKFORMATIGNORE_FILENAME = '.soukformatignore';
 
 /** Origin label surfaced verbatim in "Show Effective Configuration". */
@@ -66,10 +65,7 @@ export interface ParsedIgnoreFile {
 /** The UTF-8 byte order mark, as it reads back from a file decoded as UTF-8. */
 const BYTE_ORDER_MARK = '\uFEFF';
 
-function parseLines(
-  text: string,
-  options?: GlobOptions
-): { patterns: IgnorePattern[]; lines: number[] } {
+function parseLines(text: string): { patterns: IgnorePattern[]; lines: number[] } {
   const patterns: IgnorePattern[] = [];
   const lines: number[] = [];
   if (typeof text !== 'string' || text === '') {
@@ -79,9 +75,12 @@ function parseLines(
   // Windows editors routinely save UTF-8 with a BOM. Like git, drop it: left in,
   // it becomes the first character of the first pattern, which then matches nothing.
   const body = text.startsWith(BYTE_ORDER_MARK) ? text.slice(BYTE_ORDER_MARK.length) : text;
-  const rawLines = body.split(/\r\n|\n|\r/);
+  // Like git: split on "\n" only, then drop ONE final "\r" (CRLF). A lone "\r" is
+  // an ordinary character of the pattern, not a line break.
+  const rawLines = body.split('\n');
   for (let index = 0; index < rawLines.length; index += 1) {
-    const rawLine = rawLines[index];
+    const withCr = rawLines[index];
+    const rawLine = withCr.endsWith('\r') ? withCr.slice(0, -1) : withCr;
 
     // Blank line: nothing to compile.
     if (rawLine === '') {
@@ -97,9 +96,10 @@ function parseLines(
       continue;
     }
 
-    const pattern = compileIgnorePattern(line, options);
-    if (pattern !== undefined) {
-      patterns.push(pattern);
+    const exact = compileIgnorePattern(line, { ignoreCase: false });
+    const folded = compileIgnorePattern(line, { ignoreCase: true });
+    if (exact !== undefined && folded !== undefined) {
+      patterns.push(withFoldedTwin(exact, folded));
       lines.push(index + 1);
     }
   }
@@ -112,6 +112,7 @@ function parseLines(
  *
  * Follows git's own syntax:
  *   - a leading UTF-8 byte order mark is dropped,
+ *   - lines end at "\n" (the "\r" of CRLF is dropped); a lone "\r" is part of the pattern,
  *   - blank lines and lines whose FIRST character is "#" are comments (leading
  *     blanks are not skipped: "  #x" is a pattern; "\#x" escapes the "#"),
  *   - a leading "!" re-includes a path excluded by an earlier pattern,
@@ -127,16 +128,16 @@ function parseLines(
  * ./glob, evaluatePatterns). A line that cannot be evaluated is kept (see ./glob,
  * FAIL CLOSED), never dropped.
  */
-export function parseIgnorePatterns(text: string, options?: GlobOptions): IgnorePattern[] {
-  return parseLines(text, options).patterns;
+export function parseIgnorePatterns(text: string): IgnorePattern[] {
+  return parseLines(text).patterns;
 }
 
 /**
  * Like {@link parseIgnorePatterns}, and also records the 1-based source line of
  * each pattern so a report can name the line that could not be evaluated. PURE.
  */
-export function parseIgnoreFile(text: string, options?: GlobOptions): ParsedIgnoreFile {
-  return parseLines(text, options);
+export function parseIgnoreFile(text: string): ParsedIgnoreFile {
+  return parseLines(text);
 }
 
 /**
@@ -304,12 +305,8 @@ export interface IgnoreEvaluation {
  * later, evaluable "!negation" that matches still re-includes the path, as it
  * would after any other pattern; an unevaluable negation never re-includes.
  */
-export function evaluateIgnore(
-  text: string,
-  relPath: string,
-  options?: GlobOptions
-): IgnoreEvaluation {
-  const { patterns, lines } = parseLines(text, options);
+export function evaluateIgnore(text: string, relPath: string): IgnoreEvaluation {
+  const { patterns, lines } = parseLines(text);
   const decision = decideIgnore(relPath, patterns);
   if (decision.budgetExceeded === true) {
     return { ignored: true, failClosed: failClosedForBudget(patterns.length) };
@@ -330,38 +327,17 @@ interface LocatedIgnoreFile {
 /**
  * Walk up from a file's directory to the nearest .soukformatignore and return it
  * with the size the stat that found it reported: one stat per level, and the
- * size feeds the cap without a second syscall. Bounded to 64 levels (a stop
- * against a symlink loop or a pathological path); a stat error (permission, not
- * a directory) is fail-soft and the walk keeps going.
- *
- * WORKSPACE BOUND. With `stopDir` (the workspace folder) the walk NEVER leaves
- * it, exactly like the .soukformatrc and .prettierrc walks, and with the same
- * three fail-closed checks of the shared isWithinDir containment: the starting
- * directory must lie inside `stopDir` (else nothing is searched at all, not even
- * one stat); the walk stops after searching `stopDir` itself (inclusive); and
- * every step upward must stay inside it. An ignore file ABOVE the workspace is a
- * file the user never opened, and letting it decide what Tidy skips would change
- * their formatting on the strength of content they never chose to trust.
- * A `stopDir` that is not a usable path (empty, blank) is "no trusted boundary":
- * nothing is searched. Only an OMITTED `stopDir` leaves the walk unbounded
- * (filesystem root), which production callers must not rely on: the VS Code gate
- * passes the workspace folder of the document.
+ * size feeds the cap without a second syscall. Goes up to the root of the disk,
+ * like git (see the header). Bounded to 64 levels (a stop against a symlink loop
+ * or a pathological path); a stat error (permission, not a directory) is
+ * fail-soft and the walk keeps going.
  */
-function locateSoukformatignore(
-  startFsPath: string,
-  stopDir?: string
-): LocatedIgnoreFile | undefined {
+function locateSoukformatignore(startFsPath: string): LocatedIgnoreFile | undefined {
   if (typeof startFsPath !== 'string' || startFsPath.trim() === '') {
     return undefined;
   }
-  if (stopDir !== undefined && (typeof stopDir !== 'string' || stopDir.trim() === '')) {
-    return undefined; // no trusted boundary to walk within.
-  }
 
   let dir = dirname(resolve(startFsPath));
-  if (stopDir !== undefined && !isWithinDir(dir, stopDir)) {
-    return undefined; // the document is not inside the workspace folder.
-  }
   for (let depth = 0; depth < 64; depth += 1) {
     const candidate = join(dir, SOUKFORMATIGNORE_FILENAME);
     try {
@@ -374,15 +350,9 @@ function locateSoukformatignore(
       // block is intentional; ESLint's no-empty requires a statement here.
       void 0;
     }
-    if (stopDir !== undefined && comparableDir(dir) === comparableDir(stopDir)) {
-      return undefined; // workspace folder reached (and searched): stop.
-    }
     const parent = dirname(dir);
     if (parent === dir) {
       return undefined;
-    }
-    if (stopDir !== undefined && !isWithinDir(parent, stopDir)) {
-      return undefined; // one step further would leave the workspace folder.
     }
     dir = parent;
   }
@@ -390,13 +360,12 @@ function locateSoukformatignore(
 }
 
 /**
- * Walk up from a file's directory to the nearest .soukformatignore, never past
- * `stopDir` (the workspace folder, inclusive; see locateSoukformatignore).
- * Returns its absolute path, or undefined if none exists inside the bound.
+ * Walk up from a file's directory to the nearest .soukformatignore, up to the
+ * root of the disk. Returns its absolute path, or undefined if none exists.
  * Bounded against symlink loops. Uses only node:fs (no workspace APIs).
  */
-export function findSoukformatignore(startFsPath: string, stopDir?: string): string | undefined {
-  return locateSoukformatignore(startFsPath, stopDir)?.path;
+export function findSoukformatignore(startFsPath: string): string | undefined {
+  return locateSoukformatignore(startFsPath)?.path;
 }
 
 /** The outcome of resolving the nearest .soukformatignore for a file. */
@@ -443,13 +412,11 @@ export function isFailClosedDetail(detail: string | undefined): boolean {
  * user's exclusions without a word is the worse mistake.
  *
  * `fsPath` MUST be a real absolute filesystem path (e.g. document.uri.fsPath).
- * `stopDir` is the document's workspace folder (its fsPath): the lookup never
- * goes above it, so an ignore file outside the workspace does not apply (see
- * locateSoukformatignore). A caller that omits it gets the unbounded walk.
+ * The lookup goes up to the root of the disk (see locateSoukformatignore).
  * This is the single impure seam; the matching itself is the pure evaluateIgnore.
  */
-export function resolveIgnore(fsPath: string, stopDir?: string): IgnoreLookup {
-  const located = locateSoukformatignore(fsPath, stopDir);
+export function resolveIgnore(fsPath: string): IgnoreLookup {
+  const located = locateSoukformatignore(fsPath);
   if (located === undefined) {
     return { ignored: false };
   }

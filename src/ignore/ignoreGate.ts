@@ -7,11 +7,11 @@
 //   2. Workspace Trust : a .soukformatignore is workspace-authored content, so in
 //      Restricted Mode we must not read it (the file is formatted, fail-safe);
 //   3. the document has a real on-disk path (scheme 'file'); virtual / untitled
-//      documents have no tree to walk and are never ignored by this path;
-//   4. the document lies in a workspace folder, and the lookup never goes above
-//      it: a .soukformatignore above the workspace is a file the user never
-//      opened (same bound as .soukformatrc and .prettierrc). A document outside
-//      every workspace folder has no boundary to walk within and is not ignored.
+//      documents have no tree to walk and are never ignored by this path.
+//
+// The lookup walks up to the root of the disk, like git: a .soukformatignore above
+// the opened folder applies, and so does one for a document outside every
+// workspace folder (an exclusion file can only make Tidy format less).
 //
 // The matching itself lives in the PURE soukformatignore module (resolveIgnore);
 // this module only applies the VS Code policy gates, so the ignore logic stays
@@ -42,21 +42,16 @@ function shouldConsultIgnore(document: vscode.TextDocument): boolean {
 }
 
 /**
- * Resolve whether a document is excluded by the nearest .soukformatignore INSIDE
- * its workspace folder, applying the VS Code policy gates. Returns a non-ignored
- * verdict (no read) when any gate fails, or when the document is in no workspace
- * folder. Never throws: any unexpected error is fail-safe (not ignored).
+ * Resolve whether a document is excluded by the nearest .soukformatignore,
+ * applying the VS Code policy gates. Returns a non-ignored verdict (no read) when
+ * any gate fails. Never throws: any unexpected error is fail-safe (not ignored).
  */
 export function resolveDocumentIgnore(document: vscode.TextDocument): IgnoreLookup {
   if (!shouldConsultIgnore(document)) {
     return { ignored: false };
   }
   try {
-    const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-    if (folder === undefined) {
-      return { ignored: false }; // no workspace folder: no boundary, nothing consulted.
-    }
-    return resolveIgnore(document.uri.fsPath, folder.uri.fsPath);
+    return resolveIgnore(document.uri.fsPath);
   } catch {
     // Defensive: the pure resolver is already fail-safe, but never let an
     // unexpected error block formatting : treat as "not ignored".

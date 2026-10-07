@@ -85,7 +85,7 @@ function childProgram(globModule: string, rcModule: string, ignoreModule: string
     const ignoreBig = (k) => {
       const text = Array.from({ length: 1000 }, () => multiX(k)).join(newline);
       return () => {
-        const verdict = evaluateIgnore(text, deepPath, { ignoreCase: false });
+        const verdict = evaluateIgnore(text, deepPath);
         return verdict.ignored === true && verdict.failClosed !== undefined;
       };
     };
@@ -102,7 +102,7 @@ function childProgram(globModule: string, rcModule: string, ignoreModule: string
     })();
     const benignText = Array.from({ length: 5000 }, (_, i) => 'module_' + i + '/dist/').join(newline);
     const benignIgnore = () => {
-      const verdict = evaluateIgnore(benignText, 'packages/core/src/components/button/Button.tsx', { ignoreCase: false });
+      const verdict = evaluateIgnore(benignText, 'packages/core/src/components/button/Button.tsx');
       return verdict.ignored === false && verdict.failClosed === undefined;
     };
 

@@ -320,6 +320,28 @@ describe('commands/explainLastFormat : actions mapping (ADD-06)', () => {
       assert.ok(e.lines.some((l) => l.includes('tidy.respectSoukformatignore')));
     });
 
+    it('F5: the headline says it could not be evaluated, never "a rule excludes it"', () => {
+      const budgetReason =
+        '.soukformatignore has too many patterns to match this path within its work budget; ' +
+        'every file it governs is excluded';
+      for (const detail of [lineReason, sizeReason, budgetReason]) {
+        const e = buildExplanation(rec('ignored-file', { detail }), ctx());
+        assert.equal(
+          e.headline,
+          'Tidy skipped this file: its .soukformatignore could not be fully evaluated, so Tidy left the file alone.'
+        );
+        assert.ok(!e.lines.some((l) => l.includes('matching rule')), 'no rule is involved');
+      }
+    });
+
+    it('F5: a real rule keeps its wording (path detail, or no detail)', () => {
+      for (const over of [{ detail: '/w/project/.soukformatignore' }, {}]) {
+        const e = buildExplanation(rec('ignored-file', over), ctx());
+        assert.equal(e.headline, 'Tidy skipped this file: a .soukformatignore rule excludes it.');
+        assert.ok(e.lines.some((l) => l.includes('Remove the matching rule')));
+      }
+    });
+
     it('does not regress the normal case: a real path still gets its Open action', () => {
       const p = '/w/project/.soukformatignore';
       const a = actionsOf(buildExplanation(rec('ignored-file', { detail: p }), ctx()));

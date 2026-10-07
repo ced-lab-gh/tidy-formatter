@@ -4,9 +4,9 @@
 //
 // The "wide" alphabet deliberately covers what the matcher got wrong before:
 // character classes (every spelling git knows), runs of stars, escapes, negation,
-// a BOM, CRLF, leading and trailing blanks, a trailing tab, non-ASCII, and mixed
-// case. It does NOT generate the three forms on which this matcher is knowingly
-// stricter than git (a lone trailing backslash, `\/`, a `**` followed by `\/`):
+// a BOM, CRLF, a lone CR (not a line break, as in git), leading and trailing
+// blanks, a trailing tab, non-ASCII, and mixed case. It does NOT generate the three
+// forms on which this matcher is knowingly stricter than git (a lone trailing backslash, `\/`, a `**` followed by `\/`):
 // they are pinned by name in globSemantics.test.ts.
 import type { OracleCase } from './gitIgnoreOracle';
 
@@ -43,6 +43,7 @@ const WIDE_TOKENS = [
   '\\!',
   '\\#',
   ' ',
+  '\r',
   '!',
   '#',
   'é',

@@ -219,11 +219,17 @@ function explainRecord(record: LastFormatRecord): Explanation {
     }
     case 'ignored-file': {
       const pathLine = record.detail ? `Ignore file: ${record.detail}.` : undefined;
+      // A fail-closed verdict (budget, unevaluable line, oversized file) is not a rule.
+      const failClosed = isFailClosedDetail(record.detail);
       return {
-        headline: 'Tidy skipped this file: a .soukformatignore rule excludes it.',
+        headline: failClosed
+          ? 'Tidy skipped this file: its .soukformatignore could not be fully evaluated, so Tidy left the file alone.'
+          : 'Tidy skipped this file: a .soukformatignore rule excludes it.',
         lines: [
           ...(pathLine ? [pathLine] : []),
-          'Remove the matching rule, or set tidy.respectSoukformatignore to false to format it anyway.'
+          failClosed
+            ? 'Fix or remove what is described above, or set tidy.respectSoukformatignore to false to format it anyway.'
+            : 'Remove the matching rule, or set tidy.respectSoukformatignore to false to format it anyway.'
         ],
         actions: openIgnoreFileActions(record)
       };

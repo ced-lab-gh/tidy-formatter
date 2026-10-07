@@ -4,7 +4,6 @@
 // adversarial patterns lives in globLinear.test.ts.
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_IGNORE_CASE,
   MAX_GLOB_LENGTH,
   MatchBudget,
   compileFilesGlob,
@@ -348,7 +347,8 @@ describe('ignore/glob : G1 character classes', () => {
   });
 });
 
-// Case: git ignores case where the file system does (Windows, macOS).
+// Case: the matcher never reads the platform. A pattern is compiled as asked, and a
+// .soukformatignore line is matched in both modes and merged on the safe side.
 describe('ignore/glob : G4 case sensitivity', () => {
   it('folds ASCII case when asked, and only then', () => {
     const fold = compileIgnorePattern('Dist/', { ignoreCase: true }) as IgnorePattern;
@@ -359,10 +359,10 @@ describe('ignore/glob : G4 case sensitivity', () => {
     assert.equal(patternMatches(exact, 'Dist/a.js'), true);
   });
 
-  it('defaults to the platform: Windows and macOS ignore case, others do not', () => {
-    assert.equal(DEFAULT_IGNORE_CASE, process.platform === 'win32' || process.platform === 'darwin');
+  it('is case-sensitive by default, on every platform (no platform default)', () => {
     const pattern = compileIgnorePattern('Dist/') as IgnorePattern;
-    assert.equal(pattern.ignoreCase, DEFAULT_IGNORE_CASE);
+    assert.equal(pattern.ignoreCase, false);
+    assert.equal(patternMatches(pattern, 'dist/a.js'), false);
   });
 
   it('folds ASCII only, as git does (a non-ASCII letter keeps its case)', () => {
@@ -372,10 +372,42 @@ describe('ignore/glob : G4 case sensitivity', () => {
   });
 });
 
+// F2: a .soukformatignore line is compiled both ways; an exclusion fires if EITHER
+// mode matches, a "!" re-include only if BOTH do. Same verdict on every OS.
+describe('ignore/soukformatignore : F2 case is merged on the safe side', () => {
+  const ignored = (file: string, path: string): boolean =>
+    isIgnoredFile(path, parseIgnorePatterns(file));
+
+  it('after "*.js" then "!keep.js", KEEP.js is EXCLUDED (the re-include needs both modes)', () => {
+    assert.equal(ignored('*.js\n!keep.js\n', 'KEEP.js'), true);
+    assert.equal(ignored('*.js\n!keep.js\n', 'keep.js'), false, 'the exact name is re-included');
+  });
+
+  it('"Debug/" excludes debug/a.js (and Debug/, DEBUG/), whatever the platform', () => {
+    assert.equal(ignored('Debug/\n', 'debug/a.js'), true);
+    assert.equal(ignored('Debug/\n', 'Debug/a.js'), true);
+    assert.equal(ignored('Debug/\n', 'DEBUG/a.js'), true);
+    assert.equal(ignored('Debug/\n', 'release/a.js'), false);
+  });
+
+  it('after "*.js", "!Keep.js" does NOT re-include keep.js (nor Keep.js)', () => {
+    assert.equal(ignored('*.js\n!Keep.js\n', 'keep.js'), true);
+    assert.equal(ignored('*.js\n!Keep.js\n', 'Keep.js'), false);
+  });
+
+  it('a parent excluded in either mode stays final under a later "!"', () => {
+    assert.equal(ignored('Dist/\n!dist/keep.css\n', 'dist/keep.css'), true);
+  });
+
+  it('a line that cannot be evaluated is the same in both modes (still fails closed)', () => {
+    assert.equal(ignored('Foo\\\n', 'bar.css'), true);
+  });
+});
+
 // G2: git's precedence, not "last match wins" over every prefix.
 describe('ignore/glob : G2 negation follows git', () => {
   const evaluate = (file: string, path: string): boolean =>
-    isIgnoredFile(path, parseIgnorePatterns(file, { ignoreCase: false }));
+    isIgnoredFile(path, parseIgnorePatterns(file));
 
   it('a file under an excluded directory cannot be re-included by a later pattern', () => {
     assert.equal(evaluate('dist/\n!dist/keep.css\n', 'dist/keep.css'), true);
@@ -483,18 +515,18 @@ describe('ignore/glob : P1 the work budget fails closed at the verdict', () => {
   const adversarial = Array.from({ length: 1000 }, () => multiX(60)).join('\n');
 
   it('evaluatePatterns excludes the path and says the budget ran out', () => {
-    const patterns = parseIgnorePatterns(adversarial, { ignoreCase: false });
+    const patterns = parseIgnorePatterns(adversarial);
     assert.deepEqual(evaluatePatterns(patterns, deepPath), { ignored: true, budgetExceeded: true });
   });
 
   it('isIgnoredFile and decideIgnore carry the same fail-closed answer', () => {
-    const patterns = parseIgnorePatterns(adversarial, { ignoreCase: false });
+    const patterns = parseIgnorePatterns(adversarial);
     assert.equal(isIgnoredFile(deepPath, patterns), true);
     assert.equal(decideIgnore(deepPath, patterns).budgetExceeded, true);
   });
 
   it('a later valid negation does not rescue a path whose lookup ran out of budget', () => {
-    const patterns = parseIgnorePatterns(`${adversarial}\n!keep.css\n`, { ignoreCase: false });
+    const patterns = parseIgnorePatterns(`${adversarial}\n!keep.css\n`);
     assert.equal(isIgnoredFile(`${deepPath}/keep.css`, patterns), true);
   });
 
@@ -512,7 +544,7 @@ describe('ignore/glob : P1 the work budget fails closed at the verdict', () => {
   });
 
   it('the reason is reported through the same mechanism as an unevaluable line', () => {
-    const verdict = evaluateIgnore(adversarial, deepPath, { ignoreCase: false });
+    const verdict = evaluateIgnore(adversarial, deepPath);
     assert.equal(verdict.ignored, true);
     assert.ok(verdict.failClosed, 'a fail-closed reason is attached');
     assert.match(verdict.failClosed?.explanation ?? '', /needs more than \d+ steps/);
@@ -529,7 +561,7 @@ describe('ignore/glob : P1 the work budget fails closed at the verdict', () => {
       writeFileSync(join(root, SOUKFORMATIGNORE_FILENAME), adversarial);
       const dir = join(root, 'src');
       mkdirSync(dir, { recursive: true });
-      const lookup = resolveIgnore(join(dir, 'a.css'), root);
+      const lookup = resolveIgnore(join(dir, 'a.css'));
       // A short path costs little: the same file does NOT run out of budget here.
       assert.equal(lookup.ignored, false);
       assert.equal(lookup.failClosed, undefined);
@@ -540,7 +572,7 @@ describe('ignore/glob : P1 the work budget fails closed at the verdict', () => {
 
   it('an ordinary file of 26 000 lines stays far below the budget', () => {
     const text = Array.from({ length: 26_000 }, (_, i) => `gen_${i}_dist/`).join('\n');
-    const patterns = parseIgnorePatterns(text, { ignoreCase: false });
+    const patterns = parseIgnorePatterns(text);
     const verdict = evaluatePatterns(patterns, 'packages/core/src/components/button/Button.tsx');
     assert.deepEqual(verdict, { ignored: false });
   });

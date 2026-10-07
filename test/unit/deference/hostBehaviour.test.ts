@@ -469,15 +469,16 @@ describe('deference + Show Effective Configuration in a recording host (LOW-18)'
       );
     });
 
-    it('does not report an ignore file that lies ABOVE the workspace folder (the walk is bounded)', async () => {
+    it('reports an ignore file that lies ABOVE the workspace folder (the walk goes to the root)', async () => {
       const workspace = path.join(dir, 'ws');
       mkdirSync(workspace);
-      writeFileSync(path.join(dir, '.soukformatignore'), '*.css\n');
+      const above = path.join(dir, '.soukformatignore');
+      writeFileSync(above, '*.css\n');
       const file = path.join(workspace, 'a.css');
       writeFileSync(file, '.a{color:red}\n');
       const report = await reportFor(file, { setting: 'notify' }, workspace);
-      assert.match(report, /\.soukformatignore : \(none found\)/);
-      assert.match(report, /\.soukformatignore excludes this file : no/);
+      assert.ok(report.includes(`.soukformatignore : ${above}`), report);
+      assert.match(report, /\.soukformatignore excludes this file : yes/);
     });
 
     it('prints no problem line for an ordinary exclusion rule', async () => {

@@ -24,7 +24,6 @@ import {
   readSoukformatrcLayers,
   setSoukformatrcClock
 } from '../../../src/config/soukformatrc';
-import { DEFAULT_IGNORE_CASE } from '../../../src/ignore/glob';
 import { resolveOptions } from '../../../src/config/resolver';
 
 const ONE_HOUR_MS = 3_600_000;
@@ -594,11 +593,16 @@ describe('config/soukformatrc : P1 one work budget for all the overrides of a lo
   });
 });
 
-// G4: case. The platform decides, like git's core.ignorecase.
-describe('config/soukformatrc : G4 override globs follow the platform case rule', () => {
-  it('"*.CSS" matches "a.css" exactly when the file system ignores case', () => {
-    assert.equal(overrideApplies('*.CSS', 'a.css'), DEFAULT_IGNORE_CASE);
+// G4: case. Exact on EVERY OS, like Prettier and EditorConfig (never the platform's).
+describe('config/soukformatrc : G4 override globs are case-sensitive on every OS', () => {
+  it('"*.CSS" does NOT apply to "a.css"', () => {
+    assert.equal(overrideApplies('*.CSS', 'a.css'), false);
     assert.equal(overrideApplies('*.css', 'a.css'), true);
+  });
+
+  it('"*.css" does NOT apply to "A.CSS", and "A.CSS" applies to itself', () => {
+    assert.equal(overrideApplies('*.css', 'A.CSS'), false);
+    assert.equal(overrideApplies('A.CSS', 'A.CSS'), true);
   });
 });
 

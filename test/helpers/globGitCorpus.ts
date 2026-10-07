@@ -3,9 +3,10 @@
 // so the suite keeps protecting the glob matcher on a machine with no git. It
 // carries every input of the glob audit (etape 10): character classes (G1),
 // negation under an excluded directory (G2), a byte order mark (G3), case (G4),
-// runs of three stars (G5), leading and trailing whitespace (G6), and the syntax
-// the first round already fixed. globGit.test.ts replays it against Tidy AND,
-// when git is installed, against git itself, so a stale row cannot hide.
+// runs of three stars (G5), leading and trailing whitespace (G6), a lone CR (G7),
+// and the syntax the first round already fixed. globGit.test.ts replays it against
+// Tidy AND, when git is installed, against git itself, so a stale row cannot hide.
+// Tidy's case handling does not follow core.ignorecase: see globGit.test.ts.
 
 /** One ignore file, the paths asked about, and what git answered for each. */
 export interface GitCorpusRow {
@@ -411,5 +412,26 @@ export const GIT_CORPUS: readonly GitCorpusRow[] = [
     ignoreCase: false,
     paths: ["é.css", "e.css"],
     expected: [true, false]
+  },
+  {
+    id: "G7 lone CR is not a line break (re-include is one pattern)",
+    file: "*.js\n!keep.js\rjunk\n",
+    ignoreCase: false,
+    paths: ["keep.js", "a.js", "keep.jsjunk"],
+    expected: [true, true, false]
+  },
+  {
+    id: "G7 lone CR inside a pattern",
+    file: "a\rb\n",
+    ignoreCase: false,
+    paths: ["a\rb", "a", "b"],
+    expected: [true, false, false]
+  },
+  {
+    id: "G7 CRLF drops one CR per line",
+    file: "*.js\r\n!keep.js\r\n",
+    ignoreCase: false,
+    paths: ["keep.js", "a.js"],
+    expected: [false, true]
   }
 ];

@@ -46,9 +46,14 @@ import {
   reportedEngineIdFor
 } from '../../../src/engine/jsbeautify';
 import {
+  evaluateIgnore,
   findSoukformatignore,
   resolveIgnore
 } from '../../../src/ignore/soukformatignore';
+import { detectionCanChangeOutcome } from '../../../src/deference/setting';
+import { mapLonefyConfigText } from '../../../src/migration/lonefyConfig';
+import { LONEFY_SECTIONS } from '../../../src/migration/lonefySections';
+import { LONEFY_LOCAL_CONFIG_SEGMENTS } from '../../../src/migration/lonefySources';
 import { detectFileIgnore } from '../../../src/ignore/markers';
 import {
   EXTENSION_ID,
@@ -365,15 +370,15 @@ describe('README : the .prettierrc layer is described exactly', () => {
     assert.ok(/found in Prettier's own search order/.test(README));
   });
 
-  it('the ten keys the README lists are exactly the ten the mapper honours', () => {
-    const listed = /Only ten AST-safe stylistic keys are read \(([^)]+)\)/.exec(
+  it('the twelve keys the README lists are exactly the twelve the mapper honours', () => {
+    const listed = /Only twelve AST-safe stylistic keys are read \(([^)]+)\)/.exec(
       README
     );
     assert.ok(listed, 'the README must list the honoured keys');
     const readmeKeys = [...listed[1].matchAll(/`([A-Za-z]+)`/g)]
       .map((m) => m[1])
       .sort();
-    assert.equal(readmeKeys.length, 10, 'the README says ten');
+    assert.equal(readmeKeys.length, 12, 'the README says twelve');
 
     const sample: Record<string, unknown> = {
       printWidth: 100,
@@ -385,7 +390,9 @@ describe('README : the .prettierrc layer is described exactly', () => {
       trailingComma: 'all',
       bracketSpacing: false,
       bracketSameLine: true,
-      arrowParens: 'avoid'
+      arrowParens: 'avoid',
+      singleAttributePerLine: true,
+      objectWrap: 'collapse'
     };
     assert.deepEqual(
       Object.keys(sample).sort(),
@@ -404,8 +411,8 @@ describe('README : the .prettierrc layer is described exactly', () => {
     assert.deepEqual(warnings, [], 'every listed key must be honoured');
     assert.equal(
       Object.keys(values).length,
-      10,
-      'ten keys in, ten resolved values out'
+      12,
+      'twelve keys in, twelve resolved values out'
     );
   });
 
@@ -493,27 +500,34 @@ describe('README : the option-surface claim is a count, not a boast', () => {
   it('the numbers in the README are the numbers in the catalogue', () => {
     const prettier = OPTION_CATALOG.filter((e) => e.engine === 'prettier');
     const beautify = OPTION_CATALOG.filter((e) => e.engine !== 'prettier');
-    assert.equal(beautify.length, 21, 'README says 21 js-beautify options');
-    assert.equal(prettier.length, 8, 'README says 8 Prettier options');
-    assert.equal(OPTION_CATALOG.length, 29, 'README says 29 style settings');
-    assert.ok(/\*\*21\*\* js-beautify options/.test(README));
-    assert.ok(/\*\*8\*\* AST-safe Prettier stylistic options/.test(README));
-    assert.ok(/29 style settings in all/.test(README));
+    assert.equal(beautify.length, 25, 'README says 25 js-beautify options');
+    assert.equal(prettier.length, 10, 'README says 10 Prettier options');
+    assert.equal(OPTION_CATALOG.length, 35, 'README says 35 style settings');
+    assert.ok(/\*\*25\*\* js-beautify options/.test(README));
+    assert.ok(/\*\*10\*\* AST-safe Prettier stylistic options/.test(README));
+    assert.ok(/35 style settings in all/.test(README));
+    assert.ok(
+      README.includes('from `tidy.indent` through `tidy.prettier.objectWrap`'),
+      'the language-overridable range must end at the last catalogue entry'
+    );
+    assert.equal(
+      OPTION_CATALOG[OPTION_CATALOG.length - 1].settingKey,
+      'tidy.prettier.objectWrap',
+      'the README range names the last catalogue entry'
+    );
   });
 
-  it('js-beautify really declares 47 options, and the named ones really are missing', () => {
+  it('js-beautify really declares 47 options; the README names the ones still missing and the ones now exposed', () => {
     const declared = jsBeautifyDeclaredOptions();
     assert.equal(declared.size, 47, 'the README quotes this number');
     assert.ok(/declares 47 options/.test(README));
 
     const exposed = new Set(OPTION_CATALOG.map((e) => e.engineKey));
+    // Still missing: js-beautify declares them, Tidy does not expose them, and
+    // the README says so by name.
     for (const missing of [
       'end_with_newline',
-      'space_before_conditional',
-      'content_unformatted',
-      'void_elements',
       'wrap_attributes_min_attrs',
-      'jslint_happy',
       'templating'
     ]) {
       assert.ok(declared.has(missing), `js-beautify must declare ${missing}`);
@@ -521,6 +535,37 @@ describe('README : the option-surface claim is a count, not a boast', () => {
       assert.ok(
         README.includes('`' + missing + '`'),
         `the README must name ${missing} among the options it does NOT expose`
+      );
+    }
+    // Exposed since 0.5.0: the README must no longer list them as missing, and
+    // must name their Tidy setting.
+    const missingSentence =
+      /keys such as ([^.]*) are \*\*not\*\* exposed today/.exec(README)?.[1] ?? '';
+    for (const added of [
+      'space_before_conditional',
+      'content_unformatted',
+      'void_elements',
+      'jslint_happy'
+    ]) {
+      assert.ok(declared.has(added), `js-beautify must declare ${added}`);
+      assert.ok(exposed.has(added), `Tidy must now expose ${added}`);
+      assert.ok(
+        !missingSentence.includes(added),
+        `${added} is exposed, so the "not exposed" sentence must not list it`
+      );
+      assert.ok(
+        README.includes('`tidy.' + added + '`'),
+        `the README must name tidy.${added}`
+      );
+    }
+    for (const added of ['singleAttributePerLine', 'objectWrap']) {
+      assert.ok(
+        exposed.has(added),
+        `the Prettier option ${added} is in the catalogue`
+      );
+      assert.ok(
+        README.includes('`tidy.prettier.' + added + '`'),
+        `the README must name tidy.prettier.${added}`
       );
     }
   });
@@ -1392,12 +1437,13 @@ describe('README : a head region marker is not a whole-file ignore', () => {
 
 describe('README : the behaviour switches do not all have the same reach', () => {
   const RESOURCE_SCOPED = [
+    'tidy.editorconfig',
     'tidy.prettier.respectProjectConfig',
     'tidy.soukformatrc',
     'tidy.respectSoukformatignore'
   ];
 
-  it('three of them are declared resource-scoped in the manifest', () => {
+  it('four of them are declared resource-scoped in the manifest', () => {
     const props = manifestProperties();
     for (const key of RESOURCE_SCOPED) {
       assert.equal(
@@ -1410,7 +1456,6 @@ describe('README : the behaviour switches do not all have the same reach', () =>
       'tidy.css.enable',
       'tidy.maxFileSizeKB',
       'tidy.json.maxFileSizeKB',
-      'tidy.editorconfig',
       'tidy.deferToOtherFormatters',
       'tidy.statusBar.enable'
     ]) {
@@ -1436,7 +1481,7 @@ describe('README : the behaviour switches do not all have the same reach', () =>
           ' and $1'
         ) + ' are declared `resource`-scoped'
       ),
-      'the README must name the three resource-scoped keys together'
+      'the README must name the four resource-scoped keys together'
     );
     assert.ok(
       README_FLAT.includes('are window-scoped: one value for the whole window'),
@@ -2212,7 +2257,7 @@ describe('README : "in the Command Palette" names the three gated commands', () 
         `${command.command} must use the documented enablement clause`
       );
     }
-    assert.equal(manifestCommands().length, 8, 'the README says eight commands');
+    assert.equal(manifestCommands().length, 9, 'the README says nine commands');
   });
 
   it('the README says so instead of "All Tidy commands are in the Command Palette"', () => {
@@ -2223,7 +2268,7 @@ describe('README : "in the Command Palette" names the three gated commands', () 
       'three of them are gated on the active language'
     );
     assert.ok(
-      README_FLAT.includes('All eight Tidy commands live in the Command Palette')
+      README_FLAT.includes('All nine Tidy commands live in the Command Palette')
     );
     assert.ok(
       README_FLAT.includes(
@@ -2231,6 +2276,10 @@ describe('README : "in the Command Palette" names the three gated commands', () 
       )
     );
     assert.ok(README_FLAT.includes(ENABLEMENT), 'and must quote the real clause');
+    assert.ok(
+      README_FLAT.includes('The other six are always listed.'),
+      'nine commands minus the three gated ones'
+    );
     for (const title of [
       '*Show Effective Configuration*',
       '*Preview Format (Diff)*',
@@ -2411,10 +2460,19 @@ describe('CHANGELOG : the 0.3.0 settings count is the count that shipped', () =>
   const CHANGELOG = readFileSync(path.join(REPO_ROOT, 'CHANGELOG.md'), 'utf8');
 
   /** Settings added to the manifest AFTER the 0.3.0 release commit (d8d4549). */
-  const ADDED_AFTER_030 = ['tidy.prettier.respectProjectConfig'];
+  const ADDED_AFTER_030 = [
+    'tidy.prettier.respectProjectConfig',
+    // 0.5.0 (OPTIONS-6): the six options js-beautify and Prettier already had.
+    'tidy.space_before_conditional',
+    'tidy.jslint_happy',
+    'tidy.content_unformatted',
+    'tidy.void_elements',
+    'tidy.prettier.singleAttributePerLine',
+    'tidy.prettier.objectWrap'
+  ];
 
-  it('the manifest declares 47 settings today', () => {
-    assert.equal(Object.keys(manifestProperties()).length, 47);
+  it('the manifest declares 53 settings today', () => {
+    assert.equal(Object.keys(manifestProperties()).length, 53);
   });
 
   it('today minus what landed after 0.3.0 is the 46 the entry now states', () => {
@@ -2435,6 +2493,53 @@ describe('CHANGELOG : the 0.3.0 settings count is the count that shipped', () =>
     assert.ok(
       !CHANGELOG.includes('all 44 `tidy.*` identifiers are unchanged'),
       '44 was already wrong on the day 0.3.0 shipped'
+    );
+  });
+
+  it('the 0.5.0 entry sits above 0.4.3 and has its four sections', () => {
+    const start = CHANGELOG.indexOf('## [0.5.0] - 2026-10-07');
+    const next = CHANGELOG.indexOf('## [0.4.3]');
+    assert.ok(start >= 0, 'the 0.5.0 entry must exist');
+    assert.ok(start < next, 'and sit above 0.4.3');
+    const entry = CHANGELOG.slice(start, next);
+    let last = -1;
+    for (const heading of [
+      '### Added',
+      '### Changed',
+      '### Fixed',
+      '### Known limitations'
+    ]) {
+      const at = entry.indexOf(heading);
+      assert.ok(at > last, `${heading} must follow the previous section`);
+      last = at;
+    }
+  });
+
+  it('the 0.5.0 entry names the six new settings and the new command', () => {
+    const start = CHANGELOG.indexOf('## [0.5.0]');
+    const entry = CHANGELOG.slice(start, CHANGELOG.indexOf('## [0.4.3]'));
+    for (const key of ADDED_AFTER_030.slice(1)) {
+      assert.ok(entry.includes('`' + key + '`'), `0.5.0 must name ${key}`);
+    }
+    assert.ok(entry.includes('`tidy.whoFormats`'));
+    assert.ok(entry.includes('Who Formats This File?'));
+  });
+
+  it('the 0.5.0 entry carries no unverified figure from the audit reports', () => {
+    const start = CHANGELOG.indexOf('## [0.5.0]');
+    const entry = CHANGELOG.slice(start, CHANGELOG.indexOf('## [0.4.3]'));
+    // The differential test compares ~6 600 entries by default, not 412 000,
+    // and the worst case is minutes before and seconds after, not "1 to 4 s".
+    assert.ok(!/412[\s,]?000/.test(entry), 'the 412 000 figure is not the committed test');
+    assert.ok(!/1 to 4 s/.test(entry), 'the "1 to 4 s" figure was not verified');
+  });
+
+  it('the historical 0.4.x entries still say what was true on their date', () => {
+    assert.ok(
+      CHANGELOG.includes(
+        '`// prettier-ignore` is not honoured during *Format Selection* on the TypeScript path'
+      ),
+      'the 0.4.0 and 0.4.1 known limitation stays as written; 0.5.0 states the change'
     );
   });
 
@@ -2522,10 +2627,10 @@ describe('README : the consent flow prose matches useAsFormatter as it stands', 
 });
 
 /* -------------------------------------------------------------------------- */
-/* The ONE documented deviation from the layer order (C-15, v0.4.1)            */
+/* Line width follows the layer order (C-15, fixed in v0.5.0)                   */
 /* -------------------------------------------------------------------------- */
 
-describe('README : the line-width deviation is documented, not denied', () => {
+describe('README : line width follows the layer order, whichever key spelled it', () => {
   // An 88-character line: it fits under a width of 120 and not under 40, so the
   // shape of the output says which width actually reached the printer.
   const LONG =
@@ -2543,8 +2648,8 @@ describe('README : the line-width deviation is documented, not denied', () => {
     return out.split('\n').length > 2 ? 'narrow' : 'wide';
   }
 
-  it('a width from a HIGHER layer really does lose to tidy.prettier.printWidth', async () => {
-    // Control: the shared width alone governs, so the assertion below is not
+  it('a width from a HIGHER layer beats tidy.prettier.printWidth from a lower one', async () => {
+    // Control: the shared width alone governs, so the assertions below are not
     // measuring prettier's default.
     assert.equal(
       await widthUsed([
@@ -2553,73 +2658,334 @@ describe('README : the line-width deviation is documented, not denied', () => {
       'wide',
       'a 120 width leaves the 88-character line alone'
     );
-    // The deviation: .editorconfig is layer 3 and plain VS Code settings are
-    // layer 2, yet printWidth wins, because prettier.ts assigns printWidth from
-    // wrap_line_length and then overwrites it from engineOptions.prettier.
     assert.equal(
       await widthUsed([
         { source: 'VS Code', values: { 'prettier.printWidth': 40 } },
         { source: '.editorconfig', values: { wrap_line_length: 120 } }
       ]),
-      'narrow',
-      'tidy.prettier.printWidth beats .editorconfig max_line_length'
+      'wide',
+      '.editorconfig max_line_length (layer 3) beats a VS Code tidy.prettier.printWidth'
     );
-    // And it beats the layer the README calls the last word, too.
     assert.equal(
       await widthUsed([
         { source: 'VS Code', values: { 'prettier.printWidth': 40 } },
         { source: '.soukformatrc[typescript]', values: { wrap_line_length: 120 } }
       ]),
-      'narrow',
-      'tidy.prettier.printWidth beats a .soukformatrc wrap_line_length'
+      'wide',
+      'a .soukformatrc wrap_line_length beats a VS Code tidy.prettier.printWidth'
     );
   });
 
-  it('the same key in a higher layer still wins, which is the documented workaround', async () => {
+  it('it works the other way round too: a higher layer can ask for a NARROWER width', async () => {
+    assert.equal(
+      await widthUsed([
+        { source: 'VS Code', values: { 'prettier.printWidth': 120 } },
+        { source: '.editorconfig', values: { wrap_line_length: 40 } }
+      ]),
+      'narrow',
+      'a lower printWidth of 120 must not keep a higher layer from wrapping at 40'
+    );
+    assert.equal(
+      await widthUsed([
+        { source: 'VS Code', values: { wrap_line_length: 120 } },
+        { source: '.soukformatrc[typescript]', values: { 'prettier.printWidth': 40 } }
+      ]),
+      'narrow',
+      'a .soukformatrc printWidth beats a VS Code wrap_line_length'
+    );
+  });
+
+  it('inside ONE layer the Prettier-specific key wins, as the README says', async () => {
+    assert.equal(
+      await widthUsed([
+        {
+          source: 'VS Code',
+          values: { wrap_line_length: 120, 'prettier.printWidth': 40 }
+        }
+      ]),
+      'narrow'
+    );
+  });
+
+  it('a [lang] value beats a global one in both vocabularies', async () => {
+    assert.equal(
+      await widthUsed([
+        { source: 'VS Code', values: { 'prettier.printWidth': 120 } },
+        { source: 'VS Code [typescript]', values: { 'prettier.printWidth': 40 } }
+      ]),
+      'narrow'
+    );
+    assert.equal(
+      await widthUsed([
+        { source: 'VS Code', values: { wrap_line_length: 120 } },
+        { source: 'VS Code [typescript]', values: { wrap_line_length: 40 } }
+      ]),
+      'narrow'
+    );
+  });
+
+  it('a width of 0 means no limit on the Prettier path, as the README says', async () => {
     assert.equal(
       await widthUsed([
         { source: 'VS Code', values: { 'prettier.printWidth': 40 } },
-        { source: '.soukformatrc[typescript]', values: { 'prettier.printWidth': 120 } }
+        { source: '.editorconfig', values: { wrap_line_length: 0 } }
       ]),
       'wide',
-      'a printWidth written in .soukformatrc is layered normally and wins'
+      'a higher 0 lifts the limit a lower layer asked for'
+    );
+    assert.equal(
+      await widthUsed([{ source: '.editorconfig', values: { wrap_line_length: 0 } }]),
+      'wide',
+      '0 is "no limit", not "fall back to 80"'
     );
   });
 
-  it('the README states the deviation instead of claiming the layer order holds', () => {
+  it('the README states the unified rule and no longer states a deviation', () => {
     assert.ok(
-      !README_FLAT.includes(
-        'so your `.soukformatrc` always keeps the last word'
-      ),
-      'that absolute is false for line width'
+      !README_FLAT.includes('Known deviation, line width'),
+      'the deviation was fixed, so the section is gone'
     );
     assert.ok(
-      README_FLAT.includes('**Known deviation, line width.**'),
-      'the deviation must be stated where the layer order is described'
+      !README_FLAT.includes('with one documented exception for line width'),
+      'the layer-order sentence no longer carries an exception'
+    );
+    assert.ok(
+      !README_FLAT.includes('express the width in the same vocabulary'),
+      'the workaround for the deviation is gone with it'
+    );
+    assert.ok(
+      README_FLAT.includes('**Line width follows the layer order too.**'),
+      'the rule is stated where the layer order is described'
     );
     assert.ok(
       README_FLAT.includes(
-        'beats an `.editorconfig` `max_line_length` **and** a `.soukformatrc` `wrap_line_length`'
-      ),
-      'and it must name exactly which layers lose'
+        'Tidy takes the width from the highest layer that sets either, whichever key spelled it'
+      )
     );
     assert.ok(
       README_FLAT.includes(
-        'express the width in the same vocabulary as the layer you want to win'
-      ),
-      'a known deviation must come with the workaround that does work'
+        'Inside a single layer, `tidy.prettier.printWidth` wins over `wrap_line_length`'
+      )
+    );
+    assert.ok(
+      README_FLAT.includes('a `.soukformatrc` `wrap_line_length`'),
+      'it names the layers that no longer lose'
     );
   });
 
-  it('the engine comment agrees with the README rather than denying it', () => {
+  it('the engine no longer carries the deviation warning', () => {
     const engine = readSource('src/engine/prettier.ts');
     assert.ok(
-      !/only when no explicit prettier\.printWidth was set/.test(engine),
-      'the comment claimed a conditional assignment the code does not make'
+      !/KNOWN DEVIATION/.test(engine),
+      'the code must not warn about a deviation the README no longer states'
     );
     assert.ok(
-      /KNOWN DEVIATION/.test(engine),
-      'the code must carry the same warning as the README'
+      /ONE width, chosen by layer order/.test(engine),
+      'the code must say what it now does'
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 0.5.0: the exclusion-pattern rules the README states are the ones applied    */
+/* -------------------------------------------------------------------------- */
+
+describe('README : the .soukformatignore pattern rules are the ones the matcher applies', () => {
+  const ignored = (text: string, rel: string): boolean =>
+    evaluateIgnore(text, rel).ignored;
+
+  it('character classes, negated classes and ranges follow git', () => {
+    assert.equal(ignored('f[abc]', 'fb'), true);
+    assert.equal(ignored('f[abc]', 'fd'), false);
+    assert.equal(ignored('f[!a]', 'fb'), true);
+    assert.equal(ignored('f[!a]', 'fa'), false);
+    assert.equal(ignored('f[a-c]', 'fb'), true);
+    assert.equal(ignored('f[a-c]', 'fd'), false);
+  });
+
+  it('`***` behaves as `**`', () => {
+    assert.equal(ignored('***/x', 'a/b/x'), ignored('**/x', 'a/b/x'));
+    assert.equal(ignored('***/x', 'a/b/x'), true);
+  });
+
+  it('a pattern without a slash applies at any depth and to a folder contents', () => {
+    assert.equal(ignored('src', 'a/src/b.js'), true);
+    assert.equal(ignored('*.min.css', 'a/b/c.min.css'), true);
+  });
+
+  it('a trailing slash matches folders only, and `**` inside a word acts as `*`', () => {
+    assert.equal(ignored('build/', 'build'), false);
+    assert.equal(ignored('build/', 'build/x.js'), true);
+    assert.equal(ignored('src**min', 'srcXmin'), true);
+    assert.equal(ignored('src**min', 'src/a.min'), false);
+  });
+
+  it('an excluded folder cannot be re-included file by file; its contents can', () => {
+    assert.equal(ignored('dist/\n!dist/keep.js', 'dist/keep.js'), true);
+    assert.equal(ignored('dist/*\n!dist/keep.js', 'dist/keep.js'), false);
+    assert.equal(ignored('dist/*\n!dist/keep.js', 'dist/other.js'), true);
+  });
+
+  it('the README example still behaves as its comment says', () => {
+    const example = '*.min.css\ndist/\nvendor/**/*.js\n!vendor/keep.js\n';
+    assert.equal(ignored(example, 'vendor/a/b.js'), true);
+    assert.equal(ignored(example, 'vendor/keep.js'), false);
+    assert.ok(README.includes('!vendor/keep.js'));
+  });
+
+  it('exclusions ignore case, re-inclusions respect it', () => {
+    assert.equal(ignored('DIST/', 'dist/a.js'), true);
+    assert.equal(ignored('*.js\n!KEEP.js', 'keep.js'), true, 'a re-inclusion must match exactly');
+    assert.equal(ignored('*.js\n!keep.js', 'keep.js'), false);
+  });
+
+  it('a byte-order mark, CRLF and leading blanks are read as stated', () => {
+    assert.equal(ignored('\ufeff*.css', 'a.css'), true);
+    assert.equal(ignored('*.css\r\n', 'a.css'), true);
+    assert.equal(ignored('  *.css', 'a.css'), false, 'leading blanks are part of the pattern');
+    assert.equal(ignored('  *.css', '  a.css'), true);
+  });
+
+  it('an unevaluable line excludes, with a reason, as the README says', () => {
+    const verdict = evaluateIgnore('x'.repeat(1100) + '\n', 'a/b.js');
+    assert.equal(verdict.ignored, true);
+    assert.ok(verdict.failClosed !== undefined, 'the reason must be carried');
+    assert.ok(README.includes('over 1 024 characters'));
+  });
+
+  it('the README states the case rules in both files', () => {
+    assert.ok(
+      README_FLAT.includes('exclusion patterns ignore case (`DIST/` excludes `dist/`), while `!` re-inclusions respect it'),
+    );
+    assert.ok(
+      README_FLAT.includes('matching is **case-sensitive on every OS**, as in Prettier and EditorConfig'),
+    );
+    assert.ok(
+      README_FLAT.includes('**a folder that is excluded cannot be re-included file by file**'),
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 0.5.0: the migration prose is the migration the code runs                    */
+/* -------------------------------------------------------------------------- */
+
+describe('README : the migration reads the sources and sections the code reads', () => {
+  it('the incumbent config file is the one the README names', () => {
+    assert.equal(LONEFY_LOCAL_CONFIG_SEGMENTS.join('/'), '.vscode/formatter.json');
+    assert.ok(README.includes('`.vscode/formatter.json`'));
+  });
+
+  it('each section feeds the languages the README table says', () => {
+    assert.deepEqual([...LONEFY_SECTIONS.css.languages], ['css', 'scss']);
+    assert.deepEqual([...LONEFY_SECTIONS.javascript.languages], ['javascript', 'json']);
+    assert.deepEqual([...LONEFY_SECTIONS.html.languages], ['html']);
+    assert.ok(README.includes('| `css` | `[css]` and `[scss]` |'));
+    assert.ok(README.includes('| `javascript` | `[javascript]` and `[json]` |'));
+    assert.ok(README.includes('| `html` | `[html]` |'));
+    for (const absent of ['less', 'jsonc']) {
+      assert.ok(
+        !Object.values(LONEFY_SECTIONS).some((section) =>
+          (section.languages as readonly string[]).includes(absent)
+        ),
+        `no section feeds ${absent}`
+      );
+    }
+  });
+
+  it('the keys the README lists per section are the keys that really carry over', () => {
+    const text = JSON.stringify({
+      onSave: true,
+      javascript: Object.fromEntries([...LONEFY_SECTIONS.javascript.honoured].map((k) => [k, sampleFor(k)])),
+      css: Object.fromEntries([...LONEFY_SECTIONS.css.honoured].map((k) => [k, sampleFor(k)])),
+      html: Object.fromEntries([...LONEFY_SECTIONS.html.honoured].map((k) => [k, sampleFor(k)]))
+    });
+    const mapping = mapLonefyConfigText(text, {
+      label: '.vscode/formatter.json',
+      allowFlatKeys: false
+    });
+    assert.equal(mapping.unusable, false);
+    assert.equal(mapping.onSaveSeen, true, 'onSave is recognised');
+    assert.ok(
+      !mapping.writes.some((w) => /formatOnSave/i.test(w.key)),
+      'and never proposed'
+    );
+    const written = (language: string): string[] =>
+      mapping.writes
+        .filter((w) => w.language === language)
+        .map((w) => w.key.replace(/^tidy\./, ''));
+    // The README lists these per section (the keys of the "same name" rows).
+    const readmeLines = README.split(/\r?\n/);
+    for (const section of ['javascript', 'css', 'html'] as const) {
+      const row = readmeLines.find(
+        (line) =>
+          line.startsWith('| `' + section + '` | ') &&
+          line.endsWith('| the `tidy.*` setting of the same name |')
+      );
+      assert.ok(row, `the README must have a keys row for ${section}`);
+      const listed = [...row.split('|')[2].matchAll(/`([a-z_]+)`/g)].map(
+        (m) => m[1]
+      );
+      const really = written(section).filter(
+        (key) => key !== 'indent' && key !== 'end_of_line'
+      );
+      assert.deepEqual(
+        [...listed].sort(),
+        [...really].sort(),
+        `the README keys for the ${section} section are the ones written into [${section}]`
+      );
+    }
+    // [json] only receives what applies to JSON.
+    assert.deepEqual(written('json').sort(), ['end_of_line', 'indent']);
+  });
+
+  function sampleFor(key: string): unknown {
+    switch (key) {
+      case 'indent_size':
+      case 'wrap_line_length':
+      case 'max_preserve_newlines':
+      case 'wrap_attributes_indent_size':
+        return 2;
+      case 'brace_style':
+        return 'expand';
+      case 'wrap_attributes':
+        return 'force';
+      case 'operator_position':
+        return 'before-newline';
+      case 'indent_scripts':
+        return 'keep';
+      case 'eol':
+        return '\n';
+      default:
+        return true;
+    }
+  }
+
+  it('the global file is written at User scope and the others at Workspace scope', () => {
+    const recap = readSource('src/migration/recap.ts');
+    assert.ok(
+      /kind === 'global-formatter-json' \? 'global' : 'workspace'/.test(recap),
+      'only the incumbent global file is written at the User scope'
+    );
+    assert.ok(README_FLAT.includes('written at User scope and never into a repository'));
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 0.5.0: silent-defer reads nothing                                            */
+/* -------------------------------------------------------------------------- */
+
+describe('README : silent-defer reads nothing at activation', () => {
+  it('detection cannot change an outcome in silent-defer or off', () => {
+    assert.equal(detectionCanChangeOutcome('silent-defer', false), false);
+    assert.equal(detectionCanChangeOutcome('off', false), false);
+    assert.equal(detectionCanChangeOutcome('notify', false), true);
+  });
+
+  it('the README no longer says silent-defer "acknowledges" the competitor', () => {
+    assert.ok(!README_FLAT.includes('Acknowledge the competitor'));
+    assert.ok(
+      README_FLAT.includes('Tidy does not scan the workspace for a competitor at activation in this mode')
     );
   });
 });

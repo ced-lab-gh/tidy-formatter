@@ -260,7 +260,8 @@ function mapOverrides(
       });
       continue;
     }
-    const glob = compileFilesGlob(files);
+    // Exact case on every OS, like Prettier and EditorConfig: "*.CSS" never matches a.css.
+    const glob = compileFilesGlob(files, { ignoreCase: false });
     if (glob === undefined) {
       warnings.push({
         message: `${SOURCE_SOUKFORMATRC}: overrides[${index}].files must be a non-empty glob; ignored.`

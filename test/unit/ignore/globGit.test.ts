@@ -14,9 +14,15 @@
 //   2. the same corpus replayed against LIVE git, so a stale frozen row cannot
 //      hide, and named tests with the exact inputs of each audit finding;
 //   3. a DIFFERENTIAL run on generated ignore files and paths, through both Tidy
-//      and git. The dangerous disagreement is Tidy excluding LESS than git (a file
-//      the user excluded gets formatted); excluding MORE is the safe direction but
-//      still a defect, so the run fails on either.
+//      and git, under EACH value of core.ignorecase.
+//
+// CASE: Tidy does not follow the platform. A .soukformatignore line is matched in
+// both case modes and merged on the safe side (see ./glob, evaluatePatterns), so
+// the relation to git, for either core.ignorecase value, is:
+//   - git excludes => Tidy excludes (zero tolerance: a file the user excluded must
+//     never be formatted);
+//   - no ASCII capital in the file or the path (see caseNeutral) => Tidy == git;
+//   - otherwise Tidy may exclude MORE (safe): the cases are counted and printed.
 //
 // Size of the differential: TIDY_GIT_FUZZ_CASES (default 500 ignore files per run,
 // 40 paths each, four runs). Raise it for a long soak, e.g. TIDY_GIT_FUZZ_CASES=6000.
@@ -28,24 +34,54 @@ import { gitAvailable, gitCheckIgnore, gitVersion } from '../../helpers/gitIgnor
 
 const BOM = String.fromCharCode(0xfeff);
 
-function tidyVerdicts(file: string, paths: readonly string[], ignoreCase: boolean): boolean[] {
-  const patterns = parseIgnorePatterns(file, { ignoreCase });
+function tidyVerdicts(file: string, paths: readonly string[]): boolean[] {
+  const patterns = parseIgnorePatterns(file);
   return paths.map((path) => isIgnoredFile(path, patterns));
 }
 
+/**
+ * True when case cannot change git's answer: no ASCII capital in the ignore file or
+ * the path, and no `[:upper:]` class (git widens it to lowercase under ignorecase).
+ * There Tidy must equal git exactly; elsewhere it may exclude more.
+ */
+function caseNeutral(file: string, path: string): boolean {
+  return !/[A-Z]/.test(file) && !/[A-Z]/.test(path) && !file.includes('[:upper:]');
+}
+
+/**
+ * Compare Tidy with a git verdict recorded for one (file, path): git excludes =>
+ * Tidy excludes; case neutral => equal. Returns true when Tidy excludes MORE than
+ * git (the counted, accepted case); throws on any other disagreement.
+ */
+function checkAgainstGit(file: string, path: string, tidy: boolean, git: boolean, label: string): boolean {
+  if (git) {
+    assert.equal(tidy, true, `${label}: git excludes ${JSON.stringify(path)}, Tidy must too`);
+  } else if (caseNeutral(file, path)) {
+    assert.equal(tidy, false, `${label}: no capital anywhere, Tidy must equal git for ${JSON.stringify(path)}`);
+  }
+  return tidy && !git;
+}
+
 describe('ignore/glob vs git : the frozen corpus (verdicts recorded from real git)', () => {
+  let overExclusions = 0;
   for (const row of GIT_CORPUS) {
     it(row.id, () => {
-      assert.deepEqual(
-        tidyVerdicts(row.file, row.paths, row.ignoreCase),
-        row.expected,
-        `${JSON.stringify(row.file)} over ${JSON.stringify(row.paths)} (ignorecase=${row.ignoreCase})`
-      );
+      const tidy = tidyVerdicts(row.file, row.paths);
+      row.paths.forEach((path, index) => {
+        const label = `${JSON.stringify(row.file)} (ignorecase=${row.ignoreCase})`;
+        if (checkAgainstGit(row.file, path, tidy[index], row.expected[index], label)) {
+          overExclusions += 1;
+        }
+      });
     });
   }
 
+  after(() => {
+    console.log(`      frozen corpus: ${overExclusions} (file, path) pairs excluded by Tidy and not by git (safe)`);
+  });
+
   it('covers every finding of the audit', () => {
-    for (const finding of ['G1', 'G2', 'G3', 'G4', 'G5', 'G6']) {
+    for (const finding of ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7']) {
       assert.ok(
         GIT_CORPUS.some((row) => row.id.startsWith(`${finding} `)),
         `the corpus has no case for ${finding}`
@@ -89,6 +125,7 @@ interface Probe {
   readonly finding: string;
   readonly file: string;
   readonly path: string;
+  /** What git answers under `ignoreCase`; Tidy must exclude whenever this is true. */
   readonly expected: boolean;
   readonly ignoreCase?: boolean;
 }
@@ -143,7 +180,12 @@ const PROBES: readonly Probe[] = [
   { finding: 'G6', file: '  #note\n', path: '  #note', expected: true },
   { finding: 'G6', file: '  #note\n', path: 'note', expected: false },
   { finding: 'G6', file: 'foo\t\n', path: 'foo', expected: false },
-  { finding: 'G6', file: 'foo \n', path: 'foo', expected: true }
+  { finding: 'G6', file: 'foo \n', path: 'foo', expected: true },
+  // G7: a lone CR is not a line break (git splits on LF and drops one CR before it).
+  { finding: 'G7', file: '*.js\n!keep.js\rjunk\n', path: 'keep.js', expected: true },
+  { finding: 'G7', file: '*.js\r\n!keep.js\r\n', path: 'keep.js', expected: false },
+  { finding: 'G7', file: 'a\rb\n', path: 'a\rb', expected: true },
+  { finding: 'G7', file: 'a\rb\n', path: 'a', expected: false }
 ];
 
 describe('ignore/glob vs git : the exact inputs of each audit finding', function () {
@@ -174,8 +216,8 @@ describe('ignore/glob vs git : the exact inputs of each audit finding', function
       probe.ignoreCase === true ? ' (ignorecase)' : ''
     }`;
     it(label, function () {
-      const tidy = tidyVerdicts(probe.file, [probe.path], probe.ignoreCase === true)[0];
-      assert.equal(tidy, probe.expected, 'Tidy');
+      const tidy = tidyVerdicts(probe.file, [probe.path])[0];
+      checkAgainstGit(probe.file, probe.path, tidy, probe.expected, 'Tidy');
       const git = gitVerdicts.get(keyOf(probe));
       if (git === undefined) {
         return; // no git on this machine: the recorded answer above is what is checked.
@@ -205,31 +247,40 @@ describe('ignore/glob vs git : differential on generated ignore files', function
   ];
 
   let totalPairs = 0;
-  let totalDisagreements = 0;
+  let totalOver = 0;
 
   for (const [seed, mode, ignoreCase] of runs) {
-    it(`seed ${seed}, ${mode} alphabet, ignorecase=${ignoreCase}: Tidy and git never disagree`, function () {
+    it(`seed ${seed}, ${mode} alphabet, ignorecase=${ignoreCase}: Tidy excludes whatever git excludes`, function () {
       this.timeout(600_000);
       const generated = generateFuzzCases(seed, cases, pathsPerCase, mode);
       const gitAnswers = gitCheckIgnore(generated, ignoreCase);
 
       const less: string[] = [];
-      const more: string[] = [];
+      const neutral: string[] = [];
+      let over = 0;
       let pairs = 0;
       generated.forEach((testCase, index) => {
-        const tidy = tidyVerdicts(testCase.ignoreFile as string, testCase.paths, ignoreCase);
+        const file = testCase.ignoreFile as string;
+        const tidy = tidyVerdicts(file, testCase.paths);
         testCase.paths.forEach((path, pathIndex) => {
           pairs += 1;
-          if (tidy[pathIndex] === gitAnswers[index][pathIndex]) {
+          const git = gitAnswers[index][pathIndex];
+          if (tidy[pathIndex] === git) {
             return;
           }
-          const row = `${JSON.stringify(testCase.ignoreFile)} path=${JSON.stringify(path)}`;
-          (tidy[pathIndex] ? more : less).push(row);
+          const row = `${JSON.stringify(file)} path=${JSON.stringify(path)}`;
+          if (!tidy[pathIndex]) {
+            less.push(row);
+          } else if (caseNeutral(file, path)) {
+            neutral.push(row);
+          } else {
+            over += 1;
+          }
         });
       });
 
       totalPairs += pairs;
-      totalDisagreements += less.length + more.length;
+      totalOver += over;
       assert.equal(
         less.length,
         0,
@@ -237,10 +288,10 @@ describe('ignore/glob vs git : differential on generated ignore files', function
           `user excluded would be formatted), e.g. ${less.slice(0, 4).join(' | ')}`
       );
       assert.equal(
-        more.length,
+        neutral.length,
         0,
-        `Tidy excludes MORE than git on ${more.length} of ${pairs} pairs (safe, but a defect), ` +
-          `e.g. ${more.slice(0, 4).join(' | ')}`
+        `Tidy excludes MORE than git where case cannot matter, on ${neutral.length} of ${pairs} ` +
+          `pairs (a real defect, not a case effect), e.g. ${neutral.slice(0, 4).join(' | ')}`
       );
     });
   }
@@ -249,7 +300,7 @@ describe('ignore/glob vs git : differential on generated ignore files', function
     // One line, so a run records how large the differential was.
     console.log(
       `      git differential: ${totalPairs} (ignore file, path) pairs compared with ${gitVersion()}, ` +
-        `${totalDisagreements} disagreements`
+        `${totalOver} over-exclusions (Tidy excludes, git does not, case involved; safe)`
     );
   });
 });

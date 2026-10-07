@@ -37,9 +37,11 @@
 //     excluded by the last pattern that matches it is final: nothing beneath it
 //     can be re-included), otherwise when the last pattern that matches the path
 //     itself is not a negation (git's rule, `!dir/` included);
-//   - case: on Windows and macOS git ignores case (core.ignorecase) and so does
-//     this matcher, with git's own ASCII-only folding and its quirk that only the
-//     TEXT is folded inside a class (`[D]` never matches under core.ignorecase).
+//   - case: a pattern is compiled case-sensitive or case-insensitive (git's
+//     core.ignorecase) as asked, with git's own ASCII-only folding and its quirk
+//     that only the TEXT is folded inside a class (`[D]` never matches under
+//     core.ignorecase). Nothing depends on the platform; a .soukformatignore line
+//     is compiled both ways and merged on the safe side (see evaluatePatterns).
 //
 // KNOWN DEVIATIONS, all in the SAFE direction (this matcher excludes MORE than
 // git, never less): a globstar followed by an escaped slash (`a/**\/b`) also
@@ -77,16 +79,9 @@ export const MAX_MATCH_STEPS = 2_000_000;
 /** Longest raw pattern echoed back in a report, so a huge line cannot flood it. */
 const MAX_ECHO_LENGTH = 80;
 
-/**
- * Whether the file system of this platform ignores case, which is also git's
- * default for core.ignorecase there (Windows, macOS).
- */
-export const DEFAULT_IGNORE_CASE: boolean =
-  process.platform === 'win32' || process.platform === 'darwin';
-
 /** Options of the compile functions. */
 export interface GlobOptions {
-  /** Match case-insensitively, like git with core.ignorecase. Default: the platform's. */
+  /** Match case-insensitively, like git with core.ignorecase. Default: false (exact case). */
   readonly ignoreCase?: boolean;
 }
 
@@ -458,6 +453,11 @@ export interface IgnorePattern {
    * FAILS CLOSED: it covers every path (see the header).
    */
   readonly unevaluable?: string;
+  /**
+   * The same line compiled case-insensitively, when the pattern is matched in both
+   * case modes (see {@link withFoldedTwin} and evaluatePatterns).
+   */
+  readonly foldedTwin?: IgnorePattern;
 }
 
 /**
@@ -533,7 +533,7 @@ function compilePattern(
   allowNegation: boolean,
   options: GlobOptions | undefined
 ): IgnorePattern | undefined {
-  const ignoreCase = options?.ignoreCase ?? DEFAULT_IGNORE_CASE;
+  const ignoreCase = options?.ignoreCase ?? false;
   let body = line;
   let negated = false;
   if (allowNegation && body.startsWith('!')) {
@@ -583,6 +583,23 @@ function compilePattern(
  */
 export function compileIgnorePattern(line: string, options?: GlobOptions): IgnorePattern | undefined {
   return compilePattern(line, true, options);
+}
+
+/**
+ * `exact` (compiled case-sensitive) carrying `folded`, the same line compiled
+ * case-insensitively: evaluatePatterns then matches it in both modes. A pattern
+ * that cannot be evaluated is the same in both modes and needs no twin. Without a
+ * bracket expression, folding only WIDENS a match (exact implies folded), so the
+ * merge is `folded` for an exclusion and `exact` for a "!": one evaluation, not two.
+ */
+export function withFoldedTwin(exact: IgnorePattern, folded: IgnorePattern): IgnorePattern {
+  if (exact.unevaluable !== undefined) {
+    return exact;
+  }
+  if (!exact.raw.includes('[')) {
+    return exact.negated ? exact : folded;
+  }
+  return Object.create(exact, { foldedTwin: { value: folded } }) as IgnorePattern;
 }
 
 /**
@@ -892,6 +909,13 @@ export interface IgnoreVerdict {
  * is a file, so it defaults to false). The work of the whole lookup is bounded by
  * one MatchBudget: when it runs out the path is excluded (fail closed) and
  * `budgetExceeded` is set.
+ *
+ * CASE, SAFETY: a pattern with a `foldedTwin` is matched in both case modes and the
+ * bitmaps are merged: OR for an exclusion, AND for a "!" re-include. Proof: for either
+ * core.ignorecase value c, the merge is a superset of git's bitmap under c for every
+ * exclusion and a subset for every "!". If git's last match of a prefix is an exclusion
+ * e, ours is e or a later exclusion (a later merged "!" would also match under c, after
+ * e). So what git excludes under EITHER value is excluded here; more may be, never less.
  */
 export function evaluatePatterns(
   patterns: readonly IgnorePattern[],
@@ -917,6 +941,12 @@ export function evaluatePatterns(
         continue; // an unevaluable re-include never re-includes.
       }
       const matched = matchedPrefixes(pattern, bytes, isDirectory, budget);
+      if (pattern.foldedTwin !== undefined) {
+        const folded = matchedPrefixes(pattern.foldedTwin, bytes, isDirectory, budget);
+        for (let j = 1; j <= count; j += 1) {
+          matched[j] = pattern.negated ? matched[j] & folded[j] : matched[j] | folded[j];
+        }
+      }
       for (let j = 1; j <= count; j += 1) {
         if (matched[j] === 1 && decidedBy[j] < 0) {
           decidedBy[j] = index;

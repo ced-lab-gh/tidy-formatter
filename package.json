@@ -2,7 +2,7 @@
   "name": "tidy-formatter",
   "displayName": "Tidy: JS/CSS/HTML Formatter & Beautifier",
   "description": "Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON. A safe, config-respecting replacement for JS-CSS-HTML Formatter that never touches your files unless you ask.",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "publisher": "ced-lab",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -185,7 +185,7 @@
           {
             "id": "tidy.gettingStarted.migration",
             "title": "Migrating from JS-CSS-HTML Formatter",
-            "description": "Run [Tidy: Migrate from JS-CSS-HTML Formatter](command:tidy.runMigration) to import your legacy .jsbeautifyrc options and switch over safely.",
+            "description": "Run [Tidy: Migrate from JS-CSS-HTML Formatter](command:tidy.runMigration) to import your JS-CSS-HTML Formatter settings (its .vscode/formatter.json) and switch over safely.",
             "media": {
               "markdown": "media/walkthrough/migration.md"
             },

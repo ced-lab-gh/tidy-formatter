@@ -80,8 +80,10 @@ describe('ignore/soukformatignore : parseIgnoreFile (source lines)', () => {
     assert.deepEqual(parsed.lines, [3, 5, 6]);
   });
 
-  it('counts CRLF and lone CR line ends as one line each', () => {
-    assert.deepEqual(parseIgnoreFile('a\r\nb\rc\nd').lines, [1, 2, 3, 4]);
+  it('counts CRLF as one line end; a lone CR is NOT a line end (git splits on LF only)', () => {
+    const parsed = parseIgnoreFile('a\r\nb\rc\nd');
+    assert.deepEqual(parsed.lines, [1, 2, 3]);
+    assert.deepEqual(parsed.patterns.map((pattern) => pattern.raw), ['a', 'b\rc', 'd']);
   });
 
   it('keeps parseIgnorePatterns exactly the patterns of parseIgnoreFile', () => {
