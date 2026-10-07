@@ -13,13 +13,14 @@
 // (with a trace warning) rather than falling through to a farther data file
 // Prettier itself would not use: honouring the wrong config beats none, never.
 //
-// AST-SAFE KEYS ONLY: exactly ten Prettier keys are honoured (printWidth,
+// AST-SAFE KEYS ONLY: exactly twelve Prettier keys are honoured (printWidth,
 // tabWidth, useTabs, semi, singleQuote, jsxSingleQuote, trailingComma,
-// bracketSpacing, bracketSameLine, arrowParens). Every one is stylistic and
-// AST-invariant under the equivalence guard (same proof as the tidy.prettier.*
-// catalogue entries). Any other key (parser, plugins, overrides, endOfLine...)
-// is ignored with a warning, so a .prettierrc can never change the parser,
-// load code, or alter anything the guard does not already accept.
+// bracketSpacing, bracketSameLine, arrowParens, singleAttributePerLine,
+// objectWrap). Every one is stylistic and AST-invariant under the equivalence
+// guard (same proof as the tidy.prettier.* catalogue entries); the last two only
+// decide where line breaks fall. Any other key (parser, plugins, overrides,
+// endOfLine...) is ignored with a warning, so a .prettierrc can never change the
+// parser, load code, or alter anything the guard does not already accept.
 //
 // BOUNDED WALK: the upward search stops at the workspace folder root (stopDir,
 // inclusive), so a config planted above the trusted workspace can never govern.
@@ -198,7 +199,8 @@ const RC_STYLISTIC_BOOLEAN_KEYS: ReadonlySet<string> = new Set<string>([
   'singleQuote',
   'jsxSingleQuote',
   'bracketSpacing',
-  'bracketSameLine'
+  'bracketSameLine',
+  'singleAttributePerLine'
 ]);
 
 /**
@@ -207,7 +209,8 @@ const RC_STYLISTIC_BOOLEAN_KEYS: ReadonlySet<string> = new Set<string>([
  */
 const RC_STYLISTIC_STRING_ENUMS: Readonly<Record<string, readonly string[]>> = {
   trailingComma: ['none', 'es5', 'all'],
-  arrowParens: ['always', 'avoid']
+  arrowParens: ['always', 'avoid'],
+  objectWrap: ['preserve', 'collapse']
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -242,7 +245,7 @@ function describeValue(value: unknown): string {
  * Emission vocabulary (arbitrated by the pure resolver like any other layer):
  *   - tabWidth -> typed 'tabSize'       (files Prettier actually prints)
  *   - useTabs  -> typed 'insertSpaces'  (inverted; same condition)
- *   - printWidth and the seven stylistic keys -> flat 'prettier.<key>' entries,
+ *   - printWidth and the nine stylistic keys -> flat 'prettier.<key>' entries,
  *     later nested into engineOptions.prettier by the resolver.
  *
  * The indentation keys are gated on `printEngine`, the engine that REALLY

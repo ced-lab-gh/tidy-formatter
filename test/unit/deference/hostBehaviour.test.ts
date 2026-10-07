@@ -60,6 +60,8 @@ const ROOT_PACKAGE_JSON = JSON.stringify({ name: 'demo', prettier: { semi: false
 let rec: Recorder;
 let scenario: Scenario;
 let activeEditor: unknown;
+/** The workspace folder the stub reports for the active document (undefined: none). */
+let documentFolder: string | undefined;
 
 function freshRecorder(): Recorder {
   return {
@@ -192,7 +194,8 @@ const namespace: Record<string, unknown> = {
       return [{ uri: makeUri(path.join(path.sep, 'ws')), name: 'ws', index: 0 }];
     },
     getConfiguration: (section?: string) => makeConfiguration(section),
-    getWorkspaceFolder: () => undefined,
+    getWorkspaceFolder: () =>
+      documentFolder === undefined ? undefined : { uri: makeUri(documentFolder), name: 'ws', index: 0 },
     asRelativePath: (value: unknown) => String(value),
     onDidChangeConfiguration: noopEvent,
     onDidGrantWorkspaceTrust: noopEvent,
@@ -316,6 +319,7 @@ describe('deference + Show Effective Configuration in a recording host (LOW-18)'
     scenario = { setting: undefined, trusted: true, alreadyPrompted: false, ...next };
     rec = freshRecorder();
     activeEditor = undefined;
+    documentFolder = undefined;
     const context = makeContext();
     extension.activate(context);
     await settle();
@@ -406,10 +410,18 @@ describe('deference + Show Effective Configuration in a recording host (LOW-18)'
       rmSync(dir, { recursive: true, force: true });
     });
 
-    /** Open a real CSS file on disk as the active editor and return the report. */
-    async function reportFor(file: string, next: Partial<Scenario>): Promise<string> {
+    /**
+     * Open a real CSS file on disk as the active editor and return the report.
+     * `folder` is the workspace folder the host reports for it (the temp dir by default).
+     */
+    async function reportFor(
+      file: string,
+      next: Partial<Scenario>,
+      folder: string = dir
+    ): Promise<string> {
       scenario = { setting: undefined, trusted: true, alreadyPrompted: false, ...next };
       rec = freshRecorder();
+      documentFolder = folder;
       const text = '.a{color:red}\n';
       activeEditor = {
         options: { tabSize: 2, insertSpaces: true },
@@ -455,6 +467,17 @@ describe('deference + Show Effective Configuration in a recording host (LOW-18)'
         report,
         /\.soukformatignore problem : the file is too large to read \(1080000 bytes; the limit is 1048576\); every file under this ignore file's folder is excluded until it is shortened or removed\./
       );
+    });
+
+    it('does not report an ignore file that lies ABOVE the workspace folder (the walk is bounded)', async () => {
+      const workspace = path.join(dir, 'ws');
+      mkdirSync(workspace);
+      writeFileSync(path.join(dir, '.soukformatignore'), '*.css\n');
+      const file = path.join(workspace, 'a.css');
+      writeFileSync(file, '.a{color:red}\n');
+      const report = await reportFor(file, { setting: 'notify' }, workspace);
+      assert.match(report, /\.soukformatignore : \(none found\)/);
+      assert.match(report, /\.soukformatignore excludes this file : no/);
     });
 
     it('prints no problem line for an ordinary exclusion rule', async () => {

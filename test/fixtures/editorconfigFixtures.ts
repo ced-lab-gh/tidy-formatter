@@ -133,10 +133,34 @@ export const editorConfigFixtures: EditorConfigFixture[] = [
     }
   },
   {
-    id: 'EC-MAX-LINE-LENGTH-OFF-DROPPED',
-    desc: 'max_line_length=off is not forwarded (no bad value reaches the engine)',
-    ref: 'CFG-03 / fail-soft',
+    id: 'EC-MAX-LINE-LENGTH-OFF-UNLIMITED',
+    desc: 'max_line_length=off means no limit: wrap_line_length 0, the value that disables wrapping',
+    ref: 'CFG-03 max_line_length / v0.5.0',
     props: { max_line_length: 'off' } as unknown as Props,
+    expect: {
+      engineOptions: { wrap_line_length: 0 },
+      sources: { wrap_line_length: '.editorconfig' }
+    }
+  },
+  {
+    id: 'EC-MAX-LINE-LENGTH-GARBAGE-DROPPED',
+    desc: 'a max_line_length that is neither a positive integer nor off is not forwarded',
+    ref: 'CFG-03 / fail-soft',
+    props: { max_line_length: 'wide' } as unknown as Props,
+    expect: { absentEngineOptions: ['wrap_line_length'] }
+  },
+  {
+    id: 'EC-MAX-LINE-LENGTH-UNSET-DROPPED',
+    desc: 'max_line_length=unset falls back to the lower layer (nothing forwarded)',
+    ref: 'CFG-03 unset',
+    props: { max_line_length: 'unset' } as unknown as Props,
+    expect: { absentEngineOptions: ['wrap_line_length'] }
+  },
+  {
+    id: 'EC-MAX-LINE-LENGTH-ZERO-DROPPED',
+    desc: 'max_line_length=0 is not an EditorConfig spelling of "no limit" and is not forwarded',
+    ref: 'CFG-03 / fail-soft',
+    props: { max_line_length: 0 } as unknown as Props,
     expect: { absentEngineOptions: ['wrap_line_length'] }
   },
   {

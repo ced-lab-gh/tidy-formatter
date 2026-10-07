@@ -35,8 +35,11 @@
 //
 // COST BOUND (LOW-07): the file is size-capped (MAX_SOUKFORMATRC_BYTES) using the
 // stat the upward walk already made, so the cap adds no syscall, and the parsed
-// document is memoised by (path, mtime, size) so an unchanged file is neither
-// re-read nor re-parsed on every format. The per-format cost is then only the
+// document is memoised by the file's full identity (size, mtime and ctime in
+// nanoseconds, inode, device) so an unchanged file is neither re-read nor
+// re-parsed on every format, and never served stale: where freshness cannot be
+// proved (coarse timestamps, no inode, a file touched a moment ago) it is simply
+// re-read. The per-format cost is then only the
 // walk's stat per directory level: it cannot be cached without missing a nearer
 // .soukformatrc that appeared since. `overrides[].files` globs go through the
 // shared LINEAR matcher of ../ignore/glob, never a RegExp.
@@ -54,7 +57,14 @@ import { comparableDir, isWithinDir } from './prettierrc';
 // The ONE glob matcher, shared with .soukformatignore: linear, gitignore
 // semantics (a slash-less pattern matches at any depth), fail-closed on a
 // pattern it cannot evaluate. Pure and dependency-free, so no host coupling.
-import { compileFilesGlob, describeUnevaluable, patternMatches } from '../ignore/glob';
+import {
+  MatchBudget,
+  compileFilesGlob,
+  describeBudgetExceeded,
+  describeUnevaluable,
+  patternMatches,
+  preparePath
+} from '../ignore/glob';
 import {
   OPTION_CATALOG,
   appliesToLanguage,
@@ -85,10 +95,10 @@ const MAX_WALK_DEPTH = 64;
 export const MAX_SOUKFORMATRC_BYTES = 1_048_576;
 
 /**
- * A file modified less than this long before it was read is NOT memoised. Two
- * writes inside one timestamp tick can leave (mtime, size) unchanged, so a
- * fresh file could otherwise be served stale; waiting until it has settled (the
- * same idea as git's "racily clean" entries) makes the memo exact.
+ * A file modified (mtime or ctime) less than this long before it was read is NOT
+ * memoised. Two writes inside one timestamp tick can leave the identity
+ * unchanged, so a fresh file could otherwise be served stale; waiting until it has
+ * settled (the same idea as git's "racily clean" entries) closes that window.
  */
 const RACY_WINDOW_MS = 2000;
 
@@ -223,12 +233,17 @@ function mapOverrides(
   }
 
   const layers: ConfigLayer[] = [];
-  overrides.forEach((entry, index) => {
+  // ONE work budget for the whole lookup: many overrides times long globs times a
+  // deep path must not add up to a freeze, however each one is bounded alone.
+  const budget = new MatchBudget();
+  const path = preparePath(relativePosixPath);
+  for (let index = 0; index < overrides.length; index += 1) {
+    const entry: unknown = overrides[index];
     if (entry === null || typeof entry !== 'object') {
       warnings.push({
         message: `${SOURCE_SOUKFORMATRC}: overrides[${index}] is not an object; ignored.`
       });
-      return;
+      continue;
     }
     const record = entry as Record<string, unknown>;
     const files = record.files;
@@ -237,20 +252,20 @@ function mapOverrides(
       warnings.push({
         message: `${SOURCE_SOUKFORMATRC}: overrides[${index}].files must be a non-empty glob; ignored.`
       });
-      return;
+      continue;
     }
     if (options === null || typeof options !== 'object' || Array.isArray(options)) {
       warnings.push({
         message: `${SOURCE_SOUKFORMATRC}: overrides[${index}].options must be an object; ignored.`
       });
-      return;
+      continue;
     }
     const glob = compileFilesGlob(files);
     if (glob === undefined) {
       warnings.push({
         message: `${SOURCE_SOUKFORMATRC}: overrides[${index}].files must be a non-empty glob; ignored.`
       });
-      return;
+      continue;
     }
     const problem = describeUnevaluable(glob, 'the override is skipped');
     if (problem !== undefined) {
@@ -260,17 +275,33 @@ function mapOverrides(
       warnings.push({
         message: `${SOURCE_SOUKFORMATRC}: overrides[${index}].files ${problem}`
       });
-      return;
+      continue;
     }
-    if (!patternMatches(glob, relativePosixPath)) {
-      return;
+    const covered = patternMatches(glob, path, false, budget);
+    if (budget.exhausted) {
+      // Out of work budget: this and every later override is skipped, and the
+      // user is told (an override cannot exclude a file, so skipping is the safe
+      // fallback: the base options apply).
+      const skipped = overrides.length - index;
+      warnings.push({
+        message:
+          `${SOURCE_SOUKFORMATRC}: overrides[${index}].files: ` +
+          describeBudgetExceeded(
+            overrides.length,
+            `overrides[${index}] and the ${skipped - 1} after it are skipped`
+          )
+      });
+      break;
+    }
+    if (!covered) {
+      continue;
     }
     const where = `${SOURCE_SOUKFORMATRC} overrides[${index}] (${files})`;
     const values = mapSection(options as Record<string, unknown>, lang, warnings, where);
     if (Object.keys(values).length > 0) {
       layers.push({ source: where, values });
     }
-  });
+  }
   return layers;
 }
 
@@ -283,8 +314,14 @@ type ParsedRoot =
   | { readonly root: Readonly<Record<string, unknown>> }
   | { readonly failure: string };
 
+/** The UTF-8 byte order mark, as it reads back from a file decoded as UTF-8. */
+const BYTE_ORDER_MARK = '\uFEFF';
+
 /** Parse JSONC text into its root object, or the reason the file is ignored. */
-function parseRoot(text: string, sourcePath: string): ParsedRoot {
+function parseRoot(rawText: string, sourcePath: string): ParsedRoot {
+  // Windows editors routinely save UTF-8 with a byte order mark, which JSONC
+  // reports as an invalid symbol and would discard the whole file.
+  const text = rawText.startsWith(BYTE_ORDER_MARK) ? rawText.slice(BYTE_ORDER_MARK.length) : rawText;
   const errors: ParseError[] = [];
   const parsed = parseJsonc(text, errors, {
     allowTrailingComma: true,
@@ -362,22 +399,44 @@ export function parseSoukformatrc(
   return layersFromRoot(parsed.root, lang, relativePosixPath);
 }
 
-/** A .soukformatrc found by the walk, with the stat that found it. */
-interface LocatedConfig {
-  readonly path: string;
+/**
+ * What identifies the CONTENT GENERATION of a config file, taken from one stat
+ * in nanoseconds (bigint): a rewrite that keeps the size and even the mtime
+ * (cp -p, rsync -t, unzip, touch -r, a copy on Windows) still changes the ctime,
+ * and replacing the file changes its inode, so none of them can be mistaken for
+ * the file that was memoised.
+ */
+interface FileIdentity {
   readonly size: number;
-  readonly mtimeMs: number;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+  readonly ino: bigint;
+  readonly dev: bigint;
+}
+
+/** A .soukformatrc found by the walk, with the stat that found it. */
+interface LocatedConfig extends FileIdentity {
+  readonly path: string;
 }
 
 /**
  * Stat a candidate ONCE: it answers "is it a regular file" and, for the file
- * that wins, hands the size and mtime on to the cap and the memo so neither
- * needs a second syscall. Stat errors are fail-soft (no such file).
+ * that wins, hands its identity on to the cap and the memo so neither needs a
+ * second syscall. Stat errors are fail-soft (no such file).
  */
-function statConfigFile(candidate: string): Omit<LocatedConfig, 'path'> | undefined {
+function statConfigFile(candidate: string): FileIdentity | undefined {
   try {
-    const stats = statSync(candidate, { throwIfNoEntry: false });
-    return stats?.isFile() === true ? { size: stats.size, mtimeMs: stats.mtimeMs } : undefined;
+    const stats = statSync(candidate, { throwIfNoEntry: false, bigint: true });
+    if (stats?.isFile() !== true) {
+      return undefined;
+    }
+    return {
+      size: Number(stats.size),
+      mtimeNs: stats.mtimeNs,
+      ctimeNs: stats.ctimeNs,
+      ino: stats.ino,
+      dev: stats.dev
+    };
   } catch {
     return undefined;
   }
@@ -448,11 +507,53 @@ export function findSoukformatrc(
   return locateSoukformatrc(startFsPath, stopDir)?.path;
 }
 
-/** A parsed config kept in memory, valid while (mtime, size) are unchanged. */
+/** A parsed config kept in memory, valid while its identity is unchanged. */
 interface CachedConfig {
-  readonly size: number;
-  readonly mtimeMs: number;
+  readonly identity: FileIdentity;
   readonly parsed: ParsedRoot;
+}
+
+function sameIdentity(a: FileIdentity, b: FileIdentity): boolean {
+  return (
+    a.size === b.size &&
+    a.mtimeNs === b.mtimeNs &&
+    a.ctimeNs === b.ctimeNs &&
+    a.ino === b.ino &&
+    a.dev === b.dev
+  );
+}
+
+const NANOSECONDS_PER_SECOND = 1_000_000_000n;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
+
+/**
+ * Whether this platform and this file let us PROVE that an unchanged identity
+ * means unchanged content. If not, the answer is no and the file is simply read
+ * again: a stale config is never served.
+ *
+ *   - the file system must identify files (a non-zero inode);
+ *   - its timestamps must be finer than a second: a whole-second mtime or ctime
+ *     means a coarse clock (FAT, HFS+, SMB1, NFS), where two writes of the same
+ *     size inside one second are indistinguishable;
+ *   - the file must have SETTLED: neither timestamp is within RACY_WINDOW_MS of
+ *     the local clock (or in its future), so a rewrite inside the same timestamp
+ *     tick cannot hide behind the identity already stored.
+ */
+function canProveFreshness(identity: FileIdentity, nowMs: number): boolean {
+  if (identity.ino === 0n) {
+    return false;
+  }
+  if (
+    identity.mtimeNs % NANOSECONDS_PER_SECOND === 0n ||
+    identity.ctimeNs % NANOSECONDS_PER_SECOND === 0n
+  ) {
+    return false;
+  }
+  const newestMs = Number(
+    (identity.mtimeNs > identity.ctimeNs ? identity.mtimeNs : identity.ctimeNs) /
+      NANOSECONDS_PER_MILLISECOND
+  );
+  return nowMs - newestMs > RACY_WINDOW_MS;
 }
 
 /** Insertion-ordered, so the oldest entry is the first key (evicted first). */
@@ -463,18 +564,26 @@ export function clearSoukformatrcCache(): void {
   configCache.clear();
 }
 
+/** The clock the freshness window reads. */
+let clock: () => number = Date.now;
+
 /**
- * The parsed root of a located config: from the memo when the file is unchanged
- * (same mtime and size), otherwise read and parsed once. Returns undefined when
- * the file cannot be read. Only a SETTLED file is memoised (see RACY_WINDOW_MS).
+ * Replace the clock the freshness window reads (a test moves it forward to make a
+ * file "settled" without waiting); call with no argument to restore the real one.
+ */
+export function setSoukformatrcClock(now?: () => number): void {
+  clock = now ?? Date.now;
+}
+
+/**
+ * The parsed root of a located config: from the memo when its identity is exactly
+ * the one memoised AND freshness can be proved (see canProveFreshness), otherwise
+ * read and parsed once. Returns undefined when the file cannot be read. A config
+ * whose freshness cannot be proved is never memoised, so it is read every time.
  */
 function loadRoot(located: LocatedConfig): ParsedRoot | undefined {
   const cached = configCache.get(located.path);
-  if (
-    cached !== undefined &&
-    cached.size === located.size &&
-    cached.mtimeMs === located.mtimeMs
-  ) {
+  if (cached !== undefined && sameIdentity(cached.identity, located)) {
     return cached.parsed;
   }
 
@@ -488,14 +597,15 @@ function loadRoot(located: LocatedConfig): ParsedRoot | undefined {
 
   const parsed = parseRoot(text, located.path);
   configCache.delete(located.path);
-  if (Date.now() - located.mtimeMs > RACY_WINDOW_MS) {
+  if (canProveFreshness(located, clock())) {
     if (configCache.size >= MAX_CACHED_CONFIGS) {
       const oldest = configCache.keys().next();
       if (oldest.done !== true) {
         configCache.delete(oldest.value);
       }
     }
-    configCache.set(located.path, { size: located.size, mtimeMs: located.mtimeMs, parsed });
+    const { size, mtimeNs, ctimeNs, ino, dev } = located;
+    configCache.set(located.path, { identity: { size, mtimeNs, ctimeNs, ino, dev }, parsed });
   }
   return parsed;
 }

@@ -12,12 +12,15 @@
 //   - the catalogue's validation helpers reject any out-of-type / out-of-enum
 //     value so an invalid setting is never propagated to an engine.
 //
+// Import-light on purpose: the only import is the tag-list validator, itself pure.
+//
 // Indentation (tabSize / insertSpaces) is NOT redeclared here as such: it flows
 // through the typed fields of ResolvedOptions (see resolver.ts), and the only
 // indentation entry, tidy.indent, is an ALIAS of the typed tabSize field (its
 // engineKey `indent_size` is resolved into tabSize), never a second copy of it.
 // vscodeConfig.ts places an explicitly set tidy.indent ABOVE the live
 // FormattingOptions layer so it can actually take effect (defect C-12).
+import { isTagListKind, sanitizeTagList } from './tagList';
 
 /**
  * Which part of the format pipeline an option drives.
@@ -33,8 +36,14 @@ export type OptionEngine = 'jsbeautify' | 'prettier' | 'core';
 /**
  * The value type of an option, used both for VS Code's `type` field and for
  * runtime validation before a value reaches an engine.
+ *  - 'string-list' is a list of strings (VS Code `type: "array"` of strings). It
+ *    carries the two HTML tag-name lists, whose entries are validated one by one
+ *    in ./tagList (an invalid entry is dropped and reported, not fatal).
  */
-export type OptionType = 'boolean' | 'integer' | 'string';
+export type OptionType = 'boolean' | 'integer' | 'string' | 'string-list';
+
+/** Every shape a catalogue value can take. */
+export type OptionValue = boolean | number | string | readonly string[];
 
 /**
  * VS Code configuration scope. `language-overridable` is what allows a
@@ -78,7 +87,7 @@ export interface OptionEntry {
   /** Value type (drives VS Code `type` and runtime validation). */
   readonly type: OptionType;
   /** Default value. Mirrors package.json `default`. */
-  readonly default: boolean | number | string;
+  readonly default: OptionValue;
   /** Allowed values for a string enum; absent for free strings/numbers/bools. */
   readonly enum?: readonly string[];
   /** Which languages this option affects: 'all' or an explicit list. */
@@ -106,6 +115,10 @@ export const PRETTIER_LANGS: readonly CatalogLang[] = [
   'javascriptreact',
   'javascript'
 ];
+// The languages that can hold JSX: TSX and JSX, plus a plain .js that turns out to
+// contain JSX (it is re-routed to Prettier). Plain 'typescript' is deliberately
+// absent: a .ts file cannot contain JSX, so a JSX-only option does nothing there.
+const JSX_LANGS: readonly CatalogLang[] = ['typescriptreact', 'javascriptreact', 'javascript'];
 // The blank-line and empty-line options below are js-beautify options with no
 // Prettier and no jsonc-parser equivalent. Declaring them for 'all' made them
 // silently inert on json, jsonc, typescript, typescriptreact and javascriptreact
@@ -310,6 +323,28 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     description:
       'Where line-breaking operators are placed relative to the newline (js-beautify operator_position).'
   },
+  {
+    settingKey: 'tidy.space_before_conditional',
+    engine: 'jsbeautify',
+    engineKey: 'space_before_conditional',
+    type: 'boolean',
+    default: true,
+    languages: JSBEAUTIFY_JS_LANGS,
+    scope: 'language-overridable',
+    description:
+      'Put a space between if, for, while or switch and its opening parenthesis: if (a) when on, if(a) when off (js-beautify space_before_conditional). It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier always prints if (a).'
+  },
+  {
+    settingKey: 'tidy.jslint_happy',
+    engine: 'jsbeautify',
+    engineKey: 'jslint_happy',
+    type: 'boolean',
+    default: false,
+    languages: JSBEAUTIFY_JS_LANGS,
+    scope: 'language-overridable',
+    description:
+      'JSLint-style output for JavaScript (js-beautify jslint_happy): a space after the function keyword of an anonymous function, and case labels level with their switch instead of indented under it. It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier prints those with its own style.'
+  },
 
   // --- js-beautify: CSS-specific -------------------------------------------
   {
@@ -380,6 +415,30 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     scope: 'language-overridable',
     description:
       'Indent size for wrapped HTML attributes (js-beautify wrap_attributes_indent_size).'
+  },
+  // The two tag lists are ADDITIVE ONLY: what a user writes is added to the
+  // printer's built-in list, which is always kept (see ./tagList for why).
+  {
+    settingKey: 'tidy.content_unformatted',
+    engine: 'jsbeautify',
+    engineKey: 'content_unformatted',
+    type: 'string-list',
+    default: [],
+    languages: ['html'],
+    scope: 'language-overridable',
+    description:
+      'Extra HTML tag names whose content is left exactly as written, for example ["code", "my-snippet"] (js-beautify content_unformatted). They are added to the tags that are always preserved (pre, textarea, xmp, listing, plaintext), which stay whatever you write. Tag names only: letters, digits, hyphens and underscores. Invalid entries are ignored and listed in Show Effective Configuration.'
+  },
+  {
+    settingKey: 'tidy.void_elements',
+    engine: 'jsbeautify',
+    engineKey: 'void_elements',
+    type: 'string-list',
+    default: [],
+    languages: ['html'],
+    scope: 'language-overridable',
+    description:
+      'Extra HTML tag names printed as void elements, like br and img: tags that never have a closing tag, for example ["my-icon"] (js-beautify void_elements). They are added to the standard HTML void elements, which always stay. Tag names only: letters, digits, hyphens and underscores; elements whose text must stay as written (pre, textarea, xmp, listing, plaintext, script, style) are refused. Invalid entries are ignored and listed in Show Effective Configuration.'
   },
 
   // --- Prettier: AST-invariant stylistic options (ts/tsx/jsx) --------------
@@ -478,6 +537,29 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     scope: 'language-overridable',
     description:
       'Include parentheses around a sole arrow-function parameter (Prettier arrowParens). Stylistic only.'
+  },
+  {
+    settingKey: 'tidy.prettier.singleAttributePerLine',
+    engine: 'prettier',
+    engineKey: 'singleAttributePerLine',
+    type: 'boolean',
+    default: false,
+    languages: JSX_LANGS,
+    scope: 'language-overridable',
+    description:
+      'Put every JSX attribute on its own line as soon as an element has more than one (Prettier singleAttributePerLine). Applies to TSX, JSX and a JavaScript file that contains JSX; it has no effect on plain TypeScript, which has no JSX, nor on JavaScript that js-beautify prints. Stylistic only; does not change the AST.'
+  },
+  {
+    settingKey: 'tidy.prettier.objectWrap',
+    engine: 'prettier',
+    engineKey: 'objectWrap',
+    type: 'string',
+    default: 'preserve',
+    enum: ['preserve', 'collapse'],
+    languages: PRETTIER_LANGS,
+    scope: 'language-overridable',
+    description:
+      "How an object literal written with a line break after its opening brace is printed: 'preserve' keeps it expanded, 'collapse' joins it onto one line when it fits (Prettier objectWrap). Applies to TypeScript, TSX, JSX and a JavaScript file that contains JSX; it has no effect on JavaScript that js-beautify prints. Stylistic only; does not change the AST."
   }
   // NOTE: Prettier's `quoteProps` is intentionally NOT exposed. Changing an
   // object key from `a` to `"a"` switches its babel AST node from Identifier to
@@ -518,11 +600,21 @@ export function appliesToLanguage(entry: OptionEntry, lang: CatalogLang): boolea
  * PURE: no side effects, no I/O. Numbers must be finite; integers must be whole.
  * Strings constrained by `enum` must be one of the allowed values.
  */
-export function validateValue(entry: OptionEntry, rawValue: unknown): boolean | number | string | undefined {
+export function validateValue(entry: OptionEntry, rawValue: unknown): OptionValue | undefined {
   if (rawValue === undefined || rawValue === null) {
     return undefined;
   }
   switch (entry.type) {
+    case 'string-list': {
+      // Shape only: a list whose items are all strings. WHICH strings are usable
+      // tag names is decided entry by entry where the list is consumed (the
+      // engine drops the bad ones) and reported (describeValueProblems), so one
+      // typo never costs the user the rest of the list.
+      if (!Array.isArray(rawValue) || !rawValue.every((item) => typeof item === 'string')) {
+        return undefined;
+      }
+      return [...(rawValue as readonly string[])];
+    }
     case 'boolean':
       return typeof rawValue === 'boolean' ? rawValue : undefined;
     case 'integer': {
@@ -546,4 +638,20 @@ export function validateValue(entry: OptionEntry, rawValue: unknown): boolean | 
       throw new Error(`optionCatalog: unhandled option type '${String(exhaustive)}'`);
     }
   }
+}
+
+/**
+ * The problems with a value that passed validateValue, one sentence each, for the
+ * report "Show Effective Configuration" prints. Empty for every option whose value
+ * is fully checked by validateValue (booleans, integers, enums): only the two tag
+ * lists can hold a value that is acceptable as a list yet carries entries that are
+ * ignored (a tag name that is not one, an element that cannot be void, a list
+ * longer than the cap). PURE, and the same function the engine uses to decide
+ * which entries to keep, so what is reported is exactly what is dropped.
+ */
+export function describeValueProblems(entry: OptionEntry, value: unknown): readonly string[] {
+  if (entry.type !== 'string-list' || !isTagListKind(entry.engineKey)) {
+    return [];
+  }
+  return sanitizeTagList(entry.engineKey, value).problems;
 }

@@ -18,6 +18,11 @@ import type {
   FormatStatus,
   LastFormatRecord
 } from '../../../src/diagnostics/lastFormat';
+import {
+  MAX_SOUKFORMATIGNORE_BYTES,
+  evaluateIgnore,
+  ignoreRecordDetail
+} from '../../../src/ignore/soukformatignore';
 
 const ACTIVE_URI = 'file:///w/app.css';
 
@@ -276,6 +281,51 @@ describe('commands/explainLastFormat : actions mapping (ADD-06)', () => {
   it('ADVERSARIAL: an empty stored ignore path offers no action', () => {
     const a = actionsOf(buildExplanation(rec('ignored-file', { detail: '' }), ctx()));
     assert.equal(a.length, 0);
+  });
+
+  describe('a fail-closed exclusion records a REASON, not a path', () => {
+    // The real detail, built the way the provider records it: a line that cannot
+    // be evaluated, and a file over the size cap.
+    const lineReason = ignoreRecordDetail({
+      path: '/w/.soukformatignore',
+      ...evaluateIgnore('*.min.css\nvendor\\\n', 'app.css')
+    });
+    const sizeReason = ignoreRecordDetail({
+      path: '/w/.soukformatignore',
+      ignored: true,
+      failClosed: {
+        explanation: 'unused here',
+        detail: `.soukformatignore is too large to read (${MAX_SOUKFORMATIGNORE_BYTES + 1} bytes; the limit is ${MAX_SOUKFORMATIGNORE_BYTES}); every file it governs is excluded`
+      }
+    });
+
+    it('the test really feeds a reason, not a path', () => {
+      assert.ok(lineReason?.startsWith('.soukformatignore line 2 cannot be evaluated'), lineReason);
+      assert.ok(sizeReason?.startsWith('.soukformatignore is too large to read'), sizeReason);
+    });
+
+    it('offers NO Open .soukformatignore action for an unevaluable line (the reason is not a file)', () => {
+      const e = buildExplanation(rec('ignored-file', { detail: lineReason }), ctx());
+      assert.equal(actionsOf(e).length, 0, 'the detail is a sentence: vscode.open would fail on it');
+    });
+
+    it('offers NO Open .soukformatignore action for an oversized ignore file', () => {
+      const e = buildExplanation(rec('ignored-file', { detail: sizeReason }), ctx());
+      assert.equal(actionsOf(e).length, 0);
+    });
+
+    it('still says why, in the lines, and keeps the advice on how to get out', () => {
+      const e = buildExplanation(rec('ignored-file', { detail: lineReason }), ctx());
+      assert.ok(e.lines.some((l) => l.includes('line 2 cannot be evaluated')));
+      assert.ok(e.lines.some((l) => l.includes('tidy.respectSoukformatignore')));
+    });
+
+    it('does not regress the normal case: a real path still gets its Open action', () => {
+      const p = '/w/project/.soukformatignore';
+      const a = actionsOf(buildExplanation(rec('ignored-file', { detail: p }), ctx()));
+      assert.equal(a.length, 1);
+      assert.deepEqual(a[0].args, [p]);
+    });
   });
 
   it('no record + another default formatter offers Use Tidy as my Formatter', () => {

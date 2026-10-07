@@ -207,3 +207,81 @@ describe('engine/prettier : invalid stylistic values are ignored (not propagated
     assert.ok(out.includes('const a = 1;'));
   });
 });
+
+// LOW-03 and C-15 at the engine seam. The LAYER-ORDER half of the width fix lives
+// in the resolver (test/unit/config/resolverWidth.test.ts); this block locks what
+// the adapter does with the ONE width it is handed.
+describe('engine/prettier : the print width (LOW-03, C-15)', () => {
+  // 96 characters on one line: over Prettier's default of 80, under 120.
+  const LONG =
+    'const aVeryLongVariableName = someFunctionCall(argumentOne, argumentTwo, argumentThree, argFour);\n';
+  const lines = (text: string): number => text.split('\n').filter((l) => l !== '').length;
+
+  async function withEngineOptions(
+    engineOptions: Record<string, unknown>,
+    lang: LangId = 'typescript',
+    code: string = LONG
+  ): Promise<string> {
+    return engine.format({ languageId: lang, code, options: resolved({ engineOptions }) });
+  }
+
+  it('an UNSET width keeps Prettier default of 80 (no opinion is not a choice)', async () => {
+    assert.ok(lines(await withEngineOptions({})) > 1, 'a 96-character line wraps at 80');
+  });
+
+  it('an explicit wrap_line_length of 0 means "do not wrap", as the setting says', async () => {
+    const out = await withEngineOptions({ wrap_line_length: 0 });
+    assert.equal(lines(out), 1, 'the line stays whole: 0 disables wrapping');
+    assertGuardEquivalent('typescript', LONG, out, 'wrap_line_length=0');
+  });
+
+  it('the same holds for TSX and JSX', async () => {
+    const tsx = `${LONG}export const A = () => <div>{aVeryLongVariableName}</div>;\n`;
+    for (const lang of ['typescriptreact', 'javascriptreact'] as const) {
+      const out = await withEngineOptions({ wrap_line_length: 0 }, lang, tsx);
+      assert.ok(
+        out.split('\n').every((l) => l.length <= 100),
+        `${lang}: no line was cut`
+      );
+      assert.ok(out.includes('someFunctionCall(argumentOne, argumentTwo, argumentThree, argFour)'));
+    }
+  });
+
+  it('a positive wrap_line_length still maps to printWidth', async () => {
+    assert.equal(lines(await withEngineOptions({ wrap_line_length: 120 })), 1);
+    assert.ok(lines(await withEngineOptions({ wrap_line_length: 40 })) > 1);
+  });
+
+  it('the unified width the resolver produces is applied verbatim, unbounded included', async () => {
+    const unbounded = await withEngineOptions({ prettier: { printWidth: Number.POSITIVE_INFINITY } });
+    assert.equal(lines(unbounded), 1);
+    assert.equal(lines(await withEngineOptions({ prettier: { printWidth: 120 } })), 1);
+    assert.ok(lines(await withEngineOptions({ prettier: { printWidth: 40 } })) > 1);
+  });
+
+  it('an option bag that skipped the resolver still lets prettier.printWidth beat the shared key', async () => {
+    // Direct callers (this suite, the CSS fallback) hand over one flat bag with
+    // both keys and no layer information; the Prettier key is the more specific.
+    const out = await withEngineOptions({ wrap_line_length: 40, prettier: { printWidth: 200 } });
+    assert.equal(lines(out), 1);
+  });
+
+  it('a prettier.printWidth of 0 or below is not a width and is dropped', async () => {
+    for (const bad of [0, -3, 2.5, '80']) {
+      const out = await withEngineOptions({ prettier: { printWidth: bad } });
+      assert.ok(lines(out) > 1, `printWidth ${String(bad)} falls back to Prettier default of 80`);
+    }
+  });
+
+  it('the CSS fallback honours wrap_line_length 0 the same way', async () => {
+    const css = '.sel{transition:opacity 0.3s ease-in-out,transform 0.3s ease-in-out;grid-template-columns:[full-start] minmax(1em,1fr) [main-start] minmax(0,40em) [main-end] minmax(1em,1fr) [full-end]}';
+    const unset = await withEngineOptions({}, 'css', css);
+    const unbounded = await withEngineOptions({ wrap_line_length: 0 }, 'css', css);
+    assert.notEqual(unset, unbounded, '0 must no longer fall through to the default of 80');
+    assert.ok(
+      unbounded.split('\n').every((l) => !/\[full-start\].*\[full-end\]/.test(l) || l.length > 80),
+      'the grid line is allowed past 80 columns'
+    );
+    assert.equal(guard.check('css', css, unbounded).equivalent, true);
+  });
+});

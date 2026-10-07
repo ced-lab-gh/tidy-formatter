@@ -37,7 +37,9 @@
 // positions and does not validate anything. A file that is not valid JS is still
 // answered, and whatever the answer, the caller's parse remains the judge.
 //
-// PURE and vscode-free. Linear time, O(nesting depth) memory.
+// PURE and vscode-free. Linear time, O(nesting depth) memory. The hot loop is
+// table-driven (one lookup per character) because on a 5 MB file the per-char
+// cost is the whole budget.
 
 /** Keywords after which an expression starts (a regex, or JSX, may follow). */
 const EXPRESSION_KEYWORDS: ReadonlySet<string> = new Set([
@@ -74,47 +76,117 @@ const HEAD_KEYWORDS: ReadonlySet<string> = new Set(['if', 'while', 'for', 'with'
 /** The longest word in the three sets above (`instanceof`, `debugger`, ...). */
 const MAX_KEYWORD_LENGTH = 10;
 
-const CHAR_TAB = 9;
 const CHAR_LF = 10;
-const CHAR_VT = 11;
-const CHAR_FF = 12;
 const CHAR_CR = 13;
-const CHAR_SPACE = 32;
 const CHAR_BANG = 33;
-const CHAR_DOUBLE_QUOTE = 34;
-const CHAR_HASH = 35;
 const CHAR_DOLLAR = 36;
-const CHAR_SINGLE_QUOTE = 39;
-const CHAR_LEFT_PAREN = 40;
-const CHAR_RIGHT_PAREN = 41;
 const CHAR_STAR = 42;
-const CHAR_PLUS = 43;
 const CHAR_MINUS = 45;
-const CHAR_DOT = 46;
 const CHAR_SLASH = 47;
 const CHAR_ZERO = 48;
 const CHAR_NINE = 57;
-const CHAR_LESS = 60;
 const CHAR_EQUALS = 61;
 const CHAR_GREATER = 62;
-const CHAR_UPPER_A = 65;
-const CHAR_UPPER_Z = 90;
 const CHAR_LEFT_BRACKET = 91;
 const CHAR_BACKSLASH = 92;
 const CHAR_RIGHT_BRACKET = 93;
-const CHAR_UNDERSCORE = 95;
 const CHAR_BACKTICK = 96;
 const CHAR_LOWER_A = 97;
 const CHAR_LOWER_Z = 122;
 const CHAR_LEFT_BRACE = 123;
-const CHAR_RIGHT_BRACE = 125;
-const CHAR_ASCII_LIMIT = 127;
+const CHAR_ASCII_LIMIT = 128;
 const CHAR_LINE_SEPARATOR = 0x2028;
 const CHAR_PARAGRAPH_SEPARATOR = 0x2029;
+
+/**
+ * What a character starts, for the ASCII range. One table lookup replaces a chain
+ * of comparisons in the hot loop. A `const enum` so every member is a literal in
+ * the emitted code.
+ */
+const enum Kind {
+  Other,
+  Space,
+  LineBreak,
+  Word,
+  Digit,
+  Slash,
+  Quote,
+  Backtick,
+  Less,
+  LeftParen,
+  RightParen,
+  LeftBracket,
+  RightBracket,
+  LeftBrace,
+  RightBrace,
+  Dot,
+  Sign,
+  Hash,
+  NonAscii
+}
+
+/** State carried from one token to the next, packed into one integer. */
+const enum Carry {
+  None = 0,
+  /** The previous token was `.` or the `.` of `?.`: the next word is a property name. */
+  AfterDot = 1,
+  /** The previous token was `of`, `yield` or `await`. */
+  AfterAmbiguousWord = 2,
+  /** The next `(` opens the head of if/while/for/with, followed by a statement. */
+  HeadPending = 4,
+  /** The previous token was the word `for` (so `for await (` keeps the head). */
+  AfterFor = 8
+}
 
 /** Brace-stack markers: an ordinary `{`, or the `${` that opens a template hole. */
 const BRACE_BLOCK = 0;
 const BRACE_TEMPLATE = 1;
+
+function buildKindTable(): Uint8Array {
+  const table = new Uint8Array(CHAR_ASCII_LIMIT);
+  const set = (chars: string, kind: Kind): void => {
+    for (let i = 0; i < chars.length; i += 1) {
+      table[chars.charCodeAt(i)] = kind;
+    }
+  };
+  for (let code = CHAR_LOWER_A; code <= CHAR_LOWER_Z; code += 1) {
+    table[code] = Kind.Word;
+    table[code - 32] = Kind.Word; // the upper-case letter
+  }
+  for (let code = CHAR_ZERO; code <= CHAR_NINE; code += 1) {
+    table[code] = Kind.Digit;
+  }
+  set('_$\\', Kind.Word);
+  set(' \t\v\f', Kind.Space);
+  set('\n\r', Kind.LineBreak);
+  set('/', Kind.Slash);
+  set('\'"', Kind.Quote);
+  set('`', Kind.Backtick);
+  set('<', Kind.Less);
+  set('(', Kind.LeftParen);
+  set(')', Kind.RightParen);
+  set('[', Kind.LeftBracket);
+  set(']', Kind.RightBracket);
+  set('{', Kind.LeftBrace);
+  set('}', Kind.RightBrace);
+  set('.', Kind.Dot);
+  set('+-', Kind.Sign);
+  set('#', Kind.Hash);
+  return table;
+}
+
+/** Kind of each ASCII character; everything not listed is a plain punctuator. */
+const KINDS: Uint8Array = buildKindTable();
+
+/** 1 for an ASCII character that can continue an identifier or a number. */
+const CONTINUES_WORD: Uint8Array = (() => {
+  const table = new Uint8Array(CHAR_ASCII_LIMIT);
+  for (let code = 0; code < CHAR_ASCII_LIMIT; code += 1) {
+    const kind = KINDS[code];
+    table[code] = kind === Kind.Word || kind === Kind.Digit ? 1 : 0;
+  }
+  return table;
+})();
 
 /** Non-ASCII characters ECMAScript treats as white space (line terminators apart). */
 function isUnicodeSpace(code: number): boolean {
@@ -140,21 +212,46 @@ function isLineTerminator(code: number): boolean {
 
 /** A character that can continue an identifier (or a number). */
 function isWordChar(code: number): boolean {
-  if (code > CHAR_ASCII_LIMIT) {
+  if (code >= CHAR_ASCII_LIMIT) {
     return !isUnicodeSpace(code) && !isLineTerminator(code);
   }
-  return (
-    (code >= CHAR_LOWER_A && code <= CHAR_LOWER_Z) ||
-    (code >= CHAR_UPPER_A && code <= CHAR_UPPER_Z) ||
-    (code >= CHAR_ZERO && code <= CHAR_NINE) ||
-    code === CHAR_UNDERSCORE ||
-    code === CHAR_DOLLAR ||
-    code === CHAR_BACKSLASH
-  );
+  return CONTINUES_WORD[code] === 1;
 }
 
 function isDigit(code: number): boolean {
   return code >= CHAR_ZERO && code <= CHAR_NINE;
+}
+
+/** Index just past the end of the identifier or number that starts at `from`. */
+function skipWord(source: string, from: number): number {
+  const length = source.length;
+  let index = from + 1;
+  while (index < length) {
+    const code = source.charCodeAt(index);
+    if (code < CHAR_ASCII_LIMIT ? CONTINUES_WORD[code] === 1 : isWordChar(code)) {
+      index += 1;
+    } else {
+      break;
+    }
+  }
+  return index;
+}
+
+/** Index just past a numeric literal that starts at `from` (a digit, or `.` and a digit). */
+function skipNumber(source: string, from: number): number {
+  const length = source.length;
+  let index = from + 1;
+  while (index < length) {
+    const code = source.charCodeAt(index);
+    if (isWordChar(code)) {
+      index += 1;
+    } else if (code === 46 /* . */ && isDigit(source.charCodeAt(index + 1))) {
+      index += 1;
+    } else {
+      break;
+    }
+  }
+  return index;
 }
 
 /** Index just past the closing quote of a string literal, or -1 when unterminated. */
@@ -286,196 +383,186 @@ export function mayContainJsx(source: string): boolean {
   // after every operator, opening bracket and expression keyword; false after an
   // operand. `++` and `--` leave it as it was, like a tokenizer does.
   let expressionAllowed = true;
-  // The previous token was `.` (or the `.` of `?.`): the next word is a property name.
-  let afterDot = false;
-  // The next `(` opens the head of if/while/for/with, followed by a statement.
-  let headPending = false;
-  let lastWordWasFor = false;
-  // The previous token was `of`, `yield` or `await`.
-  let afterAmbiguousWord = false;
+  let carry: number = Carry.None;
   // A line terminator lies between the previous token and the next one.
   let lineBreakBefore = false;
 
-  if (source.charCodeAt(0) === CHAR_HASH && source.charCodeAt(1) === CHAR_BANG) {
+  if (source.charCodeAt(0) === 35 /* # */ && source.charCodeAt(1) === CHAR_BANG) {
     index = skipToLineEnd(source, 0);
   }
 
   while (index < length) {
     const code = source.charCodeAt(index);
+    const kind: number = code < CHAR_ASCII_LIMIT ? KINDS[code] : Kind.NonAscii;
 
     // --- white space and comments: no token, only the line-break flag -----------
-    if (code === CHAR_SPACE || code === CHAR_TAB || code === CHAR_VT || code === CHAR_FF) {
-      index += 1;
-      continue;
-    }
-    if (isLineTerminator(code)) {
-      lineBreakBefore = true;
-      index += 1;
-      continue;
-    }
-    if (code > CHAR_ASCII_LIMIT && isUnicodeSpace(code)) {
-      index += 1;
-      continue;
-    }
-    if (code === CHAR_SLASH) {
-      const next = source.charCodeAt(index + 1);
-      if (next === CHAR_SLASH) {
-        index = skipToLineEnd(source, index + 2);
+    switch (kind) {
+      case Kind.Space:
+        index += 1;
         continue;
-      }
-      if (next === CHAR_STAR) {
-        const close = source.indexOf('*/', index + 2);
-        if (close < 0) {
-          return true;
+      case Kind.LineBreak:
+        lineBreakBefore = true;
+        index += 1;
+        continue;
+      case Kind.NonAscii:
+        if (isUnicodeSpace(code)) {
+          index += 1;
+          continue;
         }
-        if (hasLineTerminator(source, index + 2, close)) {
+        if (code === CHAR_LINE_SEPARATOR || code === CHAR_PARAGRAPH_SEPARATOR) {
           lineBreakBefore = true;
+          index += 1;
+          continue;
         }
-        index = close + 2;
-        continue;
+        break;
+      case Kind.Slash: {
+        const next = source.charCodeAt(index + 1);
+        if (next === CHAR_SLASH) {
+          index = skipToLineEnd(source, index + 2);
+          continue;
+        }
+        if (next === CHAR_STAR) {
+          const close = source.indexOf('*/', index + 2);
+          if (close < 0) {
+            return true;
+          }
+          if (hasLineTerminator(source, index + 2, close)) {
+            lineBreakBefore = true;
+          }
+          index = close + 2;
+          continue;
+        }
+        break;
       }
+      default:
+        break;
     }
 
     // --- a token starts here ---------------------------------------------------
     const breakBefore = lineBreakBefore;
-    const wasAfterDot = afterDot;
-    const wasAfterAmbiguous = afterAmbiguousWord;
-    const head = headPending;
-    const wasLastWordFor = lastWordWasFor;
+    const before = carry;
     lineBreakBefore = false;
-    afterDot = false;
-    afterAmbiguousWord = false;
-    headPending = false;
-    lastWordWasFor = false;
+    carry = Carry.None;
 
-    if (code === CHAR_LESS) {
-      // The one question this scan exists to answer.
-      if (expressionAllowed || breakBefore) {
-        return true;
-      }
-      if (
-        source.charCodeAt(index + 1) === CHAR_BANG &&
-        source.charCodeAt(index + 2) === CHAR_MINUS &&
-        source.charCodeAt(index + 3) === CHAR_MINUS
-      ) {
-        return true; // an HTML-style comment opener: its text is not code
-      }
-      // `<`, `<<`, `<=`, `<<=`: one operator, so its second `<` is not tested.
-      index += 1;
-      if (source.charCodeAt(index) === CHAR_LESS) {
+    switch (kind) {
+      case Kind.Less:
+        // The one question this scan exists to answer.
+        if (expressionAllowed || breakBefore) {
+          return true;
+        }
+        if (
+          source.charCodeAt(index + 1) === CHAR_BANG &&
+          source.charCodeAt(index + 2) === CHAR_MINUS &&
+          source.charCodeAt(index + 3) === CHAR_MINUS
+        ) {
+          return true; // an HTML-style comment opener: its text is not code
+        }
+        // `<`, `<<`, `<=`, `<<=`: one operator, so its second `<` is not tested.
         index += 1;
-      }
-      if (source.charCodeAt(index) === CHAR_EQUALS) {
-        index += 1;
-      }
-      expressionAllowed = true;
-      continue;
-    }
+        if (source.charCodeAt(index) === 60 /* < */) {
+          index += 1;
+        }
+        if (source.charCodeAt(index) === CHAR_EQUALS) {
+          index += 1;
+        }
+        expressionAllowed = true;
+        break;
 
-    if (code === CHAR_SLASH) {
-      // A comment was handled above, so this is a regular expression or a division.
-      if (wasAfterAmbiguous) {
-        return true;
-      }
-      if (expressionAllowed) {
-        const end = scanRegex(source, index);
+      case Kind.Slash:
+        // A comment was handled above, so this is a regular expression or a division.
+        if ((before & Carry.AfterAmbiguousWord) !== 0) {
+          return true;
+        }
+        if (expressionAllowed) {
+          const end = scanRegex(source, index);
+          if (end < 0) {
+            return true;
+          }
+          index = end;
+          expressionAllowed = false;
+        } else {
+          index += 1;
+          if (source.charCodeAt(index) === CHAR_EQUALS) {
+            index += 1;
+          }
+          expressionAllowed = true;
+        }
+        break;
+
+      case Kind.Quote: {
+        const end = scanString(source, index, code);
         if (end < 0) {
           return true;
         }
         index = end;
         expressionAllowed = false;
-      } else {
-        index += 1;
-        if (source.charCodeAt(index) === CHAR_EQUALS) {
-          index += 1;
+        break;
+      }
+
+      case Kind.Backtick:
+        if (!scanTemplateChunk(source, index + 1, templateStop)) {
+          return true;
         }
-        expressionAllowed = true;
-      }
-      continue;
-    }
-
-    if (code === CHAR_SINGLE_QUOTE || code === CHAR_DOUBLE_QUOTE) {
-      const end = scanString(source, index, code);
-      if (end < 0) {
-        return true;
-      }
-      index = end;
-      expressionAllowed = false;
-      continue;
-    }
-
-    if (code === CHAR_BACKTICK) {
-      if (!scanTemplateChunk(source, index + 1, templateStop)) {
-        return true;
-      }
-      index = templateStop.end;
-      if (templateStop.opensHole) {
-        braces.push(BRACE_TEMPLATE);
-        expressionAllowed = true;
-      } else {
-        expressionAllowed = false;
-      }
-      continue;
-    }
-
-    if (isDigit(code) || (code === CHAR_DOT && isDigit(source.charCodeAt(index + 1)))) {
-      index += 1;
-      while (index < length) {
-        const inner = source.charCodeAt(index);
-        if (isWordChar(inner)) {
-          index += 1;
-        } else if (inner === CHAR_DOT && isDigit(source.charCodeAt(index + 1))) {
-          index += 1;
+        index = templateStop.end;
+        if (templateStop.opensHole) {
+          braces.push(BRACE_TEMPLATE);
+          expressionAllowed = true;
         } else {
+          expressionAllowed = false;
+        }
+        break;
+
+      case Kind.Digit:
+        index = skipNumber(source, index);
+        expressionAllowed = false;
+        break;
+
+      case Kind.Word:
+      case Kind.NonAscii: {
+        const start = index;
+        index = skipWord(source, index);
+        expressionAllowed = false;
+        if ((before & Carry.AfterDot) !== 0) {
+          break; // a property name, never a keyword
+        }
+        // Every keyword is 2 to 10 lowercase ASCII letters: skip the slice for the
+        // rest, which is most identifiers of a large file.
+        const wordLength = index - start;
+        if (
+          wordLength < 2 ||
+          wordLength > MAX_KEYWORD_LENGTH ||
+          code < CHAR_LOWER_A ||
+          code > CHAR_LOWER_Z
+        ) {
           break;
         }
+        const word = source.slice(start, index);
+        if (EXPRESSION_KEYWORDS.has(word)) {
+          expressionAllowed = true;
+        } else if (AMBIGUOUS_WORDS.has(word)) {
+          expressionAllowed = true;
+          carry = Carry.AfterAmbiguousWord;
+          // `for await (` keeps the statement head the `for` opened.
+          if (
+            word === 'await' &&
+            (before & Carry.HeadPending) !== 0 &&
+            (before & Carry.AfterFor) !== 0
+          ) {
+            carry = Carry.AfterAmbiguousWord | Carry.HeadPending;
+          }
+        } else if (HEAD_KEYWORDS.has(word)) {
+          carry = word === 'for' ? Carry.HeadPending | Carry.AfterFor : Carry.HeadPending;
+        }
+        break;
       }
-      expressionAllowed = false;
-      continue;
-    }
 
-    if (isWordChar(code)) {
-      const start = index;
-      index += 1;
-      while (index < length && isWordChar(source.charCodeAt(index))) {
-        index += 1;
-      }
-      if (wasAfterDot) {
-        expressionAllowed = false; // a property name, never a keyword
-        continue;
-      }
-      // Every keyword is 2 to 10 lowercase ASCII letters: skip the slice for the
-      // rest, which is most identifiers of a large file.
-      const wordLength = index - start;
-      if (wordLength < 2 || wordLength > MAX_KEYWORD_LENGTH || code < CHAR_LOWER_A || code > CHAR_LOWER_Z) {
-        expressionAllowed = false;
-        continue;
-      }
-      const word = source.slice(start, index);
-      if (EXPRESSION_KEYWORDS.has(word)) {
-        expressionAllowed = true;
-      } else if (AMBIGUOUS_WORDS.has(word)) {
-        expressionAllowed = true;
-        afterAmbiguousWord = true;
-        // `for await (` keeps the statement head the `for` opened.
-        headPending = word === 'await' && head && wasLastWordFor;
-      } else if (HEAD_KEYWORDS.has(word)) {
-        expressionAllowed = false;
-        headPending = true;
-        lastWordWasFor = word === 'for';
-      } else {
-        expressionAllowed = false;
-      }
-      continue;
-    }
-
-    switch (code) {
-      case CHAR_LEFT_PAREN:
-        parens.push(head);
+      case Kind.LeftParen:
+        parens.push((before & Carry.HeadPending) !== 0);
         expressionAllowed = true;
         index += 1;
         break;
-      case CHAR_RIGHT_PAREN: {
+
+      case Kind.RightParen: {
         const wasHead = parens.pop();
         if (wasHead === undefined) {
           return true; // unbalanced: the scan lost its place
@@ -485,26 +572,30 @@ export function mayContainJsx(source: string): boolean {
         index += 1;
         break;
       }
-      case CHAR_LEFT_BRACKET:
+
+      case Kind.LeftBracket:
         expressionAllowed = true;
         index += 1;
         break;
-      case CHAR_RIGHT_BRACKET:
+
+      case Kind.RightBracket:
         expressionAllowed = false;
         index += 1;
         break;
-      case CHAR_LEFT_BRACE:
+
+      case Kind.LeftBrace:
         braces.push(BRACE_BLOCK);
         expressionAllowed = true;
         index += 1;
         break;
-      case CHAR_RIGHT_BRACE: {
-        const kind = braces.pop();
-        if (kind === undefined) {
+
+      case Kind.RightBrace: {
+        const brace = braces.pop();
+        if (brace === undefined) {
           return true;
         }
         index += 1;
-        if (kind === BRACE_TEMPLATE) {
+        if (brace === BRACE_TEMPLATE) {
           if (!scanTemplateChunk(source, index, templateStop)) {
             return true;
           }
@@ -521,20 +612,25 @@ export function mayContainJsx(source: string): boolean {
         }
         break;
       }
-      case CHAR_DOT:
-        if (
-          source.charCodeAt(index + 1) === CHAR_DOT &&
-          source.charCodeAt(index + 2) === CHAR_DOT
+
+      case Kind.Dot:
+        if (isDigit(source.charCodeAt(index + 1))) {
+          index = skipNumber(source, index); // `.5`
+          expressionAllowed = false;
+        } else if (
+          source.charCodeAt(index + 1) === 46 &&
+          source.charCodeAt(index + 2) === 46
         ) {
           index += 3; // spread: an expression follows
+          expressionAllowed = true;
         } else {
           index += 1;
-          afterDot = true;
+          carry = Carry.AfterDot;
+          expressionAllowed = true;
         }
-        expressionAllowed = true;
         break;
-      case CHAR_PLUS:
-      case CHAR_MINUS:
+
+      case Kind.Sign:
         if (source.charCodeAt(index + 1) === code) {
           // `-->` at the start of a line is an HTML-style comment in a script.
           if (
@@ -550,9 +646,11 @@ export function mayContainJsx(source: string): boolean {
           expressionAllowed = true;
         }
         break;
-      case CHAR_HASH:
+
+      case Kind.Hash:
         index += 1; // a private name: the word after it sets the state
         break;
+
       default:
         // Every other punctuator (`, ; : ? = ! > & | * % ^ ~ @` and the rest)
         // is followed by an operand.

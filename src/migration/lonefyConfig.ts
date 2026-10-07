@@ -12,7 +12,12 @@
 // This module maps the real shape:
 //   - each per-language SECTION goes through the EXISTING flat key mapper
 //     (mapLonefyOptions) and its results become LANGUAGE-SCOPED writes, the
-//     `"[css]": { "tidy.indent": 2 }` form (overrideInLanguage);
+//     `"[css]": { "tidy.indent": 2 }` form (overrideInLanguage), for the languages
+//     the incumbent applied that section to (lonefySections.ts: `css` also formats
+//     SCSS, `javascript` also formats JSON) and only where the setting really
+//     applies in Tidy (tidyApplicability.ts);
+//   - a key the incumbent's own js-beautify ignores in that section is REPORTED,
+//     not imported: importing it would add a behaviour the user never had;
 //   - `onSave` is RECOGNISED and reported but NEVER MAPPED and NEVER PROPOSED:
 //     `true` is the incumbent's own default, so its presence says nothing about
 //     what the user chose (product owner's decision, v0.5.0);
@@ -26,31 +31,19 @@
 // read, and fresh result objects are returned. The text is parsed as DATA
 // (jsonc-parser) and NEVER executed: the incumbent loads its file with
 // `require`, Tidy must not.
-import type { LangId } from '../types';
 import type { LonefyConfigMapping, MigrationWrite } from './types';
+import { isMappedKey, lonefyKeyOfTidy } from './lonefyKeys';
 import {
   describeValue,
   hasForeignPrototype,
   mapLonefyOptions,
   parseConfigText
 } from './lonefyOptions';
+import { LONEFY_SECTIONS, isLonefySection } from './lonefySections';
+import { tidySettingAppliesTo } from './tidyApplicability';
 
 /** The key the incumbent reads for "format on save". Recognised, never mapped. */
 export const LONEFY_ON_SAVE_KEY = 'onSave';
-
-/**
- * Per-language sections of the incumbent's file, and the Tidy language(s) whose
- * `[language]` block each one feeds. Data, not code: widening a section to more
- * languages is a one-line change here (the incumbent also applied `css` to scss
- * and `javascript` to json; v0.5.0 deliberately keeps the three named targets).
- */
-export const LONEFY_SECTION_LANGUAGES: Readonly<
-  Record<string, readonly LangId[]>
-> = {
-  javascript: ['javascript'],
-  css: ['css'],
-  html: ['html']
-};
 
 /** Options of {@link mapLonefyConfigText} / {@link mapLonefyConfig}. */
 export interface LonefyConfigOptions {
@@ -87,9 +80,31 @@ function unusableMapping(warning: string): LonefyConfigMapping {
   };
 }
 
+/** A copy of a section without some keys, on a null-prototype bag. */
+function withoutKeys(
+  source: Record<string, unknown>,
+  dropped: ReadonlySet<string>
+): Record<string, unknown> {
+  const copy: Record<string, unknown> = Object.create(null);
+  for (const key of Object.keys(source)) {
+    if (!dropped.has(key)) {
+      copy[key] = source[key];
+    }
+  }
+  return copy;
+}
+
 /**
- * Map ONE per-language section through the existing flat key mapper and re-key
- * the result as language-scoped writes for each target language of the section.
+ * Map ONE per-language section through the existing flat key mapper and re-key the
+ * result as language-scoped writes.
+ *
+ * Three filters stand between a key and a write, each one reported, none silent:
+ *   1. the key must be one the incumbent's js-beautify READS in this section
+ *      (lonefySections.ts), or it did nothing there;
+ *   2. the mapper must accept its value (same domain as the `tidy.*` setting);
+ *   3. per target language, the setting must really apply there (tidyApplicability.ts).
+ *      A key that applies to NONE of the section's languages is reported; one that
+ *      applies to some is written for those and is not a "loss" for the others.
  * Unmapped keys and warnings come back prefixed with the section name.
  */
 function mapSection(
@@ -110,17 +125,43 @@ function mapSection(
     };
   }
 
-  const mapped = mapLonefyOptions(value);
-  const languages = LONEFY_SECTION_LANGUAGES[section] ?? [];
+  const { languages, honoured } = LONEFY_SECTIONS[section];
+  const ignoredByIncumbent = new Set(
+    Object.keys(value).filter((key) => isMappedKey(key) && !honoured.has(key))
+  );
+  const mapped = mapLonefyOptions(withoutKeys(value, ignoredByIncumbent), {
+    stringBooleans: false
+  });
+
   const writes: MigrationWrite[] = [];
   for (const language of languages) {
     for (const key of Object.keys(mapped.settings)) {
-      writes.push({ key, language, value: mapped.settings[key] });
+      if (tidySettingAppliesTo(key, language)) {
+        writes.push({ key, language, value: mapped.settings[key] });
+      }
     }
   }
+  const appliesSomewhere = (key: string) =>
+    languages.some((language) => tidySettingAppliesTo(key, language));
+  const appliesNowhere = new Set(
+    Object.keys(mapped.settings)
+      .filter((key) => !appliesSomewhere(key))
+      .map((key) => lonefyKeyOfTidy(key))
+  );
+
+  // Not carried over, in FILE order: keys nobody maps, keys the incumbent ignored
+  // here, and keys Tidy has no language to apply to.
+  const reported = new Set<string>([...mapped.unmapped, ...ignoredByIncumbent]);
+  const unmapped = [
+    ...Object.keys(value).filter(
+      (key) => reported.has(key) || appliesNowhere.has(key)
+    ),
+    ...(hasForeignPrototype(value) ? ['__proto__'] : [])
+  ].map((key) => `${section}.${key}`);
+
   return {
     writes,
-    unmapped: mapped.unmapped.map((key) => `${section}.${key}`),
+    unmapped,
     warnings: mapped.warnings.map((warning) => `${section}.${warning}`)
   };
 }
@@ -148,7 +189,7 @@ export function mapLonefyConfig(
   const flat: Record<string, unknown> = Object.create(null);
   const unmapped: string[] = [];
   for (const key of Object.keys(raw)) {
-    if (key === LONEFY_ON_SAVE_KEY || hasOwn(LONEFY_SECTION_LANGUAGES, key)) {
+    if (key === LONEFY_ON_SAVE_KEY || isLonefySection(key)) {
       continue;
     }
     if (options.allowFlatKeys) {
@@ -175,7 +216,7 @@ export function mapLonefyConfig(
   }
 
   // Sections in a CANONICAL order (not file order) so the recap is stable.
-  for (const section of Object.keys(LONEFY_SECTION_LANGUAGES)) {
+  for (const section of Object.keys(LONEFY_SECTIONS)) {
     if (!hasOwn(raw, section)) {
       continue;
     }

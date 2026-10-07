@@ -30,31 +30,58 @@ export const LONEFY_DEFAULT_FORMATTER_JSON = `{
 `;
 
 /**
+ * Every write the key mapper proposes for {@link LONEFY_DEFAULT_FORMATTER_JSON}, in
+ * the order it reports them: section by section (javascript, css, html), languages
+ * in the order the incumbent applies the section to them, keys in file order.
+ *
+ * The incumbent formatted JSON with the `javascript` section and SCSS with the
+ * `css` section (extension.ts L41-58), hence [json] and [scss]. [json] carries only
+ * the indentation: Tidy's JSON engine reads nothing else (wrap_line_length is
+ * declared for every language by the catalogue but is inert on JSON).
+ */
+export const LONEFY_DEFAULT_WRITES: readonly string[] = [
+  '[javascript] tidy.indent = 4',
+  '[javascript] tidy.preserve_newlines = true',
+  '[javascript] tidy.break_chained_methods = false',
+  '[javascript] tidy.max_preserve_newlines = 0',
+  '[javascript] tidy.space_in_paren = false',
+  '[javascript] tidy.space_in_empty_paren = false',
+  '[javascript] tidy.jslint_happy = false',
+  '[javascript] tidy.space_after_anon_function = false',
+  '[javascript] tidy.keep_array_indentation = false',
+  '[javascript] tidy.space_before_conditional = true',
+  '[javascript] tidy.wrap_line_length = 0',
+  '[javascript] tidy.comma_first = false',
+  '[json] tidy.indent = 4',
+  '[css] tidy.indent = 4',
+  '[css] tidy.newline_between_rules = true',
+  '[css] tidy.end_of_line = "lf"',
+  '[scss] tidy.indent = 4',
+  '[scss] tidy.newline_between_rules = true',
+  '[scss] tidy.end_of_line = "lf"',
+  '[html] tidy.indent_inner_html = false',
+  '[html] tidy.indent = 4'
+];
+
+/**
  * Every key of {@link LONEFY_DEFAULT_FORMATTER_JSON} that the key mapper does not
- * carry over, in the order the mapper reports them (section by section).
+ * carry over, in file order (section by section). Each has a reason, recorded in
+ * src/migration/lonefyKeys.ts and asserted one by one in lonefyKeys.test.ts: no
+ * `tidy.*` setting exists (indent_char, unescape_strings, e4x, end_with_newline),
+ * the spelling is not a js-beautify option (indentCharacter,
+ * selectorSeparatorNewLine, indent_character), or the value has no Tidy equivalent
+ * (eol "auto").
  */
 export const LONEFY_DEFAULT_UNMAPPED: readonly string[] = [
   'javascript.indent_char',
   'javascript.eol',
-  'javascript.preserve_newlines',
-  'javascript.break_chained_methods',
-  'javascript.max_preserve_newlines',
-  'javascript.space_in_paren',
-  'javascript.space_in_empty_paren',
-  'javascript.jslint_happy',
-  'javascript.keep_array_indentation',
-  'javascript.space_before_conditional',
   'javascript.unescape_strings',
   'javascript.e4x',
   'javascript.end_with_newline',
-  'javascript.comma_first',
   'css.indentCharacter',
   'css.indent_char',
   'css.selectorSeparatorNewLine',
   'css.end_with_newline',
-  'css.newline_between_rules',
-  'css.eol',
-  'html.indent_inner_html',
   'html.indent_char',
   'html.indent_character'
 ];

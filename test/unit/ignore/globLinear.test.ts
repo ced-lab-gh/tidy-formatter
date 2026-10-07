@@ -16,6 +16,7 @@ import * as path from 'node:path';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const GLOB_MODULE = path.join(REPO_ROOT, 'src/ignore/glob.ts');
 const RC_MODULE = path.join(REPO_ROOT, 'src/config/soukformatrc.ts');
+const IGNORE_MODULE = path.join(REPO_ROOT, 'src/ignore/soukformatignore.ts');
 
 /** The budget each adversarial evaluation must stay under. */
 const BUDGET_MS = 50;
@@ -31,14 +32,15 @@ interface Sample {
 
 /**
  * The child program. It evaluates every case once to warm up, then keeps the
- * BEST of three timed runs, so a scheduling hiccup on a loaded machine cannot
+ * BEST of seven timed runs, measured in CPU time, so a scheduling hiccup on a loaded machine cannot
  * fake a regression while a real one (seconds, or never returning) still shows.
  * Module paths arrive as JSON so Windows backslashes need no escaping.
  */
-function childProgram(globModule: string, rcModule: string): string {
+function childProgram(globModule: string, rcModule: string, ignoreModule: string): string {
   return `
     const { compileIgnorePattern, patternMatches } = require(${JSON.stringify(globModule)});
     const { parseSoukformatrc } = require(${JSON.stringify(rcModule)});
+    const { evaluateIgnore } = require(${JSON.stringify(ignoreModule)});
 
     const starSubject = 'a'.repeat(40) + 'b';
     const deepSubject = Array.from({ length: 30 }, (_, i) => 's' + i).join('/');
@@ -59,6 +61,51 @@ function childProgram(globModule: string, rcModule: string): string {
     const globstars200 = '**/'.repeat(200) + 'x';
     const mixed = '**/*a*a*a/'.repeat(30) + 'x';
 
+    // P1, the audit's exact worst case: multiX(k) is "**/*" + k "a" + "c" repeated while
+    // it fits in 1024 characters; 1000 of them, against a path of 16 directories of
+    // 255 characters (4095 characters in all, the Linux PATH_MAX).
+    const multiX = (k) => {
+      const unit = '**/*' + 'a'.repeat(k) + 'c';
+      let glob = '';
+      while (glob.length + unit.length <= 1024) glob += unit;
+      return glob;
+    };
+    const newline = String.fromCharCode(10);
+    const deepPath = Array.from({ length: 16 }, () => 'a'.repeat(254) + 'c').join('/');
+    const rcBig = (k) => {
+      const text = JSON.stringify({
+        css: { indent: 4 },
+        overrides: Array.from({ length: 1000 }, () => ({ files: multiX(k), options: { indent: 8 } }))
+      });
+      return () => {
+        const result = parseSoukformatrc(text, 'css', '/p/.soukformatrc', deepPath);
+        return result.warnings.length === 1 && result.layers.length < 50;
+      };
+    };
+    const ignoreBig = (k) => {
+      const text = Array.from({ length: 1000 }, () => multiX(k)).join(newline);
+      return () => {
+        const verdict = evaluateIgnore(text, deepPath, { ignoreCase: false });
+        return verdict.ignored === true && verdict.failClosed !== undefined;
+      };
+    };
+    // Many SHORT overrides that each fail on their first character, against a very
+    // long path (128 directories of 255 characters): they spend almost no matching
+    // steps, so only the fixed per-override cost counts. Encoding the path once per
+    // lookup (and charging the sweep) took this from over a second to a few dozen ms.
+    const veryLongPath = Array.from({ length: 128 }, () => 'a'.repeat(254) + 'c').join('/');
+    const manyShort = (() => {
+      const text = JSON.stringify({
+        overrides: Array.from({ length: 20000 }, (_, i) => ({ files: 'z' + i, options: { indent: 8 } }))
+      });
+      return () => parseSoukformatrc(text, 'css', '/p/.soukformatrc', veryLongPath).layers.length === 0;
+    })();
+    const benignText = Array.from({ length: 5000 }, (_, i) => 'module_' + i + '/dist/').join(newline);
+    const benignIgnore = () => {
+      const verdict = evaluateIgnore(benignText, 'packages/core/src/components/button/Button.tsx', { ignoreCase: false });
+      return verdict.ignored === false && verdict.failClosed === undefined;
+    };
+
     const cases = [
       ['ignore star x16', ignoreRun(stars16, starSubject)],
       ['ignore star x200', ignoreRun(stars200, starSubject)],
@@ -71,17 +118,28 @@ function childProgram(globModule: string, rcModule: string): string {
       ['rc globstar x10 (no match)', rcRun(globstars10, deepSubject)],
       ['rc globstar x10 (match)', rcRun(globstars10, deepSubject + '/x')],
       ['rc globstar x200', rcRun(globstars200, deepSubject)],
-      ['rc mixed', rcRun(mixed, aaaaSubject)]
+      ['rc mixed', rcRun(mixed, aaaaSubject)],
+      ['P1 rc 1000 x multiX(60), 4095-char path', rcBig(60)],
+      ['P1 rc 1000 x multiX(30), 4095-char path', rcBig(30)],
+      ['P1 rc 1000 x multiX(127), 4095-char path', rcBig(127)],
+      ['P1 ignore 1000 x multiX(60), 4095-char path', ignoreBig(60)],
+      ['P1 ignore 1000 x multiX(30), 4095-char path', ignoreBig(30)],
+      ['P1 ignore 1000 x multiX(127), 4095-char path', ignoreBig(127)],
+      ['P1 ignore 5000 ordinary lines is NOT cut off', benignIgnore],
+      ['P1 rc 20000 short overrides, 32767-char path', manyShort]
     ];
 
     const samples = cases.map(([name, run]) => {
       run();
       let best = Infinity;
       let result;
-      for (let i = 0; i < 3; i += 1) {
-        const start = performance.now();
+      for (let i = 0; i < 7; i += 1) {
+        // CPU time of the process (user + system), not wall time: other work on a
+        // busy machine inflates the wall clock but not the CPU the code spends.
+        const start = process.cpuUsage();
         result = run();
-        best = Math.min(best, performance.now() - start);
+        const spent = process.cpuUsage(start);
+        best = Math.min(best, (spent.user + spent.system) / 1000);
       }
       return { name, ms: best, result };
     });
@@ -93,7 +151,7 @@ function childProgram(globModule: string, rcModule: string): string {
 function runAdversarialCases(): Sample[] {
   const out = execFileSync(
     process.execPath,
-    ['--require', 'tsx', '-e', childProgram(GLOB_MODULE, RC_MODULE)],
+    ['--require', 'tsx', '-e', childProgram(GLOB_MODULE, RC_MODULE, IGNORE_MODULE)],
     { cwd: REPO_ROOT, encoding: 'utf8', timeout: HARD_TIMEOUT_MS, killSignal: 'SIGKILL' }
   );
   return JSON.parse(out) as Sample[];
@@ -121,9 +179,9 @@ describe('ignore/glob : adversarial patterns complete in linear time on BOTH pat
     return found as Sample;
   }
 
-  function assertFast(name: string, expected: unknown): void {
+  function assertFast(name: string, expected: unknown, budgetMs = BUDGET_MS): void {
     const { ms, result } = sample(name);
-    assert.ok(ms < BUDGET_MS, `"${name}" took ${ms.toFixed(2)} ms (budget ${BUDGET_MS} ms)`);
+    assert.ok(ms < budgetMs, `"${name}" took ${ms.toFixed(2)} ms of CPU (budget ${budgetMs} ms)`);
     assert.equal(result, expected, `"${name}" gave the wrong answer`);
   }
 
@@ -166,6 +224,30 @@ describe('ignore/glob : adversarial patterns complete in linear time on BOTH pat
     });
     it('a mixed globstar and star pattern against a deep path', () => {
       assertFast('rc mixed', 0);
+    });
+  });
+
+  // P1 (audit etape 10). Every pattern above is linear ALONE; what was missing was a
+  // bound on the TOTAL. 1000 overrides (or ignore lines) of long globs against a deep
+  // path, in a file under the 1 MiB cap, took 60.3 s for ONE parseSoukformatrc call
+  // before the work budget. They must now finish in well under 50 ms and fail
+  // closed (the ignore file excludes the path, the overrides are skipped and reported).
+  describe('P1 the audit worst case: 1000 long globs against a 4095-character path', () => {
+    for (const k of [60, 30, 127]) {
+      it(`.soukformatrc, 1000 overrides of multiX(${k}): cut off with one warning`, () => {
+        assertFast(`P1 rc 1000 x multiX(${k}), 4095-char path`, true);
+      });
+      it(`.soukformatignore, 1000 lines of multiX(${k}): excluded (fail closed), with the reason`, () => {
+        assertFast(`P1 ignore 1000 x multiX(${k}), 4095-char path`, true);
+      });
+    }
+    it('20 000 short overrides against a 32 KB path: the per-override cost is bounded too', () => {
+      // A looser budget: 830 KB of JSONC has to be parsed, and the regression here was
+      // over a second, not a few milliseconds.
+      assertFast('P1 rc 20000 short overrides, 32767-char path', true, 250);
+    });
+    it('a large ORDINARY ignore file is not cut off: the budget is not too tight', () => {
+      assertFast('P1 ignore 5000 ordinary lines is NOT cut off', true);
     });
   });
 });

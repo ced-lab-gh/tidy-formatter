@@ -363,9 +363,11 @@ export const JSX_TEXT_WHITESPACE_REASON =
   'Prettier reflowed whitespace inside JSX text; that run of spaces is part of the string this code compiles to, so Tidy did not write it';
 
 /**
- * Tokenise with @babel/parser and report, for every JSX tag, whether the
- * tag-OPENING punctuator `<` is immediately adjacent to whatever follows it
- * (the element name, a `/` of a closing tag, or the `/` of `< />`).
+ * Report, for every JSX tag, whether the tag-OPENING punctuator `<` is
+ * immediately adjacent to whatever follows it (the element name, the `/` of a
+ * closing tag, the `>` of `<>`, or a comment), read from the AST `parseJs`
+ * already produced. No second parse, and no token array (see the last
+ * paragraph for why).
  *
  * Why this exists: in babel's JSX grammar, whitespace inside a tag is
  * insignificant, so `<Foo bar={x} />` and `< Foo bar = {x} />` produce IDENTICAL
@@ -403,42 +405,179 @@ export const JSX_TEXT_WHITESPACE_REASON =
  * Two call sites, one rule: `astEqualJs` (a .js/.jsx/.tsx file) and
  * `canonicalizeEmbeddedCode` (the body of an EXECUTABLE `<script>` in an HTML
  * document, ADD-12b), so a detached opening `<` is refused wherever the JSX lives.
+ *
+ * WHY THE AST AND NOT THE TOKENS. The first version parsed a second time with
+ * `tokens: true` and looked at the token after every `jsxTagStart`. In
+ * @babel/parser 7.29 that option routes the tokens through `babel7CompatTokens`,
+ * which splices the WHOLE token array once per template literal and once per
+ * `#private` name: quadratic. A 1 MiB script dense in template literals took
+ * 4.6 s to verify in an HTML document without it and 70 s with it, on the
+ * extension host's own thread (a .js file paid the same cost through
+ * `astEqualJs`). The answer needs none of that. Every `jsxTagStart` token is the
+ * `<` that opens one of four JSX node types (plus one artifact, see
+ * `genericArrowOpenAdjacency`), and each such node STARTS at that `<`, so "does
+ * the next token begin right after it" is read straight off `node.start`:
+ *   - an opening element: its name starts at `start + 1`;
+ *   - an opening fragment: the next character is the `>` of `<>`;
+ *   - a closing element or fragment: the next character is the `/` of `</`;
+ *   - a comment, whatever it stands before, is a token of its own and starts
+ *     with `/`, so a `/` right after the `<` is adjacency too. That is also why
+ *     a block comment glued to the `<` (the `<` then `/`, `*`, a name and so on)
+ *     counts as glued, exactly as it did when tokens were read.
+ * Anything else after the `<` is whitespace the tokenizer skipped: split.
+ *
+ * NOT A NEW RULE. The returned string is the one the token version returned
+ * (same marks, same order) on every input compared so far, with ONE known
+ * difference, in the strict direction: after `if (...)`, `while (...)`,
+ * `for (...)`, `with (...)`, a block or `yield`, the tokenizer reads the `<` of
+ * a generic arrow as a plain `<` and the token version marked nothing, while
+ * the AST still holds the arrow and this walk marks it. A detached `< T,>` there
+ * is now refused; nothing the token version refused is accepted.
+ * test/unit/safety/jsxFingerprintDifferential.test.ts keeps the token version as
+ * a reference, compares the two over every JSX-bearing fixture of the repo, the
+ * edge cases of the review and generated input, and pins that one difference by
+ * name. Two things keep the walk
+ * from UNDER-reporting, the direction that would let the guard accept more: it
+ * visits every object-valued key `canonicalizeAst` visits (a superset of what a
+ * visitor-key traversal reaches), and a tag node whose `<` cannot be located
+ * exactly throws instead of being skipped, which every caller turns into a
+ * refusal (a file) or a verbatim comparison (a script).
  */
-function jsxBoundaryFingerprint(code: string, plugins: BabelPlugins): string {
-  const { parse: babelParse } = requireGuardJsChunk();
-  const ast = babelParse(code, {
-    sourceType: 'unambiguous',
-    allowReturnOutsideFunction: true,
-    allowImportExportEverywhere: true,
-    errorRecovery: false,
-    tokens: true,
-    plugins
-  });
-  const tokens = (ast.tokens ?? []) as Array<{
-    start: number;
-    end: number;
-    type: unknown;
-  }>;
-  const labelOf = (token: { type: unknown }): string => {
-    const type = token.type as { label?: string } | string | undefined;
-    if (type && typeof type === 'object' && typeof type.label === 'string') {
-      return type.label;
-    }
-    return String(type);
-  };
+const JSX_TAG_NODE_TYPES: ReadonlySet<string> = new Set([
+  'JSXOpeningElement',
+  'JSXClosingElement',
+  'JSXOpeningFragment',
+  'JSXClosingFragment'
+]);
 
-  const marks: string[] = [];
-  for (let i = 0; i < tokens.length - 1; i += 1) {
-    const current = tokens[i];
-    const next = tokens[i + 1];
-    const currentLabel = labelOf(current);
-    // `<` opening a JSX tag (open OR close tag) must be glued to whatever follows
-    // it (name, or the `/` of `</tag>` / `< />`). A detached `<` is corruption.
-    if (currentLabel === 'jsxTagStart') {
-      marks.push(`open:${next.start === current.end ? 'glued' : 'split'}`);
+const CHAR_LT = 0x3c; // <
+const CHAR_GT = 0x3e; // >
+const CHAR_SLASH = 0x2f; // /
+
+/** Where this tag node's `<` is and whether it is glued to what follows. Throws if it cannot tell. */
+function tagOpenAdjacency(
+  node: Record<string, unknown>,
+  code: string
+): { at: number; glued: boolean } {
+  const at = node.start;
+  if (typeof at !== 'number' || code.charCodeAt(at) !== CHAR_LT) {
+    throw new Error('JSX tag node does not start at a "<"');
+  }
+  const next = code.charCodeAt(at + 1);
+  if (next === CHAR_SLASH) {
+    // The `/` of `</`, or the first character of a comment between `<` and the name.
+    return { at, glued: true };
+  }
+  if (node.type === 'JSXOpeningFragment') {
+    return { at, glued: next === CHAR_GT };
+  }
+  if (node.type === 'JSXOpeningElement') {
+    const nameStart = (node.name as { start?: unknown } | null | undefined)?.start;
+    if (typeof nameStart !== 'number') {
+      throw new Error('JSX opening element without a name position');
+    }
+    return { at, glued: nameStart === at + 1 };
+  }
+  // A closing element or fragment whose `<` is not followed by `/`: detached.
+  return { at, glued: false };
+}
+
+/**
+ * The one `jsxTagStart` token that is NOT a JSX tag. With the `jsx` and
+ * `typescript` plugins both on, @babel/parser lexes the `<` that opens the type
+ * parameters of a non-async arrow function (`<T,>(x: T) => x`) as `jsxTagStart`,
+ * tries it as JSX, backs out, and leaves that token in the token array. The
+ * token version of this fingerprint therefore marked it, and so must this one:
+ * without the mark, a formatter that detached it (`< T,>(x: T) => x`, same AST)
+ * would be accepted where the token version refused it, which is a relaxation.
+ * `async <T,>(...)` is lexed as a plain `<` and leaves no such token, which is why
+ * the arrow must START at the `<` (the type parameters start where it does).
+ * The differential test is what says this list is complete: it fails if a
+ * @babel/parser upgrade ever changes which `<` is left behind.
+ */
+function genericArrowOpenAdjacency(
+  node: Record<string, unknown>,
+  code: string
+): { at: number; glued: boolean } | undefined {
+  const typeParameters = node.typeParameters as
+    | { start?: unknown; params?: unknown }
+    | null
+    | undefined;
+  if (typeParameters === null || typeof typeParameters !== 'object') {
+    return undefined;
+  }
+  const at = node.start;
+  if (typeParameters.start !== at) {
+    return undefined;
+  }
+  if (typeof at !== 'number' || code.charCodeAt(at) !== CHAR_LT) {
+    throw new Error('generic arrow type parameters do not start at a "<"');
+  }
+  if (code.charCodeAt(at + 1) === CHAR_SLASH) {
+    // Only a comment can open there: type parameters never start with `/`.
+    return { at, glued: true };
+  }
+  const first = Array.isArray(typeParameters.params)
+    ? (typeParameters.params[0] as { start?: unknown } | undefined)
+    : undefined;
+  if (typeof first?.start !== 'number') {
+    throw new Error('generic arrow without a first type parameter position');
+  }
+  return { at, glued: first.start === at + 1 };
+}
+
+function jsxBoundaryFingerprint(program: unknown, code: string): string {
+  // Exact short cut: a JSX tag is opened by a `<`, so none can exist without one.
+  if (!code.includes('<')) {
+    return '';
+  }
+  const gluedAt = new Map<number, boolean>();
+  const pending: unknown[] = [program];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        pending.push(item);
+      }
+      continue;
+    }
+    if (node === null || typeof node !== 'object') {
+      continue;
+    }
+    const record = node as Record<string, unknown>;
+    if (typeof record.type === 'string') {
+      if (JSX_TAG_NODE_TYPES.has(record.type)) {
+        const { at, glued } = tagOpenAdjacency(record, code);
+        gluedAt.set(at, glued);
+      } else if (record.type === 'ArrowFunctionExpression') {
+        const found = genericArrowOpenAdjacency(record, code);
+        if (found !== undefined) {
+          gluedAt.set(found.at, found.glued);
+        }
+      }
+    }
+    for (const key of Object.keys(record)) {
+      if (STRUCTURAL_IGNORE_KEYS.has(key)) {
+        continue;
+      }
+      const child = record[key];
+      if (child !== null && typeof child === 'object') {
+        pending.push(child);
+      }
     }
   }
-  return marks.join('|');
+  return [...gluedAt.keys()]
+    .sort((a, b) => a - b)
+    .map((at) => `open:${gluedAt.get(at) ? 'glued' : 'split'}`)
+    .join('|');
+}
+
+/**
+ * The fingerprint of a source text, exported ONLY so the differential test can
+ * compare it with the token-based reference. The guard itself never calls it.
+ */
+export function jsxBoundaryFingerprintOfSource(code: string, lang?: LangId): string {
+  return jsxBoundaryFingerprint(parseJs(code, babelPluginsFor(lang)).program, code);
 }
 
 /**
@@ -504,14 +643,19 @@ export function astEqualJs(input: string, output: string, lang?: LangId): GuardV
   // grammar actually contains JSX; for plain TS/JS there are no JSX tags.
   if (jsxEnabled) {
     try {
-      const inputJsx = jsxBoundaryFingerprint(input, plugins);
-      const outputJsx = jsxBoundaryFingerprint(output, plugins);
+      const inputJsx = jsxBoundaryFingerprint(inputParsed.program, input);
+      const outputJsx = jsxBoundaryFingerprint(outputParsed.program, output);
       if (inputJsx !== outputJsx) {
         return rejected('JSX tag boundaries were altered by formatting');
       }
     } catch (error: unknown) {
-      // Tokenisation should not fail when parsing already succeeded; if it does,
-      // stay conservative rather than silently accepting.
+      // E1: a chunk LOAD failure is an engine failure, never a statement about
+      // the user's code (the rule every other catch in this file applies). The
+      // fingerprint no longer touches a chunk, so this cannot fire today; the
+      // rethrow keeps the rule true if that ever changes.
+      rethrowIfChunkLoadFailure(error);
+      // Reading the tags should not fail when parsing already succeeded; if it
+      // does, stay conservative rather than silently accepting.
       return rejected(`could not verify JSX integrity: ${describeError(error)}`);
     }
   }
@@ -1062,7 +1206,7 @@ function canonicalizeEmbeddedCode(
       // file. It reads the opening `<` only: `<Foo / >` and `</ Foo>` keep their
       // `<` glued, are valid JSX with the same AST, and stay accepted. A failure
       // to fingerprint lands in the catch below (verbatim), which is stricter.
-      const boundaries = jsxBoundaryFingerprint(body, BABEL_PLUGINS_JSX);
+      const boundaries = jsxBoundaryFingerprint(parsed.program, body);
       return `js:${JSON.stringify(canonicalizeAst(parsed.program))}|c:${JSON.stringify(parsed.comments)}|jsx:${boundaries}`;
     } catch (error: unknown) {
       rethrowIfChunkLoadFailure(error);

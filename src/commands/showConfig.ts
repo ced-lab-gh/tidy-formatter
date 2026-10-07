@@ -18,8 +18,10 @@ import type { LangId, ResolvedOptions } from '../types';
 import {
   OPTION_CATALOG,
   appliesToLanguage,
+  describeValueProblems,
   type CatalogLang,
-  type OptionEntry
+  type OptionEntry,
+  type OptionValue
 } from '../config/optionCatalog';
 import { describeSizeLimit, type EffectiveSizeLimit } from '../config/sizeLimit';
 // The shared, 'vscode'-free detail sanitizer: a resolver/parser error can embed a
@@ -156,21 +158,31 @@ function sourceOf(options: ResolvedOptions, key: string): string {
 export function effectiveValueFor(
   options: ResolvedOptions,
   entry: OptionEntry
-): boolean | number | string {
+): OptionValue {
   if (entry.engine === 'prettier') {
     const bag = options.engineOptions.prettier;
     if (bag !== null && typeof bag === 'object') {
       const value = (bag as Record<string, unknown>)[entry.engineKey];
       if (value !== undefined) {
-        return value as boolean | number | string;
+        return value as OptionValue;
       }
     }
     return entry.default;
   }
   const value = options.engineOptions[entry.engineKey];
-  return value !== undefined
-    ? (value as boolean | number | string)
-    : entry.default;
+  return value !== undefined ? (value as OptionValue) : entry.default;
+}
+
+/**
+ * The entries of the option value report: one sentence per option value that is
+ * accepted but partly ignored (today, only the two HTML tag lists can be). Covers
+ * the options that apply to this language, whatever layer set them (VS Code
+ * settings and .soukformatrc alike), so it needs no per-layer wiring. PURE.
+ */
+function optionValueWarnings(options: ResolvedOptions, languageId: LangId): string[] {
+  return OPTION_CATALOG.filter((entry) =>
+    appliesToLanguage(entry, languageId as CatalogLang)
+  ).flatMap((entry) => describeValueProblems(entry, effectiveValueFor(options, entry)));
 }
 
 /**
@@ -356,6 +368,16 @@ export function buildEffectiveConfigReport(input: ReportInput): string {
     lines.push('.editorconfig warnings (non-fatal)');
     lines.push('----------------------------------');
     for (const warning of editorconfigWarnings) {
+      lines.push(`  • ${warning}`);
+    }
+  }
+
+  const valueWarnings = optionValueWarnings(options, languageId);
+  if (valueWarnings.length > 0) {
+    lines.push('');
+    lines.push('Option value warnings (non-fatal)');
+    lines.push('---------------------------------');
+    for (const warning of valueWarnings) {
       lines.push(`  • ${warning}`);
     }
   }

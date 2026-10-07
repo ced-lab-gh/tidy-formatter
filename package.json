@@ -103,6 +103,11 @@
         "command": "tidy.showFormatHistory",
         "title": "Show Format History",
         "category": "Tidy"
+      },
+      {
+        "command": "tidy.whoFormats",
+        "title": "Who Formats This File?",
+        "category": "Tidy"
       }
     ],
     "submenus": [
@@ -425,6 +430,22 @@
             "order": 8,
             "description": "Where line-breaking operators are placed relative to the newline (js-beautify operator_position).",
             "markdownDescription": "Where line-breaking operators are placed relative to the newline (js-beautify operator_position).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.space_before_conditional": {
+            "type": "boolean",
+            "default": true,
+            "scope": "language-overridable",
+            "order": 9,
+            "description": "Put a space between if, for, while or switch and its opening parenthesis: if (a) when on, if(a) when off (js-beautify space_before_conditional). It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier always prints if (a).",
+            "markdownDescription": "Put a space between if, for, while or switch and its opening parenthesis: if (a) when on, if(a) when off (js-beautify space_before_conditional). It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier always prints if (a).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.jslint_happy": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 10,
+            "description": "JSLint-style output for JavaScript (js-beautify jslint_happy): a space after the function keyword of an anonymous function, and case labels level with their switch instead of indented under it. It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier prints those with its own style.",
+            "markdownDescription": "JSLint-style output for JavaScript (js-beautify jslint_happy): a space after the function keyword of an anonymous function, and case labels level with their switch instead of indented under it. It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier prints those with its own style.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       },
@@ -508,6 +529,36 @@
             "order": 4,
             "description": "How <script>/<style> contents are indented inside HTML (js-beautify indent_scripts).",
             "markdownDescription": "How <script>/<style> contents are indented inside HTML (js-beautify indent_scripts).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.content_unformatted": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+              "patternErrorMessage": "A tag name: a letter, then letters, digits, hyphens or underscores."
+            },
+            "uniqueItems": true,
+            "maxItems": 128,
+            "scope": "language-overridable",
+            "order": 5,
+            "description": "Extra HTML tag names whose content is left exactly as written, for example [\"code\", \"my-snippet\"] (js-beautify content_unformatted). They are added to the tags that are always preserved (pre, textarea, xmp, listing, plaintext), which stay whatever you write. Tag names only: letters, digits, hyphens and underscores. Invalid entries are ignored and listed in Show Effective Configuration.",
+            "markdownDescription": "Extra HTML tag names whose content is left exactly as written, for example [\"code\", \"my-snippet\"] (js-beautify content_unformatted). They are added to the tags that are always preserved (pre, textarea, xmp, listing, plaintext), which stay whatever you write. Tag names only: letters, digits, hyphens and underscores. Invalid entries are ignored and listed in Show Effective Configuration.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.void_elements": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+              "patternErrorMessage": "A tag name: a letter, then letters, digits, hyphens or underscores."
+            },
+            "uniqueItems": true,
+            "maxItems": 128,
+            "scope": "language-overridable",
+            "order": 6,
+            "description": "Extra HTML tag names printed as void elements, like br and img: tags that never have a closing tag, for example [\"my-icon\"] (js-beautify void_elements). They are added to the standard HTML void elements, which always stay. Tag names only: letters, digits, hyphens and underscores; elements whose text must stay as written (pre, textarea, xmp, listing, plaintext, script, style) are refused. Invalid entries are ignored and listed in Show Effective Configuration.",
+            "markdownDescription": "Extra HTML tag names printed as void elements, like br and img: tags that never have a closing tag, for example [\"my-icon\"] (js-beautify void_elements). They are added to the standard HTML void elements, which always stay. Tag names only: letters, digits, hyphens and underscores; elements whose text must stay as written (pre, textarea, xmp, listing, plaintext, script, style) are refused. Invalid entries are ignored and listed in Show Effective Configuration.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       },
@@ -588,6 +639,26 @@
             "order": 8,
             "description": "Include parentheses around a sole arrow-function parameter (Prettier arrowParens). Stylistic only.",
             "markdownDescription": "Include parentheses around a sole arrow-function parameter (Prettier arrowParens). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.singleAttributePerLine": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 9,
+            "description": "Put every JSX attribute on its own line as soon as an element has more than one (Prettier singleAttributePerLine). Applies to TSX, JSX and a JavaScript file that contains JSX; it has no effect on plain TypeScript, which has no JSX, nor on JavaScript that js-beautify prints. Stylistic only; does not change the AST.",
+            "markdownDescription": "Put every JSX attribute on its own line as soon as an element has more than one (Prettier singleAttributePerLine). Applies to TSX, JSX and a JavaScript file that contains JSX; it has no effect on plain TypeScript, which has no JSX, nor on JavaScript that js-beautify prints. Stylistic only; does not change the AST.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.objectWrap": {
+            "type": "string",
+            "default": "preserve",
+            "enum": [
+              "preserve",
+              "collapse"
+            ],
+            "scope": "language-overridable",
+            "order": 10,
+            "description": "How an object literal written with a line break after its opening brace is printed: 'preserve' keeps it expanded, 'collapse' joins it onto one line when it fits (Prettier objectWrap). Applies to TypeScript, TSX, JSX and a JavaScript file that contains JSX; it has no effect on JavaScript that js-beautify prints. Stylistic only; does not change the AST.",
+            "markdownDescription": "How an object literal written with a line break after its opening brace is printed: 'preserve' keeps it expanded, 'collapse' joins it onto one line when it fits (Prettier objectWrap). Applies to TypeScript, TSX, JSX and a JavaScript file that contains JSX; it has no effect on JavaScript that js-beautify prints. Stylistic only; does not change the AST.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       },
@@ -690,7 +761,7 @@
     "postcss": "^8.4.35",
     "postcss-less": "^6.0.0",
     "postcss-scss": "^4.0.9",
-    "prettier": "^3.2.0",
+    "prettier": "^3.5.0",
     "smol-toml": "^1.3.1"
   },
   "devDependencies": {

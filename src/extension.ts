@@ -58,6 +58,10 @@ import {
   STATUS_BAR_MENU_COMMAND_ID,
   showStatusBarMenu
 } from './commands/statusBarMenu';
+import {
+  WHO_FORMATS_COMMAND_ID,
+  whoFormats
+} from './commands/whoFormats';
 import { createTidyStatusBar } from './diagnostics/statusBarHost';
 import { getTidyOutputChannel } from './diagnostics/outputChannel';
 import { sanitizeDetail } from './diagnostics/lastFormat';
@@ -176,6 +180,15 @@ export function activate(context: vscode.ExtensionContext): void {
       SHOW_FORMAT_HISTORY_COMMAND_ID,
       showFormatHistory
     )
+  );
+
+  // Who Formats This File? (v0.5.0): names the formatter, the settings scopes and the
+  // incumbent behind a file that gets reformatted. Strictly read-only: it writes no
+  // setting and no file, opens no connection and hooks no event; its only output is
+  // text for the Tidy output channel and a toast whose buttons OPEN Settings or the
+  // Extensions view. Registering it does nothing on its own.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(WHO_FORMATS_COMMAND_ID, whoFormats)
   );
 
   // Status bar (ADD-05, v0.3.0): a single, purely OBSERVATIONAL StatusBarItem.

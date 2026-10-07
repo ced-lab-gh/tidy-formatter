@@ -116,6 +116,14 @@ interface StubState {
    * unset key still answers "not set" and no on-disk layer is consulted.
    */
   files: Record<string, unknown>;
+  /**
+   * Forces the M3-1 prettier-ignore check to fail in one of the two ways it can:
+   * it answers "unchecked", or it throws. Neither happens organically, because
+   * the check parses the document with the guard's own plugin set and the guard
+   * has accepted the write before the check is asked; the seam exists so the
+   * fail-safe path is exercised rather than trusted.
+   */
+  ignoreCheckFault: 'unchecked' | 'throw' | undefined;
 }
 
 const state: StubState = {
@@ -123,7 +131,8 @@ const state: StubState = {
   warnings: [],
   warningActions: [],
   infos: [],
-  files: {}
+  files: {},
+  ignoreCheckFault: undefined
 };
 
 const vscodeStub = {
@@ -220,9 +229,33 @@ interface ProviderModule {
   ENGINE_ERROR_WARNING_MESSAGE: string;
   /** The refusal message for an HTML selection whose boundary cuts a tag. */
   TAG_SPLIT_WARNING_MESSAGE: string;
+  /** The refusal message for a selection over a node a prettier-ignore outside it protects. */
+  IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE: string;
+  /** The reason recorded for that refusal. */
+  IGNORE_OUTSIDE_SELECTION_REASON: string;
+  /** The notice when that refusal could not be decided (the file does not parse). */
+  IGNORE_UNCHECKED_NOTICE: string;
 }
 
 type LoadFn = (request: string, parent: unknown, isMain: boolean) => unknown;
+
+type PrettierIgnoreModule = typeof import('../../../src/engine/prettierIgnore');
+
+/** The real module, except that the selection check can be made to fail on demand. */
+function withIgnoreCheckFault(real: PrettierIgnoreModule): PrettierIgnoreModule {
+  return {
+    ...real,
+    checkSelectionAgainstPrettierIgnore: (...args) => {
+      if (state.ignoreCheckFault === 'throw') {
+        throw new Error('forced by the test');
+      }
+      if (state.ignoreCheckFault === 'unchecked') {
+        return 'unchecked';
+      }
+      return real.checkSelectionAgainstPrettierIgnore(...args);
+    }
+  };
+}
 
 describe('providers/formattingProvider : the format seam, end to end', () => {
   const loader = Module as unknown as { _load: LoadFn };
@@ -242,7 +275,11 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
       if (request === 'vscode') {
         return vscodeStub;
       }
-      return originalLoad.call(this, request, parent, isMain);
+      const loaded = originalLoad.call(this, request, parent, isMain);
+      if (request.endsWith('/engine/prettierIgnore')) {
+        return withIgnoreCheckFault(loaded as PrettierIgnoreModule);
+      }
+      return loaded;
     };
     providers = require('../../../src/providers/formattingProvider') as ProviderModule;
   });
@@ -263,6 +300,7 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
     state.warningActions = [];
     state.infos = [];
     state.files = {};
+    state.ignoreCheckFault = undefined;
     clearLastFormat();
   });
 
@@ -1323,16 +1361,17 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
     assert.deepEqual(state.warningActions[1], ['Explain', 'Report Issue']);
   });
 
-  it('the three messages are distinct, English, em-dash-free and all reassure', () => {
+  it('the four messages are distinct, English, em-dash-free and all reassure', () => {
     const engine = providers.ENGINE_ERROR_WARNING_MESSAGE;
     const verdict = providers.ABORT_WARNING_MESSAGE;
     const tagSplit = providers.TAG_SPLIT_WARNING_MESSAGE;
+    const ignoreOutside = providers.IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE;
     assert.equal(
-      new Set([engine, verdict, tagSplit]).size,
-      3,
+      new Set([engine, verdict, tagSplit, ignoreOutside]).size,
+      4,
       'splitting them is the whole point'
     );
-    for (const message of [engine, verdict, tagSplit]) {
+    for (const message of [engine, verdict, tagSplit, ignoreOutside]) {
       assert.ok(
         message.startsWith('Tidy did not apply the format:'),
         `both must open the same way, got ${JSON.stringify(message)}`
@@ -1509,6 +1548,320 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
       !lastRecord(document).detail?.startsWith('selection boundary inside a tag'),
       'nor may it be recorded there'
     );
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* M3-1: a selection never drops a prettier-ignore it cannot see        */
+  /* ------------------------------------------------------------------ */
+  //
+  // Prettier honours `// prettier-ignore` natively, but a selection format hands
+  // it ONLY the selected text. A directive above the node it protects, outside
+  // the selection, is not in what Prettier parses, so the node was reprinted as
+  // if it had none, and the guard said "equivalent" (the change is whitespace).
+  // Interim rule until a selection is formatted against the whole document:
+  // REFUSE that one shape, zero edits, and tell the user to use Format Document.
+  // Only a format that would WRITE is refused; everything that does not involve a
+  // prettier-ignore node behaves exactly as before.
+
+  const IGNORED_MATRIX =
+    'const matrix = [\n  1,0,0,\n  0,1,0,\n  0,0,1\n];';
+  const IGNORE_SOURCE =
+    'const  a   =   1;\n// prettier-ignore\n' + IGNORED_MATRIX + '\nconst  b   =   2;\n';
+  const ignoreAt = IGNORE_SOURCE.indexOf('// prettier-ignore');
+  const matrixAt = IGNORE_SOURCE.indexOf('const matrix');
+  const matrixEnd = matrixAt + IGNORED_MATRIX.length;
+
+  it('M3-1: refuses a selection over the node, with the directive left outside', async () => {
+    const document = new FakeDocument('typescriptreact', IGNORE_SOURCE, '/w/ig1.tsx');
+
+    const edits = await formatSelection(document, matrixAt, IGNORE_SOURCE.length);
+
+    assert.equal(edits.length, 0, 'zero edits: the protected node must stay as written');
+    const record = lastRecord(document);
+    assert.equal(record.scope, 'selection');
+    // The provider decided this itself: no guard verdict exists to report.
+    assert.equal(record.status, 'engine-error');
+    assert.equal(record.detail, providers.IGNORE_OUTSIDE_SELECTION_REASON);
+    assert.equal(record.engineId, 'prettier');
+  });
+
+  it('M3-1: the buffer is byte-identical afterwards, protected node included', async () => {
+    const document = new FakeDocument('typescriptreact', IGNORE_SOURCE, '/w/ig2.tsx');
+
+    const applied = applyEdits(
+      IGNORE_SOURCE,
+      await formatSelection(document, matrixAt, matrixEnd)
+    );
+
+    assert.equal(applied, IGNORE_SOURCE);
+    assert.ok(applied.includes(IGNORED_MATRIX));
+  });
+
+  it('M3-1: says to use Format Document, with the usual two remedies', async () => {
+    const document = new FakeDocument('typescriptreact', IGNORE_SOURCE, '/w/ig3.tsx');
+
+    await formatSelection(document, matrixAt, IGNORE_SOURCE.length);
+
+    assert.deepEqual(state.warnings, [providers.IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE]);
+    assert.deepEqual(state.warningActions[0], ['Explain', 'Report Issue']);
+    assert.ok(
+      providers.IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE.includes('Use Format Document'),
+      'the message must say what to do instead'
+    );
+  });
+
+  it('M3-1: the same file still formats at DOCUMENT scope, and the node survives', async () => {
+    // The directive is in view of a whole-document format, which is the remedy.
+    const document = new FakeDocument('typescriptreact', IGNORE_SOURCE, '/w/ig4.tsx');
+
+    const edits = await formatDocument(document);
+
+    assert.equal(edits.length, 1, 'the document must still be formatted');
+    assert.ok(edits[0].newText.includes(IGNORED_MATRIX), 'the node stays as written');
+    assert.ok(edits[0].newText.includes('const a = 1;'), 'and the rest is formatted');
+    assert.equal(state.warnings.length, 0);
+  });
+
+  it('M3-1: a selection that includes the directive is left to Prettier and keeps the node', async () => {
+    const document = new FakeDocument('typescriptreact', IGNORE_SOURCE, '/w/ig5.tsx');
+
+    const edits = await formatSelection(document, ignoreAt, IGNORE_SOURCE.length);
+
+    assert.equal(edits.length, 1, 'nothing to refuse: the directive is in the text');
+    assert.ok(edits[0].newText.includes(IGNORED_MATRIX), 'Prettier honours it');
+    assert.ok(edits[0].newText.includes('const b = 2;'));
+    assert.equal(state.warnings.length, 0);
+    assert.equal(lastRecord(document).status, 'applied');
+  });
+
+  it('M3-1: a selection that does not touch the node is not refused', async () => {
+    const document = new FakeDocument('typescriptreact', IGNORE_SOURCE, '/w/ig6.tsx');
+
+    const edits = await formatSelection(document, 0, IGNORE_SOURCE.indexOf('\n') + 1);
+
+    assert.equal(edits.length, 1);
+    assert.ok(edits[0].newText.includes('const a = 1;'));
+    assert.equal(state.warnings.length, 0);
+    assert.equal(lastRecord(document).status, 'applied');
+  });
+
+  it('M3-1: a selection after the node is not refused either', async () => {
+    const document = new FakeDocument('typescriptreact', IGNORE_SOURCE, '/w/ig7.tsx');
+
+    const edits = await formatSelection(document, IGNORE_SOURCE.indexOf('const  b'), IGNORE_SOURCE.length);
+
+    assert.equal(edits.length, 1);
+    assert.ok(edits[0].newText.includes('const b = 2;'));
+    assert.equal(state.warnings.length, 0);
+  });
+
+  it('M3-1: only a WRITE is refused: a selection that changes nothing stays a quiet no-op', async () => {
+    const source = 'const  z   =   0;\n// prettier-ignore\nconst b = 2;\n';
+    const document = new FakeDocument('typescript', source, '/w/ig8.ts');
+
+    const edits = await formatSelection(
+      document,
+      source.indexOf('const b'),
+      source.indexOf('const b') + 'const b = 2;'.length
+    );
+
+    assert.equal(edits.length, 0);
+    assert.equal(lastRecord(document).status, 'already-tidy');
+    assert.equal(state.warnings.length, 0, 'no toast for a format that writes nothing');
+  });
+
+  it('M3-1: an abort keeps its own, more specific reason', async () => {
+    // A selection that cannot be parsed stays an engine error, not a refusal.
+    const source =
+      'const  z   =   0;\n// prettier-ignore\nconst  a   =   [1,\n 2];\nconst  b   =   [3,\n 4];\n';
+    const document = new FakeDocument('typescript', source, '/w/ig9.ts');
+
+    const edits = await formatSelection(document, source.indexOf(' 2];'), source.length);
+
+    assert.equal(edits.length, 0);
+    assert.equal(lastRecord(document).status, 'engine-error');
+    assert.notEqual(lastRecord(document).detail, providers.IGNORE_OUTSIDE_SELECTION_REASON);
+    assert.ok(!state.warnings.includes(providers.IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE));
+  });
+
+  it('M3-1: a selection INSIDE the protected node is refused when it would write', async () => {
+    const source =
+      'const  z   =   1;\n// prettier-ignore\nfunction keep() {\n  const  p   =   [1,0,\n     0,1];\n  return   p\n}\n';
+    const document = new FakeDocument('typescript', source, '/w/ig10.ts');
+    const start = source.indexOf('const  p');
+    const end = source.indexOf('return   p') + 'return   p'.length;
+
+    const edits = await formatSelection(document, start, end);
+
+    assert.equal(edits.length, 0);
+    assert.equal(applyEdits(source, edits), source);
+    assert.ok(
+      lastRecord(document).detail === providers.IGNORE_OUTSIDE_SELECTION_REASON ||
+        lastRecord(document).status === 'engine-error',
+      'refused by this rule, or by the engine if the slice does not parse'
+    );
+  });
+
+  it('M3-1: a trailing directive governs the node before it', async () => {
+    const source = 'const  a   =   [1,0,\n 0,1]; // prettier-ignore\nconst  b   =   2;\n';
+    const document = new FakeDocument('typescript', source, '/w/ig11.ts');
+
+    const edits = await formatSelection(document, 0, source.indexOf('// prettier-ignore') - 1);
+
+    assert.equal(edits.length, 0, 'the directive is outside the selection: refused');
+    assert.equal(lastRecord(document).detail, providers.IGNORE_OUTSIDE_SELECTION_REASON);
+  });
+
+  it('M3-1: a .jsx is on the Prettier path too', async () => {
+    const jsxSource =
+      'const  a   =   <div/>;\n// prettier-ignore\n' +
+      IGNORED_MATRIX +
+      '\nconst  z   =   <p   x = "1">y</p>;\n';
+    const document = new FakeDocument('javascriptreact', jsxSource, '/w/ig12.jsx');
+
+    const edits = await formatSelection(
+      document,
+      jsxSource.indexOf('const matrix'),
+      jsxSource.length
+    );
+
+    assert.equal(edits.length, 0, 'javascriptreact must be refused');
+    assert.equal(lastRecord(document).engineId, 'prettier');
+    assert.equal(lastRecord(document).detail, providers.IGNORE_OUTSIDE_SELECTION_REASON);
+  });
+
+  it('M3-1: a .js on the Prettier path keeps a node its own mask already protects', async () => {
+    // A .js selection masks the marker line and the first line of the node it
+    // marks, whichever printer runs. A one-line node is therefore put back byte
+    // for byte even with the directive outside the selection, so refusing it
+    // would be a false refusal of something that works.
+    const source =
+      'const  a   =   <div/>;\n// prettier-ignore\nconst   keep   =   [1,0,  0,1];\nconst  z   =   <p   x = "1">y</p>;\n';
+    const document = new FakeDocument('javascript', source, '/w/ig12.js');
+
+    const edits = await formatSelection(
+      document,
+      source.indexOf('const   keep'),
+      source.length
+    );
+
+    assert.equal(edits.length, 1);
+    assert.equal(lastRecord(document).engineId, 'prettier', 'the JSX in the selection routes it');
+    assert.ok(edits[0].newText.includes('const   keep   =   [1,0,  0,1];'), 'verbatim');
+    assert.ok(edits[0].newText.includes('<p x="1">y</p>'), 'and the JSX is formatted');
+    assert.equal(state.warnings.length, 0);
+  });
+
+  it('M3-1: a .js selection that js-beautify prints is untouched by the rule', async () => {
+    // No JSX in the selected text, so the printer that runs is js-beautify, whose
+    // own mask handles in-source markers. Behaviour is exactly what it was.
+    const source = 'var  a   =   1;\n// prettier-ignore\nvar  keep   =   [1,0,\n 0,1];\nvar  b   =   2;\n';
+    const document = new FakeDocument('javascript', source, '/w/ig13.js');
+
+    await formatSelection(document, source.indexOf('var  keep'), source.length);
+
+    assert.ok(!state.warnings.includes(providers.IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE));
+    assert.notEqual(lastRecord(document).engineId, 'prettier');
+    assert.notEqual(lastRecord(document).detail, providers.IGNORE_OUTSIDE_SELECTION_REASON);
+  });
+
+  it('M3-1: a comment that only mentions prettier-ignore does not refuse anything', async () => {
+    const source =
+      'const  a   =   1;\n// prettier-ignore because the matrix reads better\n' +
+      IGNORED_MATRIX +
+      '\n';
+    const document = new FakeDocument('typescript', source, '/w/ig14.ts');
+
+    const edits = await formatSelection(document, source.indexOf('const matrix'), source.length);
+
+    assert.equal(edits.length, 1, 'not a directive, so the node is formatted as usual');
+    assert.equal(state.warnings.length, 0);
+  });
+
+  it('M3-1: CSS and the other js-beautify families never meet the rule', async () => {
+    const source = '.a{color:red}\n/* prettier-ignore */\n.b{color:blue}\n';
+    const document = new FakeDocument('css', source, '/w/ig15.css');
+
+    await formatSelection(document, source.indexOf('.b'), source.length);
+
+    assert.ok(!state.warnings.includes(providers.IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE));
+    assert.notEqual(lastRecord(document).detail, providers.IGNORE_OUTSIDE_SELECTION_REASON);
+  });
+
+  for (const fault of ['unchecked', 'throw'] as const) {
+    it(`M3-1: a check that cannot run (${fault}) is reported, never silently trusted`, async () => {
+      // The directive lies outside the selection and the check could not tell
+      // what it governs. The format goes ahead exactly as before the rule
+      // existed (fail-open on the new rule only: the guard has already judged the
+      // write), and the user is told why it was not checked.
+      state.ignoreCheckFault = fault;
+      const source =
+        'const  z   =   0;\n// prettier-ignore\nconst  a   =   [1,\n 2];\nconst  b   =   3;\n';
+      const document = new FakeDocument('typescript', source, `/w/ig16-${fault}.ts`);
+
+      const edits = await formatSelection(
+        document,
+        source.indexOf('const  b'),
+        source.length
+      );
+
+      assert.equal(edits.length, 1, 'behaviour unchanged when the check cannot run');
+      assert.equal(lastRecord(document).status, 'applied');
+      assert.ok(
+        lastRecord(document).detail?.includes(providers.IGNORE_UNCHECKED_NOTICE),
+        `Explain must repeat the notice, got ${JSON.stringify(lastRecord(document).detail)}`
+      );
+      assert.ok(
+        state.channelLines.some((line) => line.includes(providers.IGNORE_UNCHECKED_NOTICE)),
+        'and the output channel carries it'
+      );
+      assert.equal(state.warnings.length, 0, 'a notice, not a toast');
+    });
+  }
+
+  it('M3-1: a document the guard cannot parse is the guards call, before the rule is asked', async () => {
+    // The check parses with the guard's own plugin set, so a document it cannot
+    // read is one the guard has already rejected: no write, no refusal, no notice.
+    const source =
+      'const  z   =   0;\n// prettier-ignore\nconst  a   =   1;\nconst  b   =   2;\n}}}\n';
+    const document = new FakeDocument('typescript', source, '/w/ig16-guard.ts');
+
+    const edits = await formatSelection(
+      document,
+      source.indexOf('const  b'),
+      source.indexOf('\n}}}')
+    );
+
+    assert.equal(edits.length, 0);
+    assert.equal(lastRecord(document).status, 'guard-rejected');
+    assert.ok(
+      !state.channelLines.some((line) => line.includes(providers.IGNORE_UNCHECKED_NOTICE))
+    );
+  });
+
+  it('M3-1: a file without the directive pays nothing and behaves as before', async () => {
+    const source = 'const  a   =   1;\nconst  b   =   2;\n';
+    const document = new FakeDocument('typescript', source, '/w/ig17.ts');
+
+    const edits = await formatSelection(document, 0, source.length);
+
+    assert.equal(edits.length, 1);
+    assert.equal(lastRecord(document).detail, undefined);
+    assert.equal(state.warnings.length, 0);
+  });
+
+  it('M3-1: the refusal text is English, ASCII, em-dash free and content-free', () => {
+    for (const text of [
+      providers.IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE,
+      providers.IGNORE_OUTSIDE_SELECTION_REASON,
+      providers.IGNORE_UNCHECKED_NOTICE
+    ]) {
+      assert.ok(/^[\x20-\x7e]+$/.test(text), `plain ASCII only: ${text}`);
+      assert.ok(!text.includes(String.fromCharCode(0x2014)));
+      assert.ok(text.length < 400);
+    }
+    assert.ok(providers.IGNORE_OUTSIDE_SELECTION_REASON.length < 200, 'survives sanitizeDetail');
+    assert.ok(providers.IGNORE_UNCHECKED_NOTICE.length < 200, 'survives sanitizeDetail');
   });
 
   /* ------------------------------------------------------------------ */

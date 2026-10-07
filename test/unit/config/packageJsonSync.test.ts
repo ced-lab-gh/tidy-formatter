@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OPTION_CATALOG } from '../../../src/config/optionCatalog';
+import { MAX_TAG_LIST_ENTRIES, sanitizeTagList } from '../../../src/config/tagList';
 import {
   DEFAULT_MAX_FILE_SIZE_KB,
   JSON_DEFAULT_MAX_FILE_SIZE_KB
@@ -17,6 +18,9 @@ import {
 interface PkgProperty {
   type?: string;
   default?: unknown;
+  items?: { type?: string; pattern?: string; patternErrorMessage?: string };
+  uniqueItems?: boolean;
+  maxItems?: number;
   enum?: string[];
   enumDescriptions?: string[];
   minimum?: number;
@@ -94,7 +98,10 @@ const EXPECTED_SECTIONS: readonly { title: string; keys: readonly string[] }[] =
       'tidy.break_chained_methods',
       'tidy.keep_array_indentation',
       'tidy.comma_first',
-      'tidy.operator_position'
+      'tidy.operator_position',
+      // OPTIONS-6
+      'tidy.space_before_conditional',
+      'tidy.jslint_happy'
     ]
   },
   {
@@ -111,7 +118,10 @@ const EXPECTED_SECTIONS: readonly { title: string; keys: readonly string[] }[] =
       'tidy.wrap_attributes',
       'tidy.wrap_attributes_indent_size',
       'tidy.indent_inner_html',
-      'tidy.indent_scripts'
+      'tidy.indent_scripts',
+      // OPTIONS-6: the two additive tag lists
+      'tidy.content_unformatted',
+      'tidy.void_elements'
     ]
   },
   {
@@ -124,7 +134,10 @@ const EXPECTED_SECTIONS: readonly { title: string; keys: readonly string[] }[] =
       'tidy.prettier.trailingComma',
       'tidy.prettier.bracketSpacing',
       'tidy.prettier.bracketSameLine',
-      'tidy.prettier.arrowParens'
+      'tidy.prettier.arrowParens',
+      // OPTIONS-6
+      'tidy.prettier.singleAttributePerLine',
+      'tidy.prettier.objectWrap'
     ]
   },
   {
@@ -239,10 +252,54 @@ describe('config/packageJsonSync : catalogue ⇄ package.json', () => {
   it('declared type / default / scope / description match the catalogue', () => {
     for (const entry of OPTION_CATALOG) {
       const prop = props[entry.settingKey];
-      assert.equal(prop.type, entry.type, `${entry.settingKey} type`);
+      // VS Code spells a list of strings "array"; the catalogue spells it 'string-list'.
+      assert.equal(
+        prop.type,
+        entry.type === 'string-list' ? 'array' : entry.type,
+        `${entry.settingKey} type`
+      );
       assert.deepEqual(prop.default, entry.default, `${entry.settingKey} default`);
       assert.equal(prop.scope, entry.scope, `${entry.settingKey} scope`);
       assert.equal(prop.description, entry.description, `${entry.settingKey} description`);
+    }
+  });
+
+  it('a list option declares string items, a tag-name pattern, unique items and the same cap as the validator', () => {
+    const lists = OPTION_CATALOG.filter((entry) => entry.type === 'string-list');
+    assert.deepEqual(
+      lists.map((entry) => entry.settingKey).sort(),
+      ['tidy.content_unformatted', 'tidy.void_elements']
+    );
+    for (const entry of lists) {
+      const prop = props[entry.settingKey];
+      assert.equal(prop.type, 'array', entry.settingKey);
+      assert.deepEqual(prop.default, [], `${entry.settingKey} defaults to an empty list`);
+      assert.equal(prop.items?.type, 'string', entry.settingKey);
+      assert.equal(prop.uniqueItems, true, entry.settingKey);
+      assert.equal(prop.maxItems, MAX_TAG_LIST_ENTRIES, `${entry.settingKey} cap mirrors the validator`);
+      assert.ok(prop.items?.patternErrorMessage, `${entry.settingKey} explains a pattern mismatch`);
+    }
+  });
+
+  it('the item pattern shown in the editor accepts what the validator accepts, and refuses what it refuses', () => {
+    // The pattern is the squiggle VS Code draws under a bad entry; the validator is
+    // what actually decides. They must not contradict each other on a bare name.
+    const pattern = new RegExp(String(props['tidy.content_unformatted'].items?.pattern));
+    assert.equal(
+      props['tidy.void_elements'].items?.pattern,
+      props['tidy.content_unformatted'].items?.pattern,
+      'one pattern for both lists'
+    );
+    const samples = [
+      'code', 'my-icon', 'x_y', 'h1', 'CODE', 'a', 'a b', '<code>', 'a.b', 'a(', '(', '[', 'x+', '1a',
+      '-x', '_x', '', 'é', 'a/b', 'a:b', '!doctype'
+    ];
+    for (const sample of samples) {
+      assert.equal(
+        pattern.test(sample),
+        sanitizeTagList('content_unformatted', [sample]).tags.length === 1,
+        `pattern and validator disagree on ${JSON.stringify(sample)}`
+      );
     }
   });
 

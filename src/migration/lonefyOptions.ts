@@ -16,99 +16,13 @@
 // produced. This is the contract the anti-hijack rule depends on: nothing is ever
 // derived or written silently; out-of-domain values are reported, not applied.
 import { parse as parseJsonc, type ParseError, printParseErrorCode } from 'jsonc-parser';
+import {
+  LONEFY_KEYS,
+  coerceValue,
+  isMappedKey,
+  type CoerceContext
+} from './lonefyKeys';
 import type { LonefyMappingResult } from './types';
-
-/** Canonical Tidy setting ids this mapper can produce (all real package.json keys). */
-const TIDY_INDENT = 'tidy.indent';
-const TIDY_BRACE_STYLE = 'tidy.brace_style';
-const TIDY_WRAP_LINE_LENGTH = 'tidy.wrap_line_length';
-const TIDY_WRAP_ATTRIBUTES = 'tidy.wrap_attributes';
-const TIDY_SPACE_AFTER_ANON_FUNCTION = 'tidy.space_after_anon_function';
-
-/**
- * `tidy.indent` (js-beautify indent_size) accepts an integer in [1, 16] in
- * package.json. Values outside this range are dropped (warned), never written.
- */
-const INDENT_MIN = 1;
-const INDENT_MAX = 16;
-
-/**
- * Allowed `tidy.brace_style` values, copied verbatim from package.json's enum so
- * the mapper can never propose a value VS Code would reject.
- */
-const BRACE_STYLE_ENUM: ReadonlySet<string> = new Set([
-  'collapse',
-  'expand',
-  'end-expand',
-  'none',
-  'collapse-preserve-inline'
-]);
-
-/**
- * Allowed `tidy.wrap_attributes` values, copied verbatim from package.json's enum.
- */
-const WRAP_ATTRIBUTES_ENUM: ReadonlySet<string> = new Set([
-  'auto',
-  'force',
-  'force-aligned',
-  'force-expand-multiline',
-  'aligned-multiple',
-  'preserve',
-  'preserve-aligned'
-]);
-
-/**
- * Legacy js-beautify keys this mapper understands. Any source key NOT in this set
- * is reported in `unmapped` (never written). Kept as a set so the "is this key
- * recognised at all?" check is O(1) and stays in sync with the switch below.
- */
-const KNOWN_LONEFY_KEYS: ReadonlySet<string> = new Set([
-  'indent_size',
-  'brace_style',
-  'wrap_line_length',
-  'wrap_attributes',
-  'space_after_anon_function'
-]);
-
-/**
- * Coerce a js-beautify numeric option to a non-negative integer. js-beautify (and
- * `.jsbeautifyrc`) values may be a real number or a numeric string; only genuine
- * integers are accepted. Returns undefined for anything else so a malformed value
- * is reported rather than silently written.
- */
-function coerceInteger(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isInteger(value)) {
-    return value;
-  }
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value.trim());
-    if (Number.isInteger(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Coerce a js-beautify boolean option. Accepts a real boolean or the strings
- * "true"/"false" (case-insensitive), which `.jsbeautifyrc` files sometimes carry.
- * Returns undefined for anything else so it is reported, not written.
- */
-function coerceBoolean(value: unknown): boolean | undefined {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const lower = value.trim().toLowerCase();
-    if (lower === 'true') {
-      return true;
-    }
-    if (lower === 'false') {
-      return false;
-    }
-  }
-  return undefined;
-}
 
 /** Type guard: a non-null, non-array plain object usable as a key/value bag. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -127,8 +41,8 @@ export function hasForeignPrototype(value: object): boolean {
 }
 
 /**
- * Mutable accumulator used while mapping. Encapsulated so the per-key handlers
- * stay small and the public result is assembled once, immutably, at the end.
+ * Mutable accumulator used while mapping. Encapsulated so the per-key handler stays
+ * small and the public result is assembled once, immutably, at the end.
  */
 interface Accumulator {
   settings: Record<string, unknown>;
@@ -137,64 +51,26 @@ interface Accumulator {
 }
 
 /** Map a single recognised key into the accumulator (validating its value). */
-function mapKnownKey(key: string, value: unknown, acc: Accumulator): void {
-  switch (key) {
-    case 'indent_size': {
-      const n = coerceInteger(value);
-      if (n !== undefined && n >= INDENT_MIN && n <= INDENT_MAX) {
-        acc.settings[TIDY_INDENT] = n;
-      } else {
-        acc.warnings.push(
-          `indent_size: ignored value ${describeValue(value)} (expected an integer in [${INDENT_MIN}, ${INDENT_MAX}]).`
-        );
-      }
+function mapKnownKey(
+  key: string,
+  value: unknown,
+  context: CoerceContext,
+  acc: Accumulator
+): void {
+  const spec = LONEFY_KEYS[key];
+  const coerced = coerceValue(spec.domain, value, context);
+  switch (coerced.kind) {
+    case 'value':
+      acc.settings[spec.tidyKey] = coerced.value;
       return;
-    }
-    case 'brace_style': {
-      if (typeof value === 'string' && BRACE_STYLE_ENUM.has(value)) {
-        acc.settings[TIDY_BRACE_STYLE] = value;
-      } else {
-        acc.warnings.push(
-          `brace_style: ignored value ${describeValue(value)} (expected one of ${listEnum(BRACE_STYLE_ENUM)}).`
-        );
-      }
-      return;
-    }
-    case 'wrap_line_length': {
-      const n = coerceInteger(value);
-      if (n !== undefined && n >= 0) {
-        acc.settings[TIDY_WRAP_LINE_LENGTH] = n;
-      } else {
-        acc.warnings.push(
-          `wrap_line_length: ignored value ${describeValue(value)} (expected a non-negative integer).`
-        );
-      }
-      return;
-    }
-    case 'wrap_attributes': {
-      if (typeof value === 'string' && WRAP_ATTRIBUTES_ENUM.has(value)) {
-        acc.settings[TIDY_WRAP_ATTRIBUTES] = value;
-      } else {
-        acc.warnings.push(
-          `wrap_attributes: ignored value ${describeValue(value)} (expected one of ${listEnum(WRAP_ATTRIBUTES_ENUM)}).`
-        );
-      }
-      return;
-    }
-    case 'space_after_anon_function': {
-      const b = coerceBoolean(value);
-      if (b !== undefined) {
-        acc.settings[TIDY_SPACE_AFTER_ANON_FUNCTION] = b;
-      } else {
-        acc.warnings.push(
-          `space_after_anon_function: ignored value ${describeValue(value)} (expected a boolean).`
-        );
-      }
-      return;
-    }
-    default:
-      // Unreachable: callers gate on KNOWN_LONEFY_KEYS. Defensive only.
+    case 'no-equivalent':
+      // A legitimate incumbent value Tidy cannot express: reported, never guessed.
       acc.unmapped.push(key);
+      return;
+    case 'invalid':
+      acc.warnings.push(
+        `${key}: ignored value ${describeValue(value)} (expected ${coerced.expected}).`
+      );
   }
 }
 
@@ -219,9 +95,14 @@ export function describeValue(value: unknown): string {
   return typeof value;
 }
 
-/** Render an enum set as a stable, quoted, comma-separated list for messages. */
-function listEnum(set: ReadonlySet<string>): string {
-  return [...set].map((v) => `'${v}'`).join(', ');
+/** Options of {@link mapLonefyOptions}. */
+export interface MapOptions {
+  /**
+   * Whether the strings "true" / "false" are read as booleans. Default true (a
+   * `.jsbeautifyrc` may carry them). The migration passes false for a section of
+   * the incumbent's own file, where `"false"` is truthy (see CoerceContext).
+   */
+  readonly stringBooleans?: boolean;
 }
 
 /**
@@ -235,7 +116,10 @@ function listEnum(set: ReadonlySet<string>): string {
  *
  * The input is never mutated; a fresh result object is returned.
  */
-export function mapLonefyOptions(raw: unknown): LonefyMappingResult {
+export function mapLonefyOptions(
+  raw: unknown,
+  options: MapOptions = {}
+): LonefyMappingResult {
   if (!isPlainObject(raw)) {
     return {
       settings: {},
@@ -246,11 +130,12 @@ export function mapLonefyOptions(raw: unknown): LonefyMappingResult {
     };
   }
 
+  const context: CoerceContext = { stringBooleans: options.stringBooleans ?? true };
   const acc: Accumulator = { settings: {}, unmapped: [], warnings: [] };
 
   for (const key of Object.keys(raw)) {
-    if (KNOWN_LONEFY_KEYS.has(key)) {
-      mapKnownKey(key, raw[key], acc);
+    if (isMappedKey(key)) {
+      mapKnownKey(key, raw[key], context, acc);
     } else {
       acc.unmapped.push(key);
     }

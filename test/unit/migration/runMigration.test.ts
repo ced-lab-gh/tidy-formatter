@@ -1,22 +1,25 @@
-// Unit tests for the PURE pieces of the migration flow (Axe 1 / 1.T4).
+// Unit tests for the PURE pieces of the migration flow (Axe 1 / 1.T4), ported in
+// v0.5.0 to the new recap API (buildMigrationRecap now takes what the source reader
+// found, not a pre-mapped result).
 //
 // PURE (no 'vscode'): we import only the recap builders + message formatter +
-// constants. The host handler (`runMigration`, `showMigrationNotification`) loads
-// 'vscode' lazily inside its body, so importing this module does NOT pull in
-// 'vscode'.
+// constants, through the re-exports of src/migration/runMigration. The host handler
+// (`runMigration`, `showMigrationNotification`) loads 'vscode' lazily inside its
+// body, so importing this module does NOT pull in 'vscode'.
 //
-// WHAT IS NOT COVERED, stated plainly (corrected in v0.4.1: this header used to
-// claim "the host flow itself is covered by the integration suite", and it is
-// not : no test anywhere names `runMigration`, and the host half of
-// src/migration/runMigration.ts measures 0 % line coverage). Untested today:
-// the trust check, the .jsbeautifyrc read, the modal recap, the settings WRITE
-// after consent, the "use as formatter" follow-up and the one-shot migration
-// notification. Only the pure pieces listed below are exercised. Closing that
-// gap is tracked for v0.5.0 with the other coverage items; until then nothing
-// here may be read as evidence that the write path works.
+// WHAT IS COVERED ELSEWHERE, stated plainly. (Corrected in v0.4.1: this header used
+// to claim "the host flow itself is covered by the integration suite", and it was
+// not: no test named `runMigration`. Since v0.5.0 it is covered, and this header
+// says where.) The host flow (the trust check, the file reads, the modal recap, the
+// settings WRITE after consent, the rollback, the "use as formatter" follow-up and
+// the closing messages) is exercised by mock-driven tests of `runMigrationWith` in
+// runMigrationFlow.test.ts, of the reader in lonefySources.test.ts and of the write
+// in applyWrites.test.ts, and end to end in a real host by
+// test/integration/migration.test.ts. `showMigrationNotification` (the one-shot
+// activation notice) is still not exercised by any test.
 //
-// Coverage focus:
-//   - buildMigrationRecap copies (does not alias) the mapper result;
+// Coverage focus of THIS file, each block ported from the flat-key era:
+//   - buildMigrationRecap copies (does not alias) what it reads;
 //   - hasSettingsToWrite reflects whether anything would be written;
 //   - formatRecapMessage states "nothing changed yet" + the no-formatOnSave /
 //     guide-only contract, and lists settings / unmapped / warnings.
@@ -28,7 +31,12 @@ import {
   RUN_MIGRATION_COMMAND_ID,
   JSBEAUTIFYRC_FILENAME
 } from '../../../src/migration/runMigration';
-import { mapLonefyOptions } from '../../../src/migration/lonefyOptions';
+import type { SourceReadResult } from '../../../src/migration/lonefySources';
+
+/** A `.jsbeautifyrc` read, the flat-key shape this file's ported tests used. */
+function rc(text: string): SourceReadResult {
+  return { state: 'found', kind: 'jsbeautifyrc', text };
+}
 
 describe('migration/runMigration : constants', () => {
   it('exposes the stable command id and legacy filename', () => {
@@ -39,60 +47,62 @@ describe('migration/runMigration : constants', () => {
 
 describe('migration/runMigration : buildMigrationRecap', () => {
   it('carries the mapper settings / unmapped / warnings through', () => {
-    const mapping = mapLonefyOptions({
-      indent_size: 2,
-      brace_style: 'expand',
-      foo: 1
-    });
-    const recap = buildMigrationRecap(true, mapping);
+    const recap = buildMigrationRecap(
+      rc('{"indent_size":2,"brace_style":"expand","foo":1}')
+    );
 
-    assert.equal(recap.rcFound, true);
-    assert.deepEqual(recap.settings, {
-      'tidy.indent': 2,
-      'tidy.brace_style': 'expand'
-    });
-    assert.deepEqual(recap.unmapped, ['foo']);
-    assert.deepEqual(recap.warnings, []);
+    assert.equal(recap.state, 'found');
+    assert.deepEqual(
+      recap.writes.map((write) => [write.key, write.value]),
+      [
+        ['tidy.indent', 2],
+        ['tidy.brace_style', 'expand']
+      ]
+    );
+    assert.deepEqual([...recap.unmapped], ['foo']);
+    assert.deepEqual([...recap.warnings], []);
   });
 
-  it('copies the mapper data (mutating the recap never affects the mapping)', () => {
-    const mapping = mapLonefyOptions({ indent_size: 2, foo: 1 });
-    const recap = buildMigrationRecap(true, mapping);
+  // Old form: "mutating the recap never affects the mapping". The mapping object is
+  // no longer shared with the caller (the recap builds it itself from the read), so
+  // the equivalent guarantee is: two recaps of one read are independent, and the
+  // read result is never touched.
+  it('copies the mapper data (mutating a recap never affects another recap or the read)', () => {
+    const read = rc('{"indent_size":2,"foo":1}');
+    const snapshot = JSON.stringify(read);
+    const a = buildMigrationRecap(read);
+    const b = buildMigrationRecap(read);
 
-    recap.settings['tidy.indent'] = 999;
-    recap.unmapped.push('extra');
+    (a.writes[0] as { value: unknown }).value = 999;
+    (a.unmapped as string[]).push('extra');
 
-    assert.equal(mapping.settings['tidy.indent'], 2, 'mapping settings untouched');
-    assert.deepEqual(mapping.unmapped, ['foo'], 'mapping unmapped untouched');
+    assert.equal(b.writes[0].value, 2, 'another recap untouched');
+    assert.deepEqual([...b.unmapped], ['foo'], 'another recap unmapped untouched');
+    assert.equal(JSON.stringify(read), snapshot, 'the read result untouched');
   });
 
-  it('records rcFound=false with an empty mapping', () => {
-    const recap = buildMigrationRecap(false, {
-      settings: {},
-      unmapped: [],
-      warnings: []
-    });
-    assert.equal(recap.rcFound, false);
+  // Old form: rcFound=false. The recap now says HOW the search ended.
+  it('records "nothing found" with an empty mapping', () => {
+    const recap = buildMigrationRecap({ state: 'none' });
+    assert.equal(recap.state, 'none');
+    assert.equal(recap.source, undefined);
     assert.equal(hasSettingsToWrite(recap), false);
   });
 });
 
 describe('migration/runMigration : hasSettingsToWrite', () => {
   it('is true when there is at least one setting', () => {
-    const recap = buildMigrationRecap(true, mapLonefyOptions({ indent_size: 2 }));
-    assert.equal(hasSettingsToWrite(recap), true);
+    assert.equal(hasSettingsToWrite(buildMigrationRecap(rc('{"indent_size":2}'))), true);
   });
 
   it('is false for an empty settings map', () => {
-    const recap = buildMigrationRecap(true, mapLonefyOptions({ foo: 1 }));
-    assert.equal(hasSettingsToWrite(recap), false);
+    assert.equal(hasSettingsToWrite(buildMigrationRecap(rc('{"foo":1}'))), false);
   });
 });
 
 describe('migration/runMigration : formatRecapMessage', () => {
   it('always states nothing has changed yet and never enables Format On Save', () => {
-    const recap = buildMigrationRecap(true, mapLonefyOptions({ indent_size: 2 }));
-    const message = formatRecapMessage(recap);
+    const message = formatRecapMessage(buildMigrationRecap(rc('{"indent_size":2}')));
     assert.ok(
       message.includes('Nothing has been changed yet'),
       'must reassure: nothing written yet'
@@ -104,44 +114,38 @@ describe('migration/runMigration : formatRecapMessage', () => {
   });
 
   it('lists each setting it would import', () => {
-    const recap = buildMigrationRecap(
-      true,
-      mapLonefyOptions({ indent_size: 2, brace_style: 'expand' })
+    const message = formatRecapMessage(
+      buildMigrationRecap(rc('{"indent_size":2,"brace_style":"expand"}'))
     );
-    const message = formatRecapMessage(recap);
     assert.ok(message.includes('tidy.indent'));
     assert.ok(message.includes('tidy.brace_style'));
   });
 
   it('surfaces unmapped keys verbatim', () => {
-    const recap = buildMigrationRecap(true, mapLonefyOptions({ foo: 1, bar: 2 }));
-    const message = formatRecapMessage(recap);
+    const message = formatRecapMessage(buildMigrationRecap(rc('{"foo":1,"bar":2}')));
     assert.ok(message.includes('foo'));
     assert.ok(message.includes('bar'));
   });
 
-  it('reports when no .jsbeautifyrc was found', () => {
-    const recap = buildMigrationRecap(false, {
-      settings: {},
-      unmapped: [],
-      warnings: []
-    });
-    const message = formatRecapMessage(recap);
-    assert.ok(message.includes('No .jsbeautifyrc was found'));
+  // Old form: the message contained the literal 'No .jsbeautifyrc was found'. That
+  // sentence was the v0.4.2 defect (it claimed the incumbent's only file was
+  // .jsbeautifyrc, which it never reads), so the literal no longer applies. The
+  // assertion it carried, "a search that finds nothing says so", is kept, against
+  // the new wording that names every place looked at.
+  it('reports when no settings file was found', () => {
+    const message = formatRecapMessage(buildMigrationRecap({ state: 'none' }));
+    assert.ok(message.includes('No JS-CSS-HTML Formatter settings file was found'));
+    assert.ok(message.includes('.jsbeautifyrc'), 'it still says .jsbeautifyrc was looked for');
+    assert.ok(!message.includes('No .jsbeautifyrc was found'), 'the v0.4.2 sentence is gone');
   });
 
   it('reports when a file was found but nothing maps', () => {
-    const recap = buildMigrationRecap(true, mapLonefyOptions({ foo: 1 }));
-    const message = formatRecapMessage(recap);
+    const message = formatRecapMessage(buildMigrationRecap(rc('{"foo":1}')));
     assert.ok(message.includes('none of its options map'));
   });
 
   it('includes out-of-domain warnings', () => {
-    const recap = buildMigrationRecap(
-      true,
-      mapLonefyOptions({ indent_size: 999 })
-    );
-    const message = formatRecapMessage(recap);
+    const message = formatRecapMessage(buildMigrationRecap(rc('{"indent_size":999}')));
     assert.ok(message.includes('indent_size'), 'warning text surfaced');
   });
 });

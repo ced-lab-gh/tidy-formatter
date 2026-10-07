@@ -20,15 +20,22 @@ import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import {
   LONEFY_ON_SAVE_KEY,
-  LONEFY_SECTION_LANGUAGES,
   mapLonefyConfig,
   mapLonefyConfigText
 } from '../../../src/migration/lonefyConfig';
+import { LONEFY_KEYS, isMappedKey } from '../../../src/migration/lonefyKeys';
+import { LONEFY_SECTIONS } from '../../../src/migration/lonefySections';
+import {
+  appliesToLanguage,
+  findBySettingKey,
+  type CatalogLang
+} from '../../../src/config/optionCatalog';
 import type { MigrationWrite } from '../../../src/migration/types';
 import {
   LONEFY_CONTRIBUTOR_FORMATTER_JSON,
   LONEFY_DEFAULT_FORMATTER_JSON,
-  LONEFY_DEFAULT_UNMAPPED
+  LONEFY_DEFAULT_UNMAPPED,
+  LONEFY_DEFAULT_WRITES
 } from './lonefyFixtures';
 
 const LOCAL = { label: '.vscode/formatter.json', allowFlatKeys: false } as const;
@@ -46,13 +53,7 @@ describe('migration/lonefyConfig : the REAL default formatter.json shape', () =>
   const result = mapLonefyConfigText(LONEFY_DEFAULT_FORMATTER_JSON, LOCAL);
 
   it('is no longer empty: every mappable key becomes a language-scoped write', () => {
-    assert.deepEqual(lines(result.writes), [
-      '[javascript] tidy.indent = 4',
-      '[javascript] tidy.space_after_anon_function = false',
-      '[javascript] tidy.wrap_line_length = 0',
-      '[css] tidy.indent = 4',
-      '[html] tidy.indent = 4'
-    ]);
+    assert.deepEqual(lines(result.writes), [...LONEFY_DEFAULT_WRITES]);
     assert.equal(result.unusable, false);
     assert.deepEqual(result.warnings, []);
   });
@@ -81,11 +82,13 @@ describe('migration/lonefyConfig : the REAL default formatter.json shape', () =>
 describe('migration/lonefyConfig : the contributor shape (indent 2, brace_style, "html": false)', () => {
   const result = mapLonefyConfigText(LONEFY_CONTRIBUTOR_FORMATTER_JSON, LOCAL);
 
-  it('maps indent_size 2 and brace_style per language', () => {
+  it('maps indent_size 2 and brace_style per language (brace_style is JavaScript only)', () => {
     assert.deepEqual(lines(result.writes), [
       '[javascript] tidy.indent = 2',
       '[javascript] tidy.brace_style = "collapse-preserve-inline"',
-      '[css] tidy.indent = 2'
+      '[json] tidy.indent = 2',
+      '[css] tidy.indent = 2',
+      '[scss] tidy.indent = 2'
     ]);
   });
 
@@ -98,27 +101,18 @@ describe('migration/lonefyConfig : the contributor shape (indent 2, brace_style,
 });
 
 describe('migration/lonefyConfig : sections reuse the flat key mapper', () => {
-  it('each section feeds ONLY its own language', () => {
+  it('each section feeds ONLY the languages the incumbent applied it to', () => {
     const result = mapLonefyConfig(
       { css: { indent_size: 2 }, html: { indent_size: 3 }, javascript: { indent_size: 5 } },
       LOCAL
     );
     assert.deepEqual(lines(result.writes), [
       '[javascript] tidy.indent = 5',
+      '[json] tidy.indent = 5',
       '[css] tidy.indent = 2',
+      '[scss] tidy.indent = 2',
       '[html] tidy.indent = 3'
     ]);
-  });
-
-  it('the section-to-language table names exactly javascript, css and html', () => {
-    assert.deepEqual(Object.keys(LONEFY_SECTION_LANGUAGES).sort(), [
-      'css',
-      'html',
-      'javascript'
-    ]);
-    assert.deepEqual(LONEFY_SECTION_LANGUAGES.javascript, ['javascript']);
-    assert.deepEqual(LONEFY_SECTION_LANGUAGES.css, ['css']);
-    assert.deepEqual(LONEFY_SECTION_LANGUAGES.html, ['html']);
   });
 
   it('applies the SAME domains as the flat mapper: an out-of-range value warns, never writes', () => {
@@ -132,15 +126,30 @@ describe('migration/lonefyConfig : sections reuse the flat key mapper', () => {
     assert.ok(result.warnings[1].startsWith('javascript.brace_style:'));
   });
 
-  it('coerces numeric strings and string booleans like the flat mapper', () => {
-    const result = mapLonefyConfig(
-      { javascript: { indent_size: '2', space_after_anon_function: 'true' } },
-      LOCAL
-    );
+  it('coerces numeric strings like the flat mapper (js-beautify parses them with parseInt)', () => {
+    const result = mapLonefyConfig({ javascript: { indent_size: '2' } }, LOCAL);
     assert.deepEqual(lines(result.writes), [
       '[javascript] tidy.indent = 2',
-      '[javascript] tidy.space_after_anon_function = true'
+      '[json] tidy.indent = 2'
     ]);
+  });
+
+  it('does NOT read the strings "true" / "false" as booleans in the incumbent file', () => {
+    // js-beautify treats any non-empty string as truthy, so "false" means TRUE there:
+    // importing it as false would invert the behaviour the user actually had.
+    const result = mapLonefyConfig(
+      { javascript: { space_after_anon_function: 'false', comma_first: 'true' } },
+      LOCAL
+    );
+    assert.deepEqual(result.writes, []);
+    assert.equal(result.warnings.length, 2);
+    assert.ok(result.warnings[0].startsWith('javascript.space_after_anon_function:'));
+    assert.ok(result.warnings[0].includes('expected a boolean'));
+  });
+
+  it('but a .jsbeautifyrc keeps reading them (kept behaviour, several tools read that file)', () => {
+    const result = mapLonefyConfig({ space_after_anon_function: 'false' }, RC);
+    assert.deepEqual(lines(result.writes), ['tidy.space_after_anon_function = false']);
   });
 
   it('writes come out in a canonical section order, not file order', () => {
@@ -150,7 +159,7 @@ describe('migration/lonefyConfig : sections reuse the flat key mapper', () => {
     );
     assert.deepEqual(
       result.writes.map((w) => w.language),
-      ['javascript', 'css', 'html']
+      ['javascript', 'json', 'css', 'scss', 'html']
     );
   });
 
@@ -183,7 +192,7 @@ describe('migration/lonefyConfig : unknown keys are reported, never dropped sile
       LOCAL
     );
     assert.deepEqual([...result.unmapped], ['mystery', 'css.sparkle']);
-    assert.deepEqual(lines(result.writes), ['[css] tidy.indent = 2']);
+    assert.deepEqual(lines(result.writes), ['[css] tidy.indent = 2', '[scss] tidy.indent = 2']);
   });
 
   it('an unknown SECTION name is an unknown top-level key', () => {
@@ -254,7 +263,8 @@ describe('migration/lonefyConfig : top-level flat keys depend on the file', () =
     const result = mapLonefyConfig({ indent_size: 4, css: { indent_size: 2 } }, RC);
     assert.deepEqual(lines(result.writes), [
       'tidy.indent = 4',
-      '[css] tidy.indent = 2'
+      '[css] tidy.indent = 2',
+      '[scss] tidy.indent = 2'
     ]);
   });
 });
@@ -300,7 +310,7 @@ describe('migration/lonefyConfig : a malformed file is reported and writes nothi
       LOCAL
     );
     assert.equal(result.unusable, false);
-    assert.deepEqual(lines(result.writes), ['[css] tidy.indent = 2']);
+    assert.deepEqual(lines(result.writes), ['[css] tidy.indent = 2', '[scss] tidy.indent = 2']);
   });
 });
 
@@ -363,20 +373,35 @@ describe('migration/lonefyConfig : only real, language-overridable tidy.* settin
     ? Object.assign({}, ...configuration.map((c) => c.properties ?? {}))
     : (configuration.properties ?? {});
 
+  /** A valid sample value for every key the incumbent honours, per section. */
+  function sampleOf(key: string): unknown {
+    const domain = LONEFY_KEYS[key].domain;
+    switch (domain.type) {
+      case 'boolean':
+        return true;
+      case 'integer':
+        return Math.max(domain.min, 2);
+      case 'enum':
+        return domain.values[0];
+      case 'eol':
+        return '\n';
+    }
+  }
+  const maximal = Object.fromEntries(
+    Object.entries(LONEFY_SECTIONS).map(([name, section]) => [
+      name,
+      Object.fromEntries([...section.honoured].map((key) => [key, sampleOf(key)]))
+    ])
+  );
+  const result = mapLonefyConfig(maximal, LOCAL);
+
+  it('the maximal input really produces writes for every section and language', () => {
+    const languages = new Set(result.writes.map((w) => w.language));
+    assert.deepEqual([...languages].sort(), ['css', 'html', 'javascript', 'json', 'scss']);
+    assert.deepEqual(result.warnings, [], 'every sample value is in its domain');
+  });
+
   it('every written key exists in package.json, and a language write is language-overridable', () => {
-    const everything = {
-      javascript: {
-        indent_size: 2,
-        brace_style: 'expand',
-        wrap_line_length: 80,
-        wrap_attributes: 'force',
-        space_after_anon_function: true
-      },
-      css: { indent_size: 2, brace_style: 'expand', wrap_line_length: 80, wrap_attributes: 'force', space_after_anon_function: true },
-      html: { indent_size: 2, brace_style: 'expand', wrap_line_length: 80, wrap_attributes: 'force', space_after_anon_function: true }
-    };
-    const result = mapLonefyConfig(everything, LOCAL);
-    assert.equal(result.writes.length, 15, 'five keys for each of the three languages');
     for (const write of result.writes) {
       const property = properties[write.key];
       assert.ok(property, `${write.key} must be a real setting in package.json`);
@@ -385,6 +410,34 @@ describe('migration/lonefyConfig : only real, language-overridable tidy.* settin
         'language-overridable',
         `${write.key} is written per language, so VS Code must allow a [language] override`
       );
+    }
+  });
+
+  it('every (key, language) pair written is one the option catalogue declares for that language', () => {
+    for (const write of result.writes) {
+      const entry = findBySettingKey(write.key);
+      assert.ok(entry, `${write.key} must be in the catalogue`);
+      assert.ok(
+        appliesToLanguage(entry, write.language as CatalogLang),
+        `${write.key} is not declared for ${write.language}: the migration must not write it there`
+      );
+    }
+  });
+
+  it('never writes a language the incumbent did not format (no less, no jsonc, no TypeScript)', () => {
+    const written = new Set(result.writes.map((w) => w.language));
+    for (const language of ['less', 'jsonc', 'typescript', 'typescriptreact', 'javascriptreact']) {
+      assert.ok(!written.has(language as never), `[${language}] must never be written`);
+    }
+  });
+
+  it('every key a section honours is in the mapped vocabulary, and the reverse', () => {
+    const honoured = new Set(Object.values(LONEFY_SECTIONS).flatMap((s) => [...s.honoured]));
+    for (const key of honoured) {
+      assert.ok(isMappedKey(key), `${key} is honoured by a section but has no mapping`);
+    }
+    for (const key of Object.keys(LONEFY_KEYS)) {
+      assert.ok(honoured.has(key), `${key} is mapped but no section of the incumbent honours it`);
     }
   });
 });

@@ -110,6 +110,61 @@ describe('engine/dispatcher : JSX names may start with _ or $ (M3-5)', () => {
   }
 });
 
+// MEDIUM-06 (probe P11): a cheap lexical pre-check now sits between the regex gate
+// and the full parse. Routing must be EXACTLY what it was: every JSX file, however
+// hard to spot, still reaches Prettier, and only files with no JSX at an expression
+// start skip the parse. Each JSX case here was a routing answer before the change.
+describe('engine/dispatcher : the JSX pre-check changes no routing (MEDIUM-06)', () => {
+  const STILL_JSX: ReadonlyArray<readonly [string, string]> = [
+    ['inside a ternary', 'const a = c ? <A /> : <B />;'],
+    ['after return', 'function f() {\n  return <div className="x">y</div>;\n}'],
+    ['after return and an open paren', 'function f() {\n  return (\n    <div />\n  );\n}'],
+    ['a fragment', 'const a = <><b />t</>;'],
+    ['an underscore component', 'const a = <_Foo />;'],
+    ['a dollar component', 'const a = <$Bar />;'],
+    ['after a comparison that is not JSX', 'if (a<b) { c(); }\nconst v = <A />;'],
+    ['a bare element after an import without semicolon', "import x from 'y'\n<A />;"],
+    ['a bare if body', 'if (x) <A />;'],
+    ['in an arrow body', 'const f = () => <A />;'],
+    ['in a template hole', 'const a = `${<A />}`;']
+  ];
+
+  for (const [label, code] of STILL_JSX) {
+    it(`${label}: still routes to prettier`, () => {
+      assert.equal(resolveEngineIdForSource('javascript', code), 'prettier');
+    });
+  }
+
+  const STILL_PLAIN: ReadonlyArray<readonly [string, string]> = [
+    ['a bare comparison', 'const r = a<b;'],
+    ['a comparison chain', 'const ok = a<b && c>d;'],
+    ['a loop head', 'for (var i = 0; i<n; i++) { f(i); }'],
+    ['a call result compared', 'const r = f(a)<g(b);'],
+    ['markup in a string', 'const s = "<div/>";'],
+    ['markup in a template', 'const s = `<div>${a<b}</div>`;'],
+    ['markup in a comment', '/* <div/> */ const s = 1;']
+  ];
+
+  for (const [label, code] of STILL_PLAIN) {
+    it(`${label}: still routes to js-beautify`, () => {
+      assert.equal(resolveEngineIdForSource('javascript', code), 'js-beautify');
+    });
+  }
+
+  it('a 2 MB comparison-laden .js is routed without paying the parse', () => {
+    const chunk =
+      'function fn(a, b) {\n  if (a<b) { return a + 1; }\n  for (var k = 0; k<b; k++) { b += k; }\n  return b * 2;\n}\n';
+    const code = chunk.repeat(Math.ceil((2 * 1024 * 1024) / chunk.length));
+    const started = process.hrtime.bigint();
+    const id = resolveEngineIdForSource('javascript', code);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.equal(id, 'js-beautify');
+    // The full parse of this size was about 1 s on the measuring machine (5 MB:
+    // 1.9 to 4.8 s, probe P11); the scan takes a few tens of milliseconds.
+    assert.ok(elapsedMs < 400, `routing took ${elapsedMs.toFixed(0)} ms`);
+  });
+});
+
 describe('engine/dispatcher : modern-syntax preservation + guard round-trip', () => {
   for (const f of preserveFixtures) {
     it(`${f.id}: ${f.desc} [${f.ref}]`, async () => {

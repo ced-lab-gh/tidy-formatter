@@ -5,7 +5,15 @@
 //
 // The adversarial TIMING of the glob path lives in ignore/globLinear.test.ts.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -13,9 +21,13 @@ import {
   SOUKFORMATRC_FILENAME,
   clearSoukformatrcCache,
   parseSoukformatrc,
-  readSoukformatrcLayers
+  readSoukformatrcLayers,
+  setSoukformatrcClock
 } from '../../../src/config/soukformatrc';
+import { DEFAULT_IGNORE_CASE } from '../../../src/ignore/glob';
 import { resolveOptions } from '../../../src/config/resolver';
+
+const ONE_HOUR_MS = 3_600_000;
 
 /** JSONC text with one override, built with JSON.stringify so escapes are exact. */
 function withOverride(files: string, indent = 8): string {
@@ -172,16 +184,24 @@ describe('config/soukformatrc : an override glob that cannot be evaluated is rep
   });
 });
 
-// LOW-07. fs is counted by patching the real module object for the duration of
-// one call: src/config/soukformatrc.ts reads statSync / readFileSync through it.
+// LOW-07 and C1. fs is counted by patching the real module object for the duration
+// of one call: src/config/soukformatrc.ts reads statSync / readFileSync through it.
+//
+// The memo is keyed by the file's whole IDENTITY (size, mtime and ctime in
+// nanoseconds, inode, device) and only trusted when freshness can be PROVED: the
+// rule is absolute, a stale config is never served. Files are made "settled" by
+// moving the clock the freshness window reads (setSoukformatrcClock), not by
+// waiting; a test that needs the real clock restores it.
 describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per level, memo)', () => {
   let root: string;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'souk-low07-'));
     clearSoukformatrcCache();
+    setSoukformatrcClock(() => Date.now() + ONE_HOUR_MS);
   });
   afterEach(() => {
+    setSoukformatrcClock();
     rmSync(root, { recursive: true, force: true });
     clearSoukformatrcCache();
   });
@@ -191,7 +211,10 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
     readonly read: number;
   }
 
-  function counted<T>(run: () => T): { value: T; counts: FsCounts } {
+  function counted<T>(
+    run: () => T,
+    override?: { statSync?: (original: (...args: unknown[]) => unknown, args: unknown[]) => unknown }
+  ): { value: T; counts: FsCounts } {
     const realFs = require('node:fs') as Record<string, (...args: unknown[]) => unknown>;
     const originalStat = realFs.statSync;
     const originalRead = realFs.readFileSync;
@@ -199,7 +222,9 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
     let read = 0;
     realFs.statSync = (...args: unknown[]) => {
       stat += 1;
-      return originalStat(...args);
+      return override?.statSync !== undefined
+        ? override.statSync(originalStat, args)
+        : originalStat(...args);
     };
     realFs.readFileSync = (...args: unknown[]) => {
       read += 1;
@@ -214,15 +239,27 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
   }
 
   const CONFIG = '{ "css": { "indent": 6 } }';
-  const ONE_HOUR_MS = 3_600_000;
+
+  /** A timestamp with a fractional second (never a whole one), `n` seconds apart. */
+  function stamp(n: number): Date {
+    const base = Math.floor(Date.now() / 1000) * 1000 - 86_400_000;
+    return new Date(base + n * 1000 + 123);
+  }
+
+  /** Let real time pass, so two writes cannot share a file-system timestamp tick. */
+  function pause(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  }
+
+  function indentOf(file: string): number | undefined {
+    return readSoukformatrcLayers(file, 'css', root).layers[0]?.values.indent_size as
+      | number
+      | undefined;
+  }
 
   /** A file `depth` directories below the workspace root, and the root config. */
-  function deepFile(depth: number, config: string, settled: boolean): string {
-    const rc = join(root, SOUKFORMATRC_FILENAME);
-    writeFileSync(rc, config);
-    if (settled) {
-      backdate(rc, ONE_HOUR_MS);
-    }
+  function deepFile(depth: number, config: string): string {
+    writeFileSync(join(root, SOUKFORMATRC_FILENAME), config);
     let dir = root;
     for (let level = 1; level <= depth; level += 1) {
       dir = join(dir, `d${level}`);
@@ -231,12 +268,6 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
     const file = join(dir, 'a.css');
     writeFileSync(file, '.x{}');
     return file;
-  }
-
-  /** Set a file's mtime to `agoMs` before now, so it is "settled". */
-  function backdate(path: string, agoMs: number): void {
-    const when = new Date(Date.now() - agoMs);
-    utimesSync(path, when, when);
   }
 
   it('a config over the size cap yields no layer and a warning, and is never read', () => {
@@ -267,7 +298,7 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
   });
 
   it('one format 10 directories deep: ONE stat per directory level, the cap adds none', () => {
-    const file = deepFile(10, CONFIG, false);
+    const file = deepFile(10, CONFIG);
     const { value, counts } = counted(() => readSoukformatrcLayers(file, 'css', root));
     assert.equal(value.layers[0].values.indent_size, 6);
     // 10 sub-directories + the workspace root = 11 levels; the walk stats each once
@@ -278,7 +309,7 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
   });
 
   it('a settled config is read ONCE, then served from memory (stat per level only)', () => {
-    const file = deepFile(10, CONFIG, true);
+    const file = deepFile(10, CONFIG);
     const runs = [1, 2, 3].map(() => counted(() => readSoukformatrcLayers(file, 'css', root)));
 
     assert.deepEqual(
@@ -296,55 +327,50 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
   });
 
   it('a changed file is re-read (different size)', () => {
-    const file = deepFile(2, CONFIG, true);
-    assert.equal(readSoukformatrcLayers(file, 'css', root).layers[0].values.indent_size, 6);
+    const file = deepFile(2, CONFIG);
+    assert.equal(indentOf(file), 6);
 
-    const rc = join(root, SOUKFORMATRC_FILENAME);
-    writeFileSync(rc, '{ "css": {   "indent": 4   } }');
-    backdate(rc, ONE_HOUR_MS / 2);
+    pause(40);
+    writeFileSync(join(root, SOUKFORMATRC_FILENAME), '{ "css": {   "indent": 4   } }');
 
     const { value, counts } = counted(() => readSoukformatrcLayers(file, 'css', root));
     assert.equal(value.layers[0].values.indent_size, 4);
     assert.equal(counts.read, 1);
   });
 
-  it('a changed file is re-read (same size, different mtime)', () => {
-    const file = deepFile(2, '{ "css": { "indent": 6 } }', true);
-    assert.equal(readSoukformatrcLayers(file, 'css', root).layers[0].values.indent_size, 6);
-
+  it('a file modified "just now" is never memoised, however its timestamps look', () => {
+    const file = deepFile(1, CONFIG);
     const rc = join(root, SOUKFORMATRC_FILENAME);
-    writeFileSync(rc, '{ "css": { "indent": 8 } }'); // same length
-    backdate(rc, ONE_HOUR_MS / 2);
+    const stats = statSync(rc, { bigint: true });
+    // The local clock reads 100 ms after the file's last change: inside the window.
+    const justAfter = Number(stats.ctimeNs / 1_000_000n) + 100;
+    setSoukformatrcClock(() => justAfter);
 
-    const { value, counts } = counted(() => readSoukformatrcLayers(file, 'css', root));
-    assert.equal(value.layers[0].values.indent_size, 8);
-    assert.equal(counts.read, 1);
+    const first = counted(() => readSoukformatrcLayers(file, 'css', root));
+    const second = counted(() => readSoukformatrcLayers(file, 'css', root));
+    assert.deepEqual([first.counts.read, second.counts.read], [1, 1], 'read every time');
+
+    // One hour later the same unchanged file is settled, and is memoised.
+    setSoukformatrcClock(() => justAfter + ONE_HOUR_MS);
+    const third = counted(() => readSoukformatrcLayers(file, 'css', root));
+    const fourth = counted(() => readSoukformatrcLayers(file, 'css', root));
+    assert.deepEqual([third.counts.read, fourth.counts.read], [1, 0]);
   });
 
-  it('a file written moments ago is never memoised, even if its mtime does not move', () => {
-    // Two writes inside one timestamp tick can leave (mtime, size) identical.
-    // Forge exactly that: same length, same mtime, different content.
-    const file = deepFile(1, '{ "css": { "indent": 6 } }', false);
+  it('never serves a stale config across 40 quick same-size rewrites on the REAL clock', () => {
+    setSoukformatrcClock();
+    const file = deepFile(1, CONFIG);
     const rc = join(root, SOUKFORMATRC_FILENAME);
-    const stamp = new Date(); // a whole-millisecond stamp, so it can be re-applied exactly
-    utimesSync(rc, stamp, stamp);
-    assert.equal(statSync(rc).mtimeMs, stamp.getTime(), 'the forged stamp must round-trip');
-    assert.equal(readSoukformatrcLayers(file, 'css', root).layers[0].values.indent_size, 6);
-
-    writeFileSync(rc, '{ "css": { "indent": 8 } }');
-    utimesSync(rc, stamp, stamp);
-    assert.equal(statSync(rc).mtimeMs, stamp.getTime());
-    assert.equal(statSync(rc).size, CONFIG.length, 'same size, same mtime: only the racy guard helps');
-
-    const { value, counts } = counted(() => readSoukformatrcLayers(file, 'css', root));
-    assert.equal(value.layers[0].values.indent_size, 8, 'a stale memo would still say 6');
-    assert.equal(counts.read, 1);
+    for (let i = 0; i < 40; i += 1) {
+      const indent = (i % 8) + 1; // always one digit: the size never changes
+      writeFileSync(rc, `{ "css": { "indent": ${indent} } }`);
+      assert.equal(indentOf(file), indent, `rewrite ${i}`);
+    }
   });
 
   it('the memo holds the parsed FILE, never a per-document verdict', () => {
     const rc = join(root, SOUKFORMATRC_FILENAME);
     writeFileSync(rc, withOverride('src/**/*.css'));
-    backdate(rc, ONE_HOUR_MS);
     mkdirSync(join(root, 'src'), { recursive: true });
     mkdirSync(join(root, 'lib'), { recursive: true });
     const inSrc = join(root, 'src', 'a.css');
@@ -366,7 +392,7 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
   });
 
   it('a settled MALFORMED config keeps warning on every format without being re-read', () => {
-    const file = deepFile(1, '{ "css": { "indent": }', true);
+    const file = deepFile(1, '{ "css": { "indent": }');
     const first = counted(() => readSoukformatrcLayers(file, 'css', root));
     const second = counted(() => readSoukformatrcLayers(file, 'css', root));
 
@@ -383,9 +409,7 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
     for (let i = 0; i < 40; i += 1) {
       const dir = join(root, `ws${i}`);
       mkdirSync(dir, { recursive: true });
-      const rc = join(dir, SOUKFORMATRC_FILENAME);
-      writeFileSync(rc, `{ "css": { "indent": ${(i % 8) + 1} } }`);
-      backdate(rc, ONE_HOUR_MS);
+      writeFileSync(join(dir, SOUKFORMATRC_FILENAME), `{ "css": { "indent": ${(i % 8) + 1} } }`);
       const file = join(dir, 'a.css');
       writeFileSync(file, '.x{}');
       files.push(file);
@@ -397,5 +421,199 @@ describe('config/soukformatrc : LOW-07 bounded read (size cap, one stat per leve
     // The oldest entries were evicted: reading them again is correct, just a re-read.
     const again = counted(() => readSoukformatrcLayers(files[0], 'css', join(root, 'ws0')));
     assert.equal(again.value.layers[0].values.indent_size, 1);
+  });
+
+  // C1 (audit etape 10): the exact cases that served a STALE config when the key
+  // was (path, size, mtimeMs) and freshness was judged by the local clock.
+  describe('C1 never serves a stale config', () => {
+    const SAME_SIZE_A = '{ "css": { "indent": 2 } }';
+    const SAME_SIZE_B = '{ "css": { "indent": 7 } }';
+
+    it('C3 a same-size rewrite whose mtime is restored (cp -p, rsync -t, touch -r)', () => {
+      const file = deepFile(1, SAME_SIZE_A);
+      const rc = join(root, SOUKFORMATRC_FILENAME);
+      utimesSync(rc, stamp(1), stamp(1));
+      assert.equal(indentOf(file), 2);
+      assert.equal(counted(() => indentOf(file)).counts.read, 0, 'memoised: the test is sound');
+
+      pause(40);
+      writeFileSync(rc, SAME_SIZE_B);
+      utimesSync(rc, stamp(1), stamp(1)); // same size AND same mtime as before
+      assert.equal(indentOf(file), 7, 'the ctime moved: the memo must not be served');
+    });
+
+    it('C4 the file is deleted and recreated with the same size and the same mtime (mv)', () => {
+      const file = deepFile(1, SAME_SIZE_A);
+      const rc = join(root, SOUKFORMATRC_FILENAME);
+      utimesSync(rc, stamp(2), stamp(2));
+      assert.equal(indentOf(file), 2);
+
+      pause(40);
+      rmSync(rc);
+      writeFileSync(rc, SAME_SIZE_B);
+      utimesSync(rc, stamp(2), stamp(2));
+      assert.equal(indentOf(file), 7, 'a new file (inode or ctime differs) is read afresh');
+    });
+
+    it('C5 coarse timestamps (whole seconds, a lagging server clock) are never memoised', () => {
+      const file = deepFile(1, SAME_SIZE_A);
+      const rc = join(root, SOUKFORMATRC_FILENAME);
+      const wholeSecond = new Date(Math.floor(Date.now() / 1000) * 1000 - 5000);
+      utimesSync(rc, wholeSecond, wholeSecond);
+
+      const first = counted(() => readSoukformatrcLayers(file, 'css', root));
+      const second = counted(() => readSoukformatrcLayers(file, 'css', root));
+      assert.deepEqual([first.counts.read, second.counts.read], [1, 1], 'freshness cannot be proved');
+
+      writeFileSync(rc, SAME_SIZE_B);
+      utimesSync(rc, wholeSecond, wholeSecond); // same size, same whole-second mtime
+      assert.equal(indentOf(file), 7);
+    });
+
+    it('C8 a same-size file copied over the config, carrying the same mtime', () => {
+      const file = deepFile(1, SAME_SIZE_A);
+      const rc = join(root, SOUKFORMATRC_FILENAME);
+      utimesSync(rc, stamp(3), stamp(3));
+      assert.equal(indentOf(file), 2);
+
+      const source = join(root, 'replacement.json');
+      writeFileSync(source, SAME_SIZE_B);
+      utimesSync(source, stamp(3), stamp(3));
+      pause(40);
+      copyFileSync(source, rc);
+      utimesSync(rc, stamp(3), stamp(3));
+      assert.equal(indentOf(file), 7);
+    });
+
+    it('a file system that reports no inode is never memoised', () => {
+      const file = deepFile(1, SAME_SIZE_A);
+      const withoutInode = {
+        statSync: (original: (...args: unknown[]) => unknown, args: unknown[]): unknown => {
+          const stats = original(...args) as { ino?: bigint } | undefined;
+          return stats === undefined
+            ? stats
+            : Object.assign(Object.create(Object.getPrototypeOf(stats) as object), stats, { ino: 0n });
+        }
+      };
+      const first = counted(() => readSoukformatrcLayers(file, 'css', root), withoutInode);
+      const second = counted(() => readSoukformatrcLayers(file, 'css', root), withoutInode);
+      assert.deepEqual([first.counts.read, second.counts.read], [1, 1]);
+      assert.equal(first.value.layers[0].values.indent_size, 2);
+    });
+  });
+});
+
+// G3 (audit etape 10): a UTF-8 byte order mark made JSONC report an invalid symbol
+// at offset 0, which discarded the WHOLE file.
+describe('config/soukformatrc : G3 a leading byte order mark', () => {
+  const BOM = String.fromCharCode(0xfeff);
+
+  it('parseSoukformatrc reads a config that starts with a BOM', () => {
+    const { layers, warnings } = parseSoukformatrc(
+      `${BOM}{ "css": { "indent": 4 } }`,
+      'css',
+      '/p/.soukformatrc'
+    );
+    assert.deepEqual(warnings, []);
+    assert.equal(layers[0].values.indent_size, 4);
+  });
+
+  it('readSoukformatrcLayers reads a BOM file from disk', () => {
+    const root = mkdtempSync(join(tmpdir(), 'souk-bom-'));
+    try {
+      writeFileSync(join(root, SOUKFORMATRC_FILENAME), `${BOM}{ "css": { "indent": 6 } }`);
+      const file = join(root, 'a.css');
+      writeFileSync(file, '.x{}');
+      clearSoukformatrcCache();
+      const result = readSoukformatrcLayers(file, 'css', root);
+      assert.deepEqual(result.warnings, []);
+      assert.equal(result.layers[0].values.indent_size, 6);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// P1 (audit etape 10): each glob was linear alone, but nothing bounded the TOTAL:
+// 1000 overrides of long globs against a 4095-character path took 60 s. One work
+// budget now covers the whole lookup. The timing of the reviewer's exact case is in
+// ignore/globLinear.test.ts; here is the behaviour.
+describe('config/soukformatrc : P1 one work budget for all the overrides of a lookup', () => {
+  /** Reviewer's multiX(k): "**" + "/*" + k "a" + "c", repeated while it fits in 1024 characters. */
+  function multiX(k: number): string {
+    const unit = `**/*${'a'.repeat(k)}c`;
+    let glob = '';
+    while (glob.length + unit.length <= 1024) {
+      glob += unit;
+    }
+    return glob;
+  }
+  const deepRel = Array.from({ length: 16 }, () => `${'a'.repeat(254)}c`).join('/');
+
+  it('an adversarial set of overrides is cut off with a warning, not evaluated for a minute', () => {
+    const text = JSON.stringify({
+      css: { indent: 4 },
+      overrides: Array.from({ length: 1000 }, () => ({ files: multiX(60), options: { indent: 8 } }))
+    });
+    const started = Date.now();
+    const { layers, warnings } = parseSoukformatrc(text, 'css', '/p/.soukformatrc', deepRel);
+    assert.ok(Date.now() - started < 5000, 'finished');
+    // The first overrides match before the budget runs out and apply; the other
+    // ~1000 are skipped, not evaluated.
+    assert.ok(layers.length >= 1 && layers.length < 50, `layers: ${layers.length}`);
+    const message = warnings.map((w) => w.message).join('\n');
+    assert.match(message, /overrides\[\d+\]\.files/);
+    assert.match(message, /needs more than \d+ steps/);
+    assert.match(message, /are skipped/);
+    assert.equal(warnings.length, 1, 'one warning, not one per override');
+  });
+
+  it('an ordinary config never comes near the budget', () => {
+    const text = JSON.stringify({
+      overrides: Array.from({ length: 300 }, (_, i) => ({
+        files: `src/module${i}/**/*.css`,
+        options: { indent: 8 }
+      }))
+    });
+    const { layers, warnings } = parseSoukformatrc(text, 'css', '/p/.soukformatrc', 'src/module7/a/b.css');
+    assert.deepEqual(warnings, []);
+    assert.equal(layers.length, 1);
+  });
+
+  it('overrides matched BEFORE the budget ran out still apply', () => {
+    const text = JSON.stringify({
+      overrides: [
+        { files: '*.css', options: { indent: 8 } },
+        ...Array.from({ length: 1000 }, () => ({ files: multiX(60), options: { indent: 2 } }))
+      ]
+    });
+    const { layers, warnings } = parseSoukformatrc(text, 'css', '/p/.soukformatrc', `${deepRel}.css`);
+    assert.ok(layers.length < 50, `layers: ${layers.length}`);
+    assert.equal(layers[0].values.indent_size, 8, 'the first override applied before the cut-off');
+    assert.ok(warnings.some((w) => /are skipped/.test(w.message)));
+  });
+});
+
+// G4: case. The platform decides, like git's core.ignorecase.
+describe('config/soukformatrc : G4 override globs follow the platform case rule', () => {
+  it('"*.CSS" matches "a.css" exactly when the file system ignores case', () => {
+    assert.equal(overrideApplies('*.CSS', 'a.css'), DEFAULT_IGNORE_CASE);
+    assert.equal(overrideApplies('*.css', 'a.css'), true);
+  });
+});
+
+// G1: character classes in an override glob.
+describe('config/soukformatrc : G1 character classes in overrides[].files', () => {
+  it('"[Ll]egacy/**" reaches legacy/ and Legacy/ (it used to be skipped SILENTLY)', () => {
+    const { layers, warnings } = parseSoukformatrc(
+      withOverride('[Ll]egacy/**'),
+      'css',
+      '/p/.soukformatrc',
+      'legacy/a.css'
+    );
+    assert.equal(layers.length, 2, 'the override applies');
+    assert.deepEqual(warnings, []);
+    assert.equal(overrideApplies('[Ll]egacy/**', 'Legacy/a.css'), true);
+    assert.equal(overrideApplies('[Ll]egacy/**', 'modern/a.css'), false);
   });
 });

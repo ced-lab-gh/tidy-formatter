@@ -101,13 +101,22 @@ function resolveEndOfLine(
  * Each is validated for type before being applied so a malformed value never
  * reaches Prettier. Layout-affecting options Tidy already owns (tabWidth /
  * useTabs / endOfLine / range) are handled separately above.
+ *
+ * singleAttributePerLine and objectWrap (the latter in PRETTIER_STRING_ENUMS) are
+ * the two newest entries and the purest case of the rule: each decides ONLY where
+ * line breaks fall (one JSX attribute per line; an object literal kept expanded or
+ * joined onto one line), so the tree Prettier prints is the tree it was given.
+ * Probe P16 of the v0.5.0 audit ran both over the fixture corpus with zero new
+ * guard rejections. Both are also read from a .prettierrc (src/config/prettierrc.ts
+ * keeps the matching allow-list).
  */
 const PRETTIER_BOOLEAN_KEYS = [
   'semi',
   'singleQuote',
   'jsxSingleQuote',
   'bracketSpacing',
-  'bracketSameLine'
+  'bracketSameLine',
+  'singleAttributePerLine'
 ] as const;
 
 // NOTE: `quoteProps` is deliberately absent : it changes an object key's AST node
@@ -121,7 +130,8 @@ const PRETTIER_BOOLEAN_KEYS = [
 // reject the key-quoting it performs.
 const PRETTIER_STRING_ENUMS: Readonly<Record<string, readonly string[]>> = {
   trailingComma: ['none', 'es5', 'all'],
-  arrowParens: ['always', 'avoid']
+  arrowParens: ['always', 'avoid'],
+  objectWrap: ['preserve', 'collapse']
 };
 
 // Explicit denylist of Prettier options that LOOK stylistic but mutate the babel

@@ -11,13 +11,14 @@ import { join } from 'node:path';
 import {
   OPTION_CATALOG,
   appliesToLanguage,
+  describeValueProblems,
   findBySettingKey,
   validateValue,
   type OptionEntry
 } from '../../../src/config/optionCatalog';
 
 const SCOPES = new Set(['window', 'resource', 'language-overridable']);
-const TYPES = new Set(['boolean', 'integer', 'string']);
+const TYPES = new Set(['boolean', 'integer', 'string', 'string-list']);
 
 describe('config/optionCatalog : structural invariants', () => {
   it('is non-empty and curated (>= 25 entries)', () => {
@@ -72,6 +73,16 @@ describe('config/optionCatalog : structural invariants', () => {
     }
   });
 
+  it('a string-list entry has an array-of-strings default and no enum', () => {
+    const lists = OPTION_CATALOG.filter((entry) => entry.type === 'string-list');
+    assert.ok(lists.length >= 2, 'the two tag lists exist');
+    for (const entry of lists) {
+      assert.ok(Array.isArray(entry.default), entry.settingKey);
+      assert.ok((entry.default as readonly unknown[]).every((v) => typeof v === 'string'), entry.settingKey);
+      assert.equal(entry.enum, undefined, `${entry.settingKey} must not declare an enum`);
+    }
+  });
+
   it('every language-overridable entry has a non-empty description', () => {
     for (const entry of OPTION_CATALOG) {
       assert.ok(entry.description && entry.description.length > 0, entry.settingKey);
@@ -113,6 +124,24 @@ describe('config/optionCatalog : structural invariants', () => {
     }
   });
 
+  it('covers the six OPTIONS-6 options, with the defaults of the engines', () => {
+    const expected: ReadonlyArray<readonly [string, OptionEntry['engine'], unknown]> = [
+      ['tidy.space_before_conditional', 'jsbeautify', true],
+      ['tidy.jslint_happy', 'jsbeautify', false],
+      ['tidy.content_unformatted', 'jsbeautify', []],
+      ['tidy.void_elements', 'jsbeautify', []],
+      ['tidy.prettier.singleAttributePerLine', 'prettier', false],
+      ['tidy.prettier.objectWrap', 'prettier', 'preserve']
+    ];
+    for (const [key, engine, dflt] of expected) {
+      const entry = findBySettingKey(key);
+      assert.ok(entry, `missing ${key}`);
+      assert.equal(entry!.engine, engine, key);
+      assert.deepEqual(entry!.default, dflt, key);
+    }
+    assert.deepEqual(findBySettingKey('tidy.prettier.objectWrap')!.enum, ['preserve', 'collapse']);
+  });
+
   it('does NOT expose quoteProps (not AST-invariant under the guard)', () => {
     assert.equal(findBySettingKey('tidy.prettier.quoteProps'), undefined);
   });
@@ -122,6 +151,7 @@ describe('config/optionCatalog : validateValue (never propagate invalid)', () =>
   const boolEntry = findBySettingKey('tidy.prettier.semi') as OptionEntry;
   const intEntry = findBySettingKey('tidy.indent') as OptionEntry;
   const enumEntry = findBySettingKey('tidy.brace_style') as OptionEntry;
+  const listEntry = findBySettingKey('tidy.content_unformatted') as OptionEntry;
 
   it('accepts a valid boolean and rejects non-booleans', () => {
     assert.equal(validateValue(boolEntry, true), true);
@@ -146,6 +176,55 @@ describe('config/optionCatalog : validateValue (never propagate invalid)', () =>
   it('treats null/undefined as "not set"', () => {
     assert.equal(validateValue(boolEntry, undefined), undefined);
     assert.equal(validateValue(boolEntry, null), undefined);
+    assert.equal(validateValue(listEntry, undefined), undefined);
+    assert.equal(validateValue(listEntry, null), undefined);
+  });
+
+  it('accepts a list of strings (a copy) and rejects anything else', () => {
+    const raw = ['code', 'my-icon'];
+    const valid = validateValue(listEntry, raw);
+    assert.deepEqual(valid, ['code', 'my-icon']);
+    assert.notEqual(valid, raw, 'the array of the caller is never handed on');
+    assert.deepEqual(validateValue(listEntry, []), []);
+    for (const bad of ['code', 7, true, { a: 1 }, ['code', 5], [null], [['x']]]) {
+      assert.equal(validateValue(listEntry, bad), undefined, JSON.stringify(bad));
+    }
+  });
+
+  it('judges only the SHAPE of a list: which entries are usable tag names is decided where it is consumed', () => {
+    assert.deepEqual(validateValue(listEntry, ['a b', 'code']), ['a b', 'code']);
+  });
+});
+
+describe('config/optionCatalog : describeValueProblems (what "Show Effective Configuration" prints)', () => {
+  const contentEntry = findBySettingKey('tidy.content_unformatted') as OptionEntry;
+  const voidEntry = findBySettingKey('tidy.void_elements') as OptionEntry;
+
+  it('is empty for every option whose value validateValue fully checks', () => {
+    for (const entry of OPTION_CATALOG) {
+      if (entry.type !== 'string-list') {
+        assert.deepEqual(describeValueProblems(entry, entry.default), [], entry.settingKey);
+        assert.deepEqual(describeValueProblems(entry, 'nonsense'), [], entry.settingKey);
+      }
+    }
+  });
+
+  it('is empty for a clean list, an empty list and an unset value', () => {
+    assert.deepEqual(describeValueProblems(contentEntry, ['code', 'my-icon']), []);
+    assert.deepEqual(describeValueProblems(contentEntry, []), []);
+    assert.deepEqual(describeValueProblems(voidEntry, undefined), []);
+  });
+
+  it('says what is dropped, naming the setting', () => {
+    const problems = describeValueProblems(contentEntry, ['a b', 'code', '<x>']);
+    assert.equal(problems.length, 2);
+    assert.ok(problems.every((p) => p.startsWith('tidy.content_unformatted:')));
+  });
+
+  it('says so for an element that cannot be void', () => {
+    const problems = describeValueProblems(voidEntry, ['pre', 'my-icon']);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /"pre".*cannot be a void element/);
   });
 });
 

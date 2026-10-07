@@ -22,6 +22,7 @@ import { css as cssBeautify, html as htmlBeautify, js as jsBeautify } from 'js-b
 import type { CSSBeautifyOptions, HTMLBeautifyOptions, JSBeautifyOptions } from 'js-beautify';
 import type { Engine, FormatRequest, LangId, ResolvedOptions } from '../types';
 import { htmlPreformattedTags } from '../safety/htmlPreformatted';
+import { sanitizeTagList } from '../config/tagList';
 import { formatJson } from './jsonFormatter';
 import { postProcess } from './postProcess';
 import { splitSliceEdges } from './sliceEdges';
@@ -162,6 +163,18 @@ function mapJsOptions(resolved: ResolvedOptions): JSBeautifyOptions {
     options.space_after_anon_function = spaceAfterAnon;
   }
 
+  // Both default to js-beautify's own defaults (true and false) when unset, so a
+  // user who sets neither gets exactly the output of every earlier version.
+  const spaceBeforeConditional = readBoolean(engine, 'space_before_conditional');
+  if (spaceBeforeConditional !== undefined) {
+    options.space_before_conditional = spaceBeforeConditional;
+  }
+
+  const jslintHappy = readBoolean(engine, 'jslint_happy');
+  if (jslintHappy !== undefined) {
+    options.jslint_happy = jslintHappy;
+  }
+
   const spaceAfterNamed = readBoolean(engine, 'space_after_named_function');
   if (spaceAfterNamed !== undefined) {
     options.space_after_named_function = spaceAfterNamed;
@@ -231,6 +244,43 @@ function mapCssOptions(resolved: ResolvedOptions): CSSBeautifyOptions {
   return options;
 }
 
+/**
+ * js-beautify's own default `void_elements` (1.15.4), the standard HTML void
+ * elements plus the doctype / xml prologue markers and two obsolete tags. It is
+ * restated here because a `void_elements` passed to js-beautify REPLACES its
+ * default rather than extending it: to add a custom element, the standard list has
+ * to be handed back in full. test/unit/engine pins this copy to the installed
+ * js-beautify, so an upgrade that changes the default fails a test instead of
+ * silently diverging from it.
+ */
+export const STANDARD_VOID_ELEMENTS: readonly string[] = Object.freeze([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'keygen',
+  'link',
+  'menuitem',
+  'meta',
+  'param',
+  'source',
+  'track',
+  'wbr',
+  '!doctype',
+  '?xml',
+  'basefont',
+  'isindex'
+]);
+
+/** `base` followed by the entries of `extra` it does not already contain. */
+function addTags(base: readonly string[], extra: readonly string[]): string[] {
+  return [...base, ...extra.filter((tag) => !base.includes(tag))];
+}
+
 const HTML_WRAP_ATTRIBUTES: ReadonlySet<string> = new Set([
   'auto',
   'force',
@@ -253,9 +303,26 @@ function mapHtmlOptions(resolved: ResolvedOptions): HTMLBeautifyOptions {
   // source of truth: src/safety/htmlPreformatted.ts), so it can never reflow
   // inside a tag the guard compares verbatim.
   //
-  // Deliberately NOT a user setting: `content_unformatted` stays out of the
-  // option catalogue precisely because shrinking it would re-open that hole.
-  options.content_unformatted = htmlPreformattedTags();
+  // tidy.content_unformatted is ADDITIVE ONLY: the user's tags are appended to
+  // that list, which is always present in full. A user list that could shrink it
+  // would re-open the hole above (probe P16c: the guard then rejects an <xmp>).
+  // Invalid entries are dropped here (and reported by Show Effective
+  // Configuration, which asks the same sanitizer).
+  options.content_unformatted = addTags(
+    htmlPreformattedTags(),
+    sanitizeTagList('content_unformatted', engine.content_unformatted).tags
+  );
+
+  // tidy.void_elements is ADDITIVE ONLY for the same reason: a standard void
+  // element removed from the list makes the printer wait for a closing tag that
+  // never comes and mis-indent everything after it. Nothing is passed when the
+  // user added nothing new, so the printer keeps its own default untouched.
+  const extraVoid = sanitizeTagList('void_elements', engine.void_elements).tags.filter(
+    (tag) => !STANDARD_VOID_ELEMENTS.includes(tag)
+  );
+  if (extraVoid.length > 0) {
+    options.void_elements = addTags(STANDARD_VOID_ELEMENTS, extraVoid);
+  }
 
   const wrapAttributes = readString(engine, 'wrap_attributes');
   if (wrapAttributes !== undefined && HTML_WRAP_ATTRIBUTES.has(wrapAttributes)) {

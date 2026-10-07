@@ -227,7 +227,7 @@ describe('safety/guard : labelling changes no verdict', () => {
     });
   }
 
-  it('a file whose double-spaced JSX text is untouched is still equivalent to itself', () => {
+  it('re-spacing the code around an untouched double-spaced JSX text is equivalent', () => {
     // guard.check(LANG, src, src) would return on string equality alone, before
     // any parse, so it could not fail. The second side re-spaces only the code
     // AROUND the text, so both sides are really parsed and the untouched

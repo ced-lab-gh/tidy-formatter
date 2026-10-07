@@ -132,6 +132,43 @@ describe('config/editorconfig : precedence (layer 3 over VS Code)', () => {
     assert.equal(result.sources.insertSpaces, SOURCE_EDITORCONFIG);
   });
 
+  it('max_line_length=off lifts a VS Code width for the Prettier languages (unbounded width)', () => {
+    // Prettier's own EditorConfig mapping reads `off` as an infinite printWidth;
+    // Tidy says the same thing through the shared "0 disables wrapping" value.
+    const vscodeLayer = {
+      source: 'VS Code settings (tidy.*)',
+      values: { wrap_line_length: 100 }
+    };
+    const ecLayer = mapEditorConfigLayer({ max_line_length: 'off' } as unknown as Parameters<
+      typeof mapEditorConfigLayer
+    >[0]);
+    assert.ok(ecLayer);
+    const result = resolveOptions({
+      languageId: 'typescript',
+      layers: [vscodeLayer, ecLayer]
+    });
+    const prettierBag = result.engineOptions.prettier as Record<string, unknown> | undefined;
+    assert.equal(prettierBag?.printWidth, Number.POSITIVE_INFINITY);
+    assert.equal(result.sources['prettier.printWidth'], SOURCE_EDITORCONFIG);
+  });
+
+  it('max_line_length=off lifts a VS Code width for js-beautify too (wrap_line_length 0)', () => {
+    const vscodeLayer = {
+      source: 'VS Code settings (tidy.*)',
+      values: { wrap_line_length: 100 }
+    };
+    const ecLayer = mapEditorConfigLayer({ max_line_length: 'OFF' } as unknown as Parameters<
+      typeof mapEditorConfigLayer
+    >[0]);
+    assert.ok(ecLayer);
+    const result = resolveOptions({
+      languageId: 'html',
+      layers: [vscodeLayer, ecLayer]
+    });
+    assert.equal(result.engineOptions.wrap_line_length, 0);
+    assert.equal(result.sources.wrap_line_length, SOURCE_EDITORCONFIG);
+  });
+
   it('a key absent from .editorconfig does not erase the VS Code layer value', () => {
     const vscodeLayer = {
       source: 'VS Code settings (tidy.*)',
