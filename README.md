@@ -1,4 +1,4 @@
-# Tidy HTML Formatter
+# Tidy: JS/CSS/HTML Formatter & Beautifier
 
 **Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON, safely. Tidy respects your VS Code config and never auto-formats or hijacks your files unless you ask.**
 
