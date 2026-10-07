@@ -433,5 +433,21 @@ export const GIT_CORPUS: readonly GitCorpusRow[] = [
     ignoreCase: false,
     paths: ["keep.js", "a.js"],
     expected: [false, true]
+  },
+  {
+    // Final review C1: git never case-folds the character after "\", so under
+    // core.ignorecase "!\App.js" re-includes nothing. Tidy must not format App.js.
+    id: "C1 escaped uppercase in a negation, ignorecase on",
+    file: "*.js\n!\\App.js\n",
+    ignoreCase: true,
+    paths: ["App.js", "app.js", "src/App.js"],
+    expected: [true, true, true]
+  },
+  {
+    id: "C1 escaped uppercase in a negation, ignorecase off",
+    file: "*.js\n!\\App.js\n",
+    ignoreCase: false,
+    paths: ["App.js", "app.js", "src/App.js"],
+    expected: [false, true, false]
   }
 ];

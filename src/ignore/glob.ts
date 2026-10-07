@@ -363,7 +363,7 @@ function tokenize(bytes: Uint8Array, pathMode: boolean, ignoreCase: boolean): To
         segments.push({ globstar: false, items: buffer.slice(start, count) });
         start = count;
       } else {
-        buffer[count] = ignoreCase ? lowerAscii(escaped) : escaped;
+        buffer[count] = escaped; // like git: the character after "\\" is never case-folded
         count += 1;
       }
     } else if (byte === SLASH && pathMode) {
@@ -589,14 +589,14 @@ export function compileIgnorePattern(line: string, options?: GlobOptions): Ignor
  * `exact` (compiled case-sensitive) carrying `folded`, the same line compiled
  * case-insensitively: evaluatePatterns then matches it in both modes. A pattern
  * that cannot be evaluated is the same in both modes and needs no twin. Without a
- * bracket expression, folding only WIDENS a match (exact implies folded), so the
+ * bracket expression or a backslash, folding only WIDENS a match (exact implies folded), so the
  * merge is `folded` for an exclusion and `exact` for a "!": one evaluation, not two.
  */
 export function withFoldedTwin(exact: IgnorePattern, folded: IgnorePattern): IgnorePattern {
   if (exact.unevaluable !== undefined) {
     return exact;
   }
-  if (!exact.raw.includes('[')) {
+  if (!exact.raw.includes('[') && !exact.raw.includes('\\')) {
     return exact.negated ? exact : folded;
   }
   return Object.create(exact, { foldedTwin: { value: folded } }) as IgnorePattern;
