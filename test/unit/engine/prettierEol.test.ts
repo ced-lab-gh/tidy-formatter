@@ -41,6 +41,7 @@ import assert from 'node:assert/strict';
 import { dispatchFormat } from '../../../src/engine/dispatcher';
 import { PrettierEngine } from '../../../src/engine/prettier';
 import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import { resolved } from '../../helpers/options';
 import { SUPPORTED_LANG_IDS, type LangId, type ResolvedOptions } from '../../../src/types';
 
@@ -386,7 +387,7 @@ describe('engine/prettier : the trim policy is NOT applied to printed JS/TS', ()
       `the literal's own spaces were eaten: ${JSON.stringify(output)}`
     );
     assert.equal(
-      guard.check('typescript', input, output).equivalent,
+      guardCheckNoFastPath('typescript', input, output).equivalent,
       true,
       'and the guard therefore still accepts the result'
     );

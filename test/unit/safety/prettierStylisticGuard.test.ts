@@ -13,6 +13,7 @@
 import assert from 'node:assert/strict';
 import { PrettierEngine } from '../../../src/engine/prettier';
 import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import { resolved } from '../../helpers/options';
 import type { LangId } from '../../../src/types';
 
@@ -100,8 +101,10 @@ describe('safety/guard : Prettier stylistic options are AST-invariant', () => {
       assert.notEqual(outA, outB, `${c.name}: outputs must differ to prove the option has effect`);
 
       // 2. Each variant is equivalent to the original input under the guard.
-      const vA = guard.check(c.lang, c.input, outA);
-      const vB = guard.check(c.lang, c.input, outB);
+      // guardCheckNoFastPath: an input already in style A (or B) equals outA
+      // (or outB), and guard.check would then answer without parsing.
+      const vA = guardCheckNoFastPath(c.lang, c.input, outA);
+      const vB = guardCheckNoFastPath(c.lang, c.input, outB);
       assert.equal(vA.equivalent, true, `${c.name}: variant A rejected (${vA.reason ?? ''})`);
       assert.equal(vB.equivalent, true, `${c.name}: variant B rejected (${vB.reason ?? ''})`);
 

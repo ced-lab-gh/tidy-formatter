@@ -27,6 +27,7 @@ import {
 import { dispatchCssFallback, dispatchFormat } from '../../../src/engine/dispatcher';
 import { scanMarkers } from '../../../src/ignore/markers';
 import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import { resolved } from '../../helpers/options';
 import {
   frontMatterFixtures,
@@ -270,7 +271,7 @@ describe('engine/maskPlan : the engine range is expressed in the ENGINE\'s coord
       `the island must come back byte for byte, got ${JSON.stringify(spliced)}`
     );
     assert.equal(
-      guard.check('html', document, spliced).equivalent,
+      guardCheckNoFastPath('html', document, spliced).equivalent,
       true,
       'a boundary inside an island must never produce a non-equivalent document'
     );
@@ -501,7 +502,7 @@ describe('engine/maskPlan : HTML template islands survive a REAL format byte for
     const input = '<div>{% if u %}<p>{{ u.name }}</p>{% endif %}</div>';
     const result = await formatThroughPlan('html', input);
     assert.ok(result.text !== undefined);
-    const verdict = guard.check('html', input, result.text);
+    const verdict = guardCheckNoFastPath('html', input, result.text);
     assert.equal(verdict.equivalent, true, verdict.reason);
     assert.ok(
       !result.text.includes('tidytplisland'),
@@ -1452,7 +1453,7 @@ describe('engine/maskPlan : an apostrophe in HTML text never disarms a region', 
       result.text.includes(region),
       `the marked span must survive byte for byte, got ${JSON.stringify(result.text)}`
     );
-    assert.equal(guard.check('html', doc, result.text).equivalent, true);
+    assert.equal(guardCheckNoFastPath('html', doc, result.text).equivalent, true);
   });
 
   it('protection does not depend on apostrophe parity, in either scope', async () => {

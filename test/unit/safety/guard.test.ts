@@ -5,6 +5,8 @@
 import assert from 'node:assert/strict';
 import { guard, astEqualJs, cssTreeEqual, htmlTreeEqual, jsonEqual } from '../../../src/safety/guard';
 import { guardFixtures } from '../../fixtures/guardFixtures';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
+import type { LangId } from '../../../src/types';
 
 describe('safety/guard : anti-incumbent regression corpus', () => {
   for (const f of guardFixtures) {
@@ -77,9 +79,16 @@ describe('safety/guard : legitimate JSX reflow is accepted (regression)', () => 
 });
 
 describe('safety/guard : fast path & dispatch', () => {
-  it('returns equivalent immediately when input === output', () => {
+  // THE one explicit test of the identity fast path (I-L23). guard.check answers
+  // on string equality alone, so a test that hands it the same text on both sides
+  // never reaches a comparator and would pass with every comparator broken. Any
+  // other test that asserts "the guard accepts X" where X may equal the input
+  // must go through guardCheckNoFastPath (test/helpers/guardCheck.ts) instead.
+  it('returns equivalent immediately when input === output, without parsing', () => {
     const verdict = guard.check('css', '.a{}', '.a{}');
     assert.deepEqual(verdict, { equivalent: true });
+    // Nothing is parsed: identical text that cannot parse is still "equivalent".
+    assert.deepEqual(guard.check('typescript', 'const = ;', 'const = ;'), { equivalent: true });
   });
 
   it('per-language strategies are exported and usable directly', () => {
@@ -87,5 +96,65 @@ describe('safety/guard : fast path & dispatch', () => {
     assert.equal(cssTreeEqual('css', 'a{color:red}', 'a {\n  color: red\n}').equivalent, true);
     assert.equal(htmlTreeEqual('<p>x</p>', '<p>\n  x\n</p>').equivalent, true);
     assert.equal(jsonEqual('{"a":1}', '{\n  "a": 1\n}').equivalent, true);
+  });
+});
+
+// The helper that stands in for guard.check wherever the two sides may be equal.
+// It is only worth having if it really bypasses the fast path, so that is proven
+// here, per language, rather than assumed.
+describe('test helper guardCheckNoFastPath : identical text is really compared (I-L23)', () => {
+  const UNPARSEABLE: ReadonlyArray<readonly [LangId, string]> = [
+    ['javascript', 'const = ;'],
+    ['javascriptreact', 'const a = <div>;'],
+    ['typescript', 'const = ;'],
+    ['typescriptreact', 'const a = <div>;'],
+    ['css', '.a{'],
+    ['scss', '.a{'],
+    ['less', '.a{'],
+    ['json', '{"a":'],
+    ['jsonc', '{"a":']
+  ];
+
+  for (const [lang, text] of UNPARSEABLE) {
+    it(`${lang}: identical unparseable text is rejected, not waved through`, () => {
+      // The fast path would call this equivalent...
+      assert.deepEqual(guard.check(lang, text, text), { equivalent: true });
+      // ...and the helper must not.
+      const verdict = guardCheckNoFastPath(lang, text, text);
+      assert.equal(verdict.equivalent, false);
+      assert.ok(verdict.reason && verdict.reason.length > 0, 'a rejection must carry a reason');
+    });
+  }
+
+  const PARSEABLE: ReadonlyArray<readonly [LangId, string]> = [
+    ['javascript', 'const a = 1;'],
+    ['javascriptreact', 'const a = <div />;'],
+    ['typescript', 'const a: number = 1;'],
+    ['typescriptreact', 'const a = <div />;'],
+    ['css', '.a { color: red; }'],
+    ['scss', '.a { .b { color: red; } }'],
+    ['less', '@c: red;\n.a { color: @c; }'],
+    ['html', '<p>x</p>'],
+    ['json', '{"a":1}'],
+    ['jsonc', '{"a":1,}']
+  ];
+
+  for (const [lang, text] of PARSEABLE) {
+    it(`${lang}: identical parseable text is accepted`, () => {
+      assert.equal(guardCheckNoFastPath(lang, text, text).equivalent, true);
+    });
+  }
+
+  it('different text is delegated to guard.check unchanged', () => {
+    const pairs: ReadonlyArray<readonly [LangId, string, string]> = [
+      ['typescript', 'const a=1;', 'const a = 1;'],
+      ['typescript', 'const a=1;', 'const a=2;'],
+      ['css', 'a{color:red}', 'a{color:blue}'],
+      ['html', '<p>a</p>', '<p>b</p>'],
+      ['json', '{"a":1}', '{"a":2}']
+    ];
+    for (const [lang, input, output] of pairs) {
+      assert.deepEqual(guardCheckNoFastPath(lang, input, output), guard.check(lang, input, output));
+    }
   });
 });

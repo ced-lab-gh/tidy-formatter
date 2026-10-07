@@ -101,13 +101,22 @@ function resolveEndOfLine(
  * Each is validated for type before being applied so a malformed value never
  * reaches Prettier. Layout-affecting options Tidy already owns (tabWidth /
  * useTabs / endOfLine / range) are handled separately above.
+ *
+ * singleAttributePerLine and objectWrap (the latter in PRETTIER_STRING_ENUMS) are
+ * the two newest entries and the purest case of the rule: each decides ONLY where
+ * line breaks fall (one JSX attribute per line; an object literal kept expanded or
+ * joined onto one line), so the tree Prettier prints is the tree it was given.
+ * Probe P16 of the v0.5.0 audit ran both over the fixture corpus with zero new
+ * guard rejections. Both are also read from a .prettierrc (src/config/prettierrc.ts
+ * keeps the matching allow-list).
  */
 const PRETTIER_BOOLEAN_KEYS = [
   'semi',
   'singleQuote',
   'jsxSingleQuote',
   'bracketSpacing',
-  'bracketSameLine'
+  'bracketSameLine',
+  'singleAttributePerLine'
 ] as const;
 
 // NOTE: `quoteProps` is deliberately absent : it changes an object key's AST node
@@ -121,7 +130,8 @@ const PRETTIER_BOOLEAN_KEYS = [
 // reject the key-quoting it performs.
 const PRETTIER_STRING_ENUMS: Readonly<Record<string, readonly string[]>> = {
   trailingComma: ['none', 'es5', 'all'],
-  arrowParens: ['always', 'avoid']
+  arrowParens: ['always', 'avoid'],
+  objectWrap: ['preserve', 'collapse']
 };
 
 // Explicit denylist of Prettier options that LOOK stylistic but mutate the babel
@@ -145,10 +155,8 @@ function readPrettierBag(options: ResolvedOptions): Record<string, unknown> {
  * the prettier option object. Invalid values are dropped (never propagated).
  */
 function applyStylisticOptions(target: PrettierOptions, bag: Record<string, unknown>): void {
-  const printWidth = bag.printWidth;
-  if (typeof printWidth === 'number' && Number.isInteger(printWidth) && printWidth > 0) {
-    target.printWidth = printWidth;
-  }
+  // printWidth is NOT applied here: it is one value chosen by layer order, see
+  // resolvePrintWidth (the width used to be assigned twice, defect C-15).
   for (const key of PRETTIER_BOOLEAN_KEYS) {
     if (DENIED_AST_CHANGING_KEYS.has(key)) {
       continue;
@@ -167,6 +175,55 @@ function applyStylisticOptions(target: PrettierOptions, bag: Record<string, unkn
       (target as Record<string, unknown>)[key] = value;
     }
   }
+}
+
+/**
+ * A width Prettier can be handed: a positive integer, or the unbounded width.
+ * Anything else (0, a negative, a fraction, a string) is not a width.
+ */
+function usableWidth(value: unknown): number | undefined {
+  if (value === Number.POSITIVE_INFINITY) {
+    return value;
+  }
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : undefined;
+}
+
+/**
+ * The ONE print width for Prettier, or undefined when nobody asked for one (so
+ * Prettier's own default of 80 applies). Shared by the TS/JSX path and the CSS
+ * fallback.
+ *
+ * The layer-order decision is NOT made here. The resolver (src/config/
+ * resolver.ts, unifyPrintWidth) has already collapsed `wrap_line_length` and
+ * `prettier.printWidth` into `engineOptions.prettier.printWidth` by the order
+ * of the layers that set them, and that value is what this reads first. Before
+ * the resolver did so, this adapter assigned the shared width and then
+ * overwrote it from the Prettier key, so a VS Code `tidy.prettier.printWidth`
+ * beat an .editorconfig `max_line_length` and a .soukformatrc
+ * `wrap_line_length` (defect C-15). The shared key is still consulted as a
+ * fallback so that an option bag which never went through the resolver (this
+ * adapter is called directly by tests and by the CSS fallback, where no
+ * Prettier key can exist) still maps its width, the Prettier key winning when
+ * both are present.
+ *
+ * An explicit `wrap_line_length` of 0 means "do not wrap", the same words the
+ * setting has always used. Prettier has no off switch, so 0 becomes the
+ * unbounded width. It used to fall through to Prettier's default of 80, i.e.
+ * the exact opposite of what was asked (defect LOW-03). A width nobody set is
+ * still no opinion: undefined.
+ */
+function resolvePrintWidth(options: ResolvedOptions): number | undefined {
+  const fromPrettierKey = usableWidth(readPrettierBag(options).printWidth);
+  if (fromPrettierKey !== undefined) {
+    return fromPrettierKey;
+  }
+  const shared = options.engineOptions.wrap_line_length;
+  if (typeof shared === 'number' && Number.isInteger(shared)) {
+    return shared === 0 ? Number.POSITIVE_INFINITY : usableWidth(shared);
+  }
+  return undefined;
 }
 
 /**
@@ -193,25 +250,10 @@ function buildPrettierOptions(
     endOfLine: resolveEndOfLine(options)
   };
 
-  // A shared wrap_line_length (js-beautify vocabulary) maps to prettier
-  // printWidth, so the cross-engine "core" option influences TS/JSX width.
-  //
-  // KNOWN DEVIATION, DO NOT READ THIS AS "ONLY WHEN UNSET" (C-15). This comment
-  // used to claim the mapping applied "only when no explicit prettier.printWidth
-  // was set". It does not: `applyStylisticOptions` runs AFTER this assignment and
-  // overwrites printWidth from engineOptions.prettier.printWidth whenever that
-  // key has a valid value. Because the resolver has already collapsed every layer
-  // into one bag, wrap_line_length here may be carrying .editorconfig
-  // max_line_length or .soukformatrc, and a plain `tidy.prettier.printWidth` from
-  // VS Code settings therefore beats BOTH : the reverse of the documented layer
-  // order, where .soukformatrc has the last word. Resolving a single width key
-  // BEFORE the engine is the real fix; it is deferred to v0.5.0 with the other
-  // option-resolution defects (C-12, C-14, C-15) because changing it moves a
-  // precedence layer, which a patch release must not do. README flags the same
-  // deviation, and the two must be corrected together.
-  const sharedWrap = options.engineOptions.wrap_line_length;
-  if (typeof sharedWrap === 'number' && Number.isInteger(sharedWrap) && sharedWrap > 0) {
-    prettierOptions.printWidth = sharedWrap;
+  // ONE width, chosen by layer order upstream (see resolvePrintWidth).
+  const printWidth = resolvePrintWidth(options);
+  if (printWidth !== undefined) {
+    prettierOptions.printWidth = printWidth;
   }
 
   applyStylisticOptions(prettierOptions, readPrettierBag(options));
@@ -232,8 +274,10 @@ function buildPrettierOptions(
  *    unresolved and a CRLF stylesheet is never rewritten to LF by the fallback
  *    (Prettier's own default is 'lf', which would). The TS/JSX path above asks
  *    the same question through the same function.
- *  - printWidth: shared wrap_line_length first, then an explicit
- *    engineOptions.prettier.printWidth (same precedence as the TS path).
+ *  - printWidth: the same single width as the TS path (resolvePrintWidth). No
+ *    Prettier width key can reach a CSS document (the catalogue does not declare
+ *    it for CSS, SCSS or LESS), so in practice this is wrap_line_length, with 0
+ *    meaning "do not wrap".
  *  - NOTHING else from the prettier bag. singleQuote would rewrite quoted CSS
  *    strings ("x" -> 'x'), which the guard compares VERBATIM, so every fallback
  *    attempt would be rejected and the whole feature would silently never apply.
@@ -255,21 +299,8 @@ function buildCssPrettierOptions(
     endOfLine: resolveEndOfLine(options)
   };
 
-  const sharedWrap = options.engineOptions.wrap_line_length;
-  if (
-    typeof sharedWrap === 'number' &&
-    Number.isInteger(sharedWrap) &&
-    sharedWrap > 0
-  ) {
-    prettierOptions.printWidth = sharedWrap;
-  }
-
-  const printWidth = readPrettierBag(options).printWidth;
-  if (
-    typeof printWidth === 'number' &&
-    Number.isInteger(printWidth) &&
-    printWidth > 0
-  ) {
+  const printWidth = resolvePrintWidth(options);
+  if (printWidth !== undefined) {
     prettierOptions.printWidth = printWidth;
   }
 

@@ -33,3 +33,7 @@ ignore-suite/
 
 # VS Code writes per-workspace state here when the test host updates settings.
 .vscode/
+
+# Throwaway fixtures written by the who-formats integration tests at runtime.
+who-formats/
+biome.json

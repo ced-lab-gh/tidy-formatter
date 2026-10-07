@@ -66,7 +66,31 @@ describe('config/resolver : sources map invariants', () => {
       layers: [{ source: 'vscode', values: { brace_style: 'expand', wrap_line_length: 120 } }]
     });
     for (const key of Object.keys(r.engineOptions)) {
+      if (key === 'prettier') {
+        continue; // the nested bag is sourced per key, asserted just below
+      }
       assert.ok(r.sources[key], `engineOption ${key} must have a source`);
+    }
+  });
+
+  it('every key of the nested prettier bag is sourced under prettier.<key>', () => {
+    // The Prettier options are lifted into ONE nested `engineOptions.prettier`
+    // object, so the bag itself has no source of its own: the attribution is
+    // recorded per key under the flat `prettier.<key>` name (resolver.ts,
+    // nestPrettierOptions). That includes the unified print width, which a
+    // `wrap_line_length` can contribute without any prettier.* key in a layer.
+    const r = resolveOptions({
+      languageId: 'typescript',
+      layers: [
+        { source: 'vscode', values: { 'prettier.semi': false } },
+        { source: '.editorconfig', values: { wrap_line_length: 120 } }
+      ]
+    });
+    const bag = r.engineOptions.prettier as Record<string, unknown>;
+    assert.ok(bag, 'the Prettier bag exists');
+    assert.deepEqual(Object.keys(bag).sort(), ['printWidth', 'semi']);
+    for (const key of Object.keys(bag)) {
+      assert.ok(r.sources[`prettier.${key}`], `prettier.${key} must have a source`);
     }
   });
 

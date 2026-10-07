@@ -12,6 +12,7 @@ import type { Node } from '@babel/types';
 import { requireGuardJsChunk } from '../chunks/loader';
 import type { Engine, FormatRequest, LangId } from '../types';
 import { JsBeautifyEngine } from './jsbeautify';
+import { mayContainJsx } from './jsxScan';
 import { PrettierEngine } from './prettier';
 
 // Engines are stateless adapters, so a single shared instance per engine is safe
@@ -98,10 +99,16 @@ export async function dispatchCssFallback(req: FormatRequest): Promise<string> {
  * Detect whether a 'javascript' document actually contains JSX that js-beautify
  * would corrupt, in which case the prettier engine must be used.
  *
- * Two-stage strategy (SPEC §4: "heuristique + tentative"):
- *   1. A cheap regex gate skips the parse for the overwhelmingly common case of
+ * Three-stage strategy (SPEC §4: "heuristique + tentative"):
+ *   1. A cheap regex gate skips everything for the overwhelmingly common case of
  *      plain JS with no JSX-looking tokens.
- *   2. A real @babel/parser pass with the `jsx` plugin confirms the presence of
+ *   2. A linear lexical scan (MEDIUM-06) skips the PARSE when no `<` sits where
+ *      an expression can start. `a<b` matches the regex gate but is a
+ *      comparison, and a 5 MB .js with one of them used to pay 1.9 to 4.8 s of
+ *      Babel parse to learn that (probe P11). The scan only ever answers "no"
+ *      when JSX is impossible and answers "maybe" on any doubt: see
+ *      engine/jsxScan.ts for the rule that keeps it from ever hiding real JSX.
+ *   3. A real @babel/parser pass with the `jsx` plugin confirms the presence of
  *      genuine JSX nodes, distinguishing them from comparison operators (`a < b`)
  *      and TypeScript-style generics that merely look similar.
  *
@@ -113,6 +120,12 @@ export async function dispatchCssFallback(req: FormatRequest): Promise<string> {
 function containsJsx(code: string): boolean {
   // Stage 1 : cheap gate. No JSX-looking token => certainly no JSX.
   if (!JSX_HINT.test(code)) {
+    return false;
+  }
+
+  // Stage 1b : linear scan, no parser. false = no `<` at an expression start,
+  // so the file cannot hold JSX and the parse below would only confirm that.
+  if (!mayContainJsx(code)) {
     return false;
   }
 

@@ -71,17 +71,31 @@ describe('engine/dispatcherLazy : nothing loads that is not needed (ADD-11)', ()
     assert.equal(__isChunkLoadedForTests('chunk-prettier'), true);
   });
 
-  it('a JSX-LOOKING but non-JSX .js loads the detector chunk and stays on js-beautify', async () => {
+  it('a JSX-LOOKING comparison-only .js loads no chunk: the lexical scan rules JSX out (MEDIUM-06)', async () => {
     const out = await dispatchFormat({
       languageId: 'javascript',
       code: 'const ok = a<b && c>d;',
       options: resolved()
     });
-    // Detection needed a real parse (hence the chunk) but found no JSX, so the
-    // prettier chunk is never touched.
-    assert.equal(__isChunkLoadedForTests('chunk-guard-js'), true);
+    // It used to load the babel chunk and run a full parse to learn that `a<b` is
+    // a comparison (1.9 to 4.8 s on a 5 MB file, probe P11). No `<` sits where an
+    // expression can start, so neither chunk is touched and js-beautify prints it.
+    assert.equal(__isChunkLoadedForTests('chunk-guard-js'), false);
     assert.equal(__isChunkLoadedForTests('chunk-prettier'), false);
     assert.ok(out.includes('a < b'), `got: ${JSON.stringify(out)}`);
+  });
+
+  it('a .js the scan cannot rule out still loads the detector chunk and stays on js-beautify', async () => {
+    // A `<` on the line after its left operand could follow an automatic
+    // semicolon, so the scan answers "maybe" and the real parse decides.
+    const out = await dispatchFormat({
+      languageId: 'javascript',
+      code: 'const ok = a\n<b && c>d;',
+      options: resolved()
+    });
+    assert.equal(__isChunkLoadedForTests('chunk-guard-js'), true);
+    assert.equal(__isChunkLoadedForTests('chunk-prettier'), false);
+    assert.ok(/a\s*<\s*b/.test(out), `got: ${JSON.stringify(out)}`);
   });
 });
 

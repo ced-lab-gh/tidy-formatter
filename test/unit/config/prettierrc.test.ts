@@ -2,7 +2,7 @@
 //
 // Three tiers, all PURE (no 'vscode'):
 //   1. mapPrettierConfig: parsed object -> resolver-ready values + warnings
-//      (allow-list of ten AST-safe keys; everything else ignored with a trace).
+//      (allow-list of twelve AST-safe keys; everything else ignored with a trace).
 //   2. parsePrettierrcData: raw text -> object per data format (JSON / JSONC /
 //      JSON5 / YAML / TOML), fail-soft on malformed input.
 //   3. findPrettierConfig / readPrettierrcLayer: on-disk discovery BOUNDED to
@@ -31,7 +31,7 @@ import {
   type PrettierrcWarning,
   type PrintEngineId
 } from '../../../src/config/prettierrc';
-import { resolveEngineIdForSource } from '../../../src/engine/dispatcher';
+import { dispatchFormat, resolveEngineIdForSource } from '../../../src/engine/dispatcher';
 import { resolveOptions, type ConfigLayer } from '../../../src/config/resolver';
 import type { LangId } from '../../../src/types';
 
@@ -57,7 +57,7 @@ function upperLastSegment(dir: string): string {
 }
 
 describe('config/prettierrc : mapPrettierConfig (pure allow-list)', () => {
-  it('maps printWidth and the seven stylistic keys to flat prettier.* entries', () => {
+  it('maps printWidth and the nine stylistic keys to flat prettier.* entries', () => {
     const { values, warnings } = mapFor({
       printWidth: 90,
       semi: false,
@@ -66,7 +66,9 @@ describe('config/prettierrc : mapPrettierConfig (pure allow-list)', () => {
       trailingComma: 'es5',
       bracketSpacing: false,
       bracketSameLine: true,
-      arrowParens: 'avoid'
+      arrowParens: 'avoid',
+      singleAttributePerLine: true,
+      objectWrap: 'collapse'
     });
     assert.equal(warnings.length, 0);
     assert.deepEqual(values, {
@@ -77,7 +79,9 @@ describe('config/prettierrc : mapPrettierConfig (pure allow-list)', () => {
       'prettier.trailingComma': 'es5',
       'prettier.bracketSpacing': false,
       'prettier.bracketSameLine': true,
-      'prettier.arrowParens': 'avoid'
+      'prettier.arrowParens': 'avoid',
+      'prettier.singleAttributePerLine': true,
+      'prettier.objectWrap': 'collapse'
     });
   });
 
@@ -230,10 +234,12 @@ describe('config/prettierrc : mapPrettierConfig (pure allow-list)', () => {
       tabWidth: 2.5,
       semi: 'false',
       trailingComma: 'everywhere',
-      arrowParens: 'sometimes'
+      arrowParens: 'sometimes',
+      singleAttributePerLine: 'yes',
+      objectWrap: 'wrap'
     });
     assert.deepEqual(values, {});
-    assert.equal(warnings.length, 5);
+    assert.equal(warnings.length, 7);
   });
 
   it('truncates an oversized rejected value inside the warning message', () => {
@@ -1043,5 +1049,145 @@ describe('config/prettierrc : precedence through the pure resolver', () => {
     });
     assert.equal(resolved.insertSpaces, false);
     assert.equal(resolved.sources.insertSpaces, SOURCE_PRETTIERRC);
+  });
+});
+
+describe('config/prettierrc : singleAttributePerLine and objectWrap (OPTIONS-6)', () => {
+  const PRETTIER_LANG_IDS: readonly LangId[] = [
+    'typescript',
+    'typescriptreact',
+    'javascriptreact',
+    'javascript'
+  ];
+
+  it('both keys are forwarded for every language the layer is built for, in either printing engine', () => {
+    for (const lang of PRETTIER_LANG_IDS) {
+      for (const engine of ['prettier', 'js-beautify'] as PrintEngineId[]) {
+        const { values, warnings } = mapFor(
+          { singleAttributePerLine: true, objectWrap: 'collapse' },
+          lang,
+          engine
+        );
+        assert.deepEqual(warnings, [], `${lang}/${engine}`);
+        assert.deepEqual(values, {
+          'prettier.singleAttributePerLine': true,
+          'prettier.objectWrap': 'collapse'
+        });
+      }
+    }
+  });
+
+  it('accepts both values of objectWrap and both booleans', () => {
+    assert.deepEqual(mapFor({ objectWrap: 'preserve' }).values, { 'prettier.objectWrap': 'preserve' });
+    assert.deepEqual(mapFor({ objectWrap: 'collapse' }).values, { 'prettier.objectWrap': 'collapse' });
+    assert.deepEqual(mapFor({ singleAttributePerLine: false }).values, {
+      'prettier.singleAttributePerLine': false
+    });
+  });
+
+  it('drops a value of the wrong type or outside the enum, one warning each, naming the key', () => {
+    for (const root of [
+      { singleAttributePerLine: 'true' },
+      { singleAttributePerLine: 1 },
+      { singleAttributePerLine: null },
+      { objectWrap: 'wrap' },
+      { objectWrap: 'COLLAPSE' },
+      { objectWrap: true },
+      { objectWrap: ['collapse'] }
+    ]) {
+      const { values, warnings } = mapFor(root);
+      assert.deepEqual(values, {}, JSON.stringify(root));
+      assert.equal(warnings.length, 1, JSON.stringify(root));
+      assert.match(warnings[0].message, /invalid value for "(singleAttributePerLine|objectWrap)"/);
+    }
+  });
+
+  it('the allow-list is exactly twelve keys: nothing else became readable', () => {
+    const everything: Record<string, unknown> = {
+      printWidth: 80,
+      tabWidth: 2,
+      useTabs: false,
+      semi: true,
+      singleQuote: true,
+      jsxSingleQuote: true,
+      trailingComma: 'all',
+      bracketSpacing: true,
+      bracketSameLine: true,
+      arrowParens: 'always',
+      singleAttributePerLine: true,
+      objectWrap: 'preserve'
+    };
+    const { warnings } = mapFor(everything);
+    assert.deepEqual(warnings, [], 'all twelve are honoured');
+    for (const key of ['quoteProps', 'parser', 'plugins', 'endOfLine', 'proseWrap', 'experimentalTernaries']) {
+      const { values, warnings: dropped } = mapFor({ [key]: 'x' });
+      assert.deepEqual(values, {}, key);
+      assert.equal(dropped.length, 1, key);
+      assert.match(dropped[0].message, /unknown or not AST-safe/, key);
+    }
+  });
+
+  describe('end to end: a real config file on disk governs the real engine', () => {
+    let ws: string;
+    beforeEach(() => {
+      ws = mkdtempSync(join(tmpdir(), 'tidy-prettierrc-options6-'));
+      mkdirSync(join(ws, 'src'), { recursive: true });
+    });
+    afterEach(() => {
+      rmSync(ws, { recursive: true, force: true });
+    });
+
+    const TSX = 'const a = <Foo a="1" b="2" c="3" />;\nconst o = {\n  b: 1, c: 2 };\n';
+
+    async function formatWith(
+      configName: string,
+      configText: string,
+      lang: LangId
+    ): Promise<{ output: string; baseline: string }> {
+      writeFileSync(join(ws, configName), configText);
+      const read = readPrettierrcLayer(join(ws, 'src', 'a.tsx'), lang, ws, 'prettier');
+      assert.deepEqual(read.warnings, [], configName);
+      const layers: ConfigLayer[] = read.layer ? [read.layer] : [];
+      const resolved = resolveOptions({ languageId: lang, layers });
+      const format = (engineOptions: Record<string, unknown>): Promise<string> =>
+        dispatchFormat({
+          languageId: lang,
+          code: TSX,
+          options: { ...resolved, tabSize: 2, engineOptions }
+        });
+      return { output: await format(resolved.engineOptions), baseline: await format({}) };
+    }
+
+    it('.prettierrc (YAML): both options reach Prettier and change the output', async () => {
+      const { output, baseline } = await formatWith(
+        '.prettierrc',
+        'singleAttributePerLine: true\nobjectWrap: collapse\n',
+        'typescriptreact'
+      );
+      assert.notEqual(output, baseline);
+      assert.match(output, /^ {4}a="1"$/m, 'one attribute per line');
+      assert.match(output, /^const o = \{ b: 1, c: 2 \};$/m, 'the object is collapsed');
+      assert.match(baseline, /^const o = \{\n {2}b: 1,/m, 'control: without the config it stays expanded');
+    });
+
+    it('.prettierrc.json: each option acts alone', async () => {
+      const single = await formatWith('.prettierrc.json', '{"singleAttributePerLine": true}', 'typescriptreact');
+      assert.match(single.output, /^ {4}a="1"$/m);
+      assert.match(single.output, /^const o = \{\n/m, 'objectWrap untouched');
+      rmSync(join(ws, '.prettierrc.json'));
+      const wrap = await formatWith('.prettierrc.json', '{"objectWrap": "collapse"}', 'typescriptreact');
+      assert.match(wrap.output, /^const o = \{ b: 1, c: 2 \};$/m);
+      assert.match(wrap.output, /<Foo a="1" b="2" c="3" \/>/, 'singleAttributePerLine untouched');
+    });
+
+    it('the printed result of the config is accepted by the guard', async () => {
+      const { output } = await formatWith(
+        '.prettierrc.toml',
+        'singleAttributePerLine = true\nobjectWrap = "collapse"\n',
+        'typescriptreact'
+      );
+      const { guard } = await import('../../../src/safety/guard');
+      assert.equal(guard.check('typescriptreact', TSX, output).equivalent, true);
+    });
   });
 });

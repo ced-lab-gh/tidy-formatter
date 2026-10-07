@@ -28,7 +28,7 @@ import { parse as parseLess } from 'postcss-less';
 import { parse as parseHtml, parseFragment as parseHtmlFragment } from 'parse5';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import { dispatchFormat } from '../../../src/engine/dispatcher';
-import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import type { LangId, ResolvedOptions } from '../../../src/types';
 import { corpus, perturb, ALL_LANGS, type CorpusSnippet } from '../../fixtures/corpus';
 
@@ -140,7 +140,9 @@ describe('property : invariants over corpus x deterministic perturbations', () =
 
         // I1 : the safety guard must accept the formatter's own output.
         it('I1: guard.check(lang, input, output).equivalent === true', () => {
-          const verdict = guard.check(snippet.lang, input, output);
+          // guardCheckNoFastPath: a snippet the formatter leaves untouched has
+          // output === input, and guard.check would answer without parsing.
+          const verdict = guardCheckNoFastPath(snippet.lang, input, output);
           assert.equal(
             verdict.equivalent,
             true,
@@ -180,7 +182,7 @@ describe('property : previously-quarantined bugs (now fixed)', () => {
   it('BUG-LESS-VAR: compact `@c:red` LESS variable is accepted by guard', async () => {
     const input = '@c:red;.a{color:@c}';
     const output = await dispatchFormat({ languageId: 'less', code: input, options: OPTS });
-    const verdict = guard.check('less', input, output);
+    const verdict = guardCheckNoFastPath('less', input, output);
     assert.equal(verdict.equivalent, true, verdict.reason);
   });
 
@@ -192,7 +194,9 @@ describe('property : previously-quarantined bugs (now fixed)', () => {
   it('BUG-TS-ANGLE-CAST: legacy `<T>expr` cast in .ts is accepted by guard', async () => {
     const input = 'const c = <readonly number[]>[1, 2];';
     const output = await dispatchFormat({ languageId: 'typescript', code: input, options: OPTS });
-    const verdict = guard.check('typescript', input, output);
+    // The formatter leaves this cast untouched (output === input), so only
+    // guardCheckNoFastPath makes the guard actually parse the `<T>expr` form.
+    const verdict = guardCheckNoFastPath('typescript', input, output);
     assert.equal(verdict.equivalent, true, verdict.reason);
   });
 

@@ -3,8 +3,8 @@
   "schemaVersion": 1,
   "files": {
     "extension.js": {
-      "maxBytes": 440320,
-      "//": "measured 381694 bytes after ADD-11 (production build), frozen at measured + 15% rounded up to 10 KiB. Down from 2 923 286 because ADD-11 moved prettier, @babel/parser, @babel/types, postcss (+scss/less) and parse5 out of the host bundle into lazy chunks. The host keeps js-beautify, jsonc-parser, editorconfig and the prettierrc data parsers (js-yaml, json5, smol-toml) added by ADD-13. scripts/check-chunks.mjs enforces a second, architectural ceiling of 700 KiB on this same file."
+      "maxBytes": 532480,
+      "//": "v0.5.0: measured 459185 bytes (production build), frozen at measured + 15% rounded up to 10 KiB, the same rule as ADD-11. Up from 407 285 in v0.4.2 (+51 900), all of it Tidy source, no dependency grew: src/commands +15 507 (Who Formats This File? about 15 100), src/migration +9 577 (lonefy migration rework), src/engine +8 281 (prettier-ignore refusal, JSX scan, OPTIONS-6), src/config +8 096 (OPTIONS-6 catalog and tag lists, linear .soukformatrc matcher), src/ignore +7 805 (linear glob matcher, bounded .soukformatignore walk), src/safety +1 310, the rest +1 324. Cold require measured unchanged against v0.4.2 on the same machine (25 to 36 ms against 32 to 37 ms, budget 80 ms), so lazy-loading these commands was not worth a fifth chunk. History: 381 694 after ADD-11 (down from 2 923 286 when ADD-11 moved prettier, @babel/parser, @babel/types, postcss (+scss/less) and parse5 into lazy chunks); the host keeps js-beautify, jsonc-parser, editorconfig and the prettierrc data parsers (js-yaml, json5, smol-toml) added by ADD-13. scripts/check-chunks.mjs enforces a second, architectural ceiling of 700 KiB on this same file."
     },
     "chunk-prettier.js": {
       "maxBytes": 1925120,

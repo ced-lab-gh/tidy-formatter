@@ -3,7 +3,7 @@
 //
 // ANTI-HIJACK (ARCH-01/02, SPEC §5/§10/§12) : NON-NEGOTIABLE:
 //   - This module only DECIDES whether to *offer* a migration. It writes no
-//     setting, reads no `.jsbeautifyrc`, and triggers no formatting.
+//     setting, reads no config file, and triggers no formatting.
 //   - The notification is ONE-SHOT and deduplicated: once the user has been
 //     prompted (or chose "Don't ask again"), `shouldPromptMigration` returns
 //     false forever. The #1 complaint about the incumbent was intrusion, so the
@@ -50,15 +50,34 @@ export function shouldPromptMigration(
 /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires */
 
 /**
- * Whether the abandoned incumbent is installed in the current VS Code instance.
- * Thin host-only wrapper around `vscode.extensions.getExtension` so the pure
- * predicate above stays free of 'vscode'. Returns false if the API is somehow
- * unavailable rather than throwing (defensive: detection must never break boot).
+ * Whether the incumbent is present in the GIVEN `vscode` module's extension list.
+ * `vscode` is a parameter (the idiom of setDefaultFormatter.ts) so the migration
+ * flow can be driven by a mock in a unit test. Returns false if the API is
+ * unavailable rather than throwing.
+ *
+ * KNOWN LIMIT (probe P4, LOW-13): `getExtension` cannot see a DISABLED extension,
+ * so this is `false` for an incumbent that is installed but disabled. That is why
+ * the MIGRATION reads the incumbent's CONFIG FILE (which outlives the extension)
+ * instead of keying on this, and why the "disable it in the Extensions view"
+ * advice is only shown when this is true: a disabled incumbent formats nothing.
+ */
+export function isLonefyPresentIn(vscode: any): boolean {
+  try {
+    return vscode.extensions.getExtension(LONEFY_EXTENSION_ID) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the abandoned incumbent is installed AND enabled in the current VS Code
+ * instance. Thin host-only wrapper so the pure predicate above stays free of
+ * 'vscode'. Returns false if the API is somehow unavailable rather than throwing
+ * (defensive: detection must never break boot).
  */
 export function isLonefyInstalled(): boolean {
   try {
-    const vscode = require('vscode');
-    return vscode.extensions.getExtension(LONEFY_EXTENSION_ID) !== undefined;
+    return isLonefyPresentIn(require('vscode'));
   } catch {
     return false;
   }

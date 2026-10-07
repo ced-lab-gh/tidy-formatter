@@ -25,6 +25,8 @@ import { EXTENSION_ID } from '../commands/setDefaultFormatter';
 // Pure module (no 'vscode'): lets a too-large view name the cap that actually
 // applied (json/jsonc have their own) instead of always the generic key.
 import { settingKeyFromDescription } from '../config/sizeLimit';
+// Pure module too: tells a fail-closed exclusion (no rule involved) from a rule's.
+import { isFailClosedDetail } from '../ignore/soukformatignore';
 
 /** Setting key relative to the 'tidy' section (declared in package.json). */
 export const STATUS_BAR_ENABLE_KEY = 'statusBar.enable';
@@ -243,7 +245,9 @@ function transientSentence(record: LastFormatRecord): string {
         `${settingKeyFromDescription(record.detail) ?? 'tidy.maxFileSizeKB'}.`
       );
     case 'ignored-file':
-      return 'Skipped: a .soukformatignore rule excludes this file.';
+      return isFailClosedDetail(record.detail)
+        ? 'Skipped: .soukformatignore could not be fully evaluated.'
+        : 'Skipped: a .soukformatignore rule excludes this file.';
     case 'ignored-marker':
       return 'Skipped: a top-of-file ignore marker is present.';
     case 'disabled':

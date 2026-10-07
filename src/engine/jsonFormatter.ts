@@ -63,6 +63,16 @@ function applyEditsLinear(text: string, edits: readonly Edit[]): string {
  *   ending. The deterministic EOL policy is applied afterwards by the engine's
  *   shared post-processing pass (only when `endOfLine` is explicitly requested),
  *   keeping a single source of truth for EOL/final-newline/trim across languages.
+ *
+ * NOT consumed, on purpose: `preserve_newlines`, `max_preserve_newlines`,
+ * `indent_empty_lines` and `wrap_line_length`. jsonc-parser has no equivalent
+ * and this printer always lays a document out one member per line, so blank
+ * lines between members are dropped. The option catalogue therefore does NOT
+ * declare those options for json / jsonc (defect C-14): a setting that this
+ * function cannot honour must not be offered for the language it prints.
+ * Honouring `preserve_newlines` here would change the default output of every
+ * JSON file that contains a blank line, for users who set nothing, so it is a
+ * product decision and not a fix.
  */
 function mapJsonFormattingOptions(resolved: ResolvedOptions): FormattingOptions {
   const useTabs = resolved.insertSpaces === false;

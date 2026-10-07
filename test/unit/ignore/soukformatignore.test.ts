@@ -59,6 +59,21 @@ describe('ignore/soukformatignore : parseIgnorePatterns + isIgnoredFile (pure)',
     assert.equal(isIgnoredFile('./dist/bundle.js', patterns), true);
   });
 
+  it('F1: a lone CR is part of the pattern, not a line break (like git)', () => {
+    // git reads "!keep.js\rjunk" as ONE re-include of a file with a CR in its name,
+    // so keep.js stays excluded (checked against real git in globGit.test.ts, G7).
+    const patterns = parseIgnorePatterns('*.js\n!keep.js\rjunk\n');
+    assert.equal(patterns.length, 2);
+    assert.equal(isIgnoredFile('keep.js', patterns), true);
+  });
+
+  it('F1: CRLF drops exactly one final CR per line', () => {
+    const patterns = parseIgnorePatterns('*.js\r\n!keep.js\r\n');
+    assert.deepEqual(patterns.map((pattern) => pattern.raw), ['*.js', '!keep.js']);
+    assert.equal(isIgnoredFile('keep.js', patterns), false);
+    assert.equal(parseIgnorePatterns('a\r\r\n')[0].raw, 'a\r', 'only ONE CR is dropped');
+  });
+
   it('honours an escaped trailing space and trims unescaped ones', () => {
     // "foo\ " keeps one trailing space => matches "foo " not "foo".
     const escaped = parseIgnorePatterns('foo\\ \n');

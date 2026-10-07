@@ -305,6 +305,31 @@ describe('diagnostics/statusBar : renderTransient (exhaustive over 12 statuses)'
     assert.ok(view.tooltipMarkdown.includes('JSX tag boundary changed'));
   });
 
+  it('F5: a fail-closed exclusion does not claim a rule excluded the file', () => {
+    const closed = renderTransient(
+      rec('ignored-file', {
+        detail:
+          '.soukformatignore line 2 cannot be evaluated (it ends with a lone backslash); ' +
+          'every file it governs is excluded'
+      })
+    );
+    assert.ok(
+      closed.tooltipMarkdown.includes('Skipped: .soukformatignore could not be fully evaluated.'),
+      closed.tooltipMarkdown
+    );
+    assert.ok(!closed.tooltipMarkdown.includes('rule excludes'), closed.tooltipMarkdown);
+  });
+
+  it('F5: a real rule (the detail is the ignore file path) keeps its wording', () => {
+    const rule = renderTransient(rec('ignored-file', { detail: '/w/.soukformatignore' }));
+    assert.ok(
+      rule.tooltipMarkdown.includes('Skipped: a .soukformatignore rule excludes this file.'),
+      rule.tooltipMarkdown
+    );
+    const noDetail = renderTransient(rec('ignored-file'));
+    assert.ok(noDetail.tooltipMarkdown.includes('a .soukformatignore rule excludes this file'));
+  });
+
   it('disabled names the per-language key of the record', () => {
     const view = renderTransient(rec('disabled', { languageId: 'scss' }));
     assert.ok(view.tooltipMarkdown.includes('tidy.scss.enable'));

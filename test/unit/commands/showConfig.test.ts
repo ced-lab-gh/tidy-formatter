@@ -357,6 +357,37 @@ describe('commands/showConfig : ignore & coexistence (Axe 4.T8)', () => {
     assert.match(report, /\.soukformatignore excludes this file : yes/);
   });
 
+  it('says WHY when the exclusion is a fail-closed one (which line, and the reason)', () => {
+    const problem =
+      'line 3: pattern "vendor\\" cannot be evaluated (it ends with a lone backslash); ' +
+      "every file under this ignore file's folder is excluded until the line is fixed or removed.";
+    const report = reportFor('css', resolved(), {
+      ignoreStatus: {
+        ...baseStatus,
+        fileIgnoredByList: true,
+        soukformatignorePath: '/proj/.soukformatignore',
+        ignoreFileProblem: problem
+      }
+    });
+    assert.match(report, /\.soukformatignore excludes this file : yes/);
+    const lines = report.split('\n');
+    assert.ok(lines.includes('  .soukformatignore problem : ' + problem));
+    // The problem line sits right under the "excludes this file" line it explains.
+    const at = lines.findIndex((line) => line.includes('excludes this file : yes'));
+    assert.ok(lines[at + 1].startsWith('  .soukformatignore problem : line 3:'));
+  });
+
+  it('prints no problem line for an ordinary exclusion', () => {
+    const report = reportFor('css', resolved(), {
+      ignoreStatus: {
+        ...baseStatus,
+        fileIgnoredByList: true,
+        soukformatignorePath: '/proj/.soukformatignore'
+      }
+    });
+    assert.ok(!report.includes('.soukformatignore problem'));
+  });
+
   it('surfaces a head file-ignore marker as a SKIP', () => {
     const report = reportFor('css', resolved(), {
       ignoreStatus: { ...baseStatus, fileIgnoredByMarker: true }
@@ -495,5 +526,87 @@ describe('commands/showConfig : .prettierrc layer (ADD-13)', () => {
       now: FIXED_NOW
     });
     assert.ok(!empty.includes('warnings (non-fatal)'));
+  });
+});
+
+describe('commands/showConfig : option value warnings (the two HTML tag lists)', () => {
+  const SECTION = /^Option value warnings \(non-fatal\)$/m;
+
+  function htmlOptions(values: Record<string, unknown>, source = 'VS Code settings (tidy.*)'): ResolvedOptions {
+    return resolveFor('html', [{ source, values }]);
+  }
+
+  it('lists every dropped entry, naming the setting, when the language is HTML', () => {
+    const report = reportFor(
+      'html',
+      htmlOptions({ content_unformatted: ['a b', 'code', '<x>'], void_elements: ['pre', 'my-icon', 5 as unknown as string] })
+    );
+    assert.match(report, SECTION);
+    const section = report.slice(report.search(SECTION));
+    assert.equal((section.match(/tidy\.content_unformatted: entry/g) ?? []).length, 2);
+    assert.match(section, /tidy\.void_elements: "pre" holds text that must stay exactly as written/);
+    assert.match(section, /tidy\.void_elements: entry 5 is not a string/);
+    assert.ok(!/"code"|my-icon/.test(section), 'the entries that are kept are not reported');
+  });
+
+  it('prints nothing when every entry is usable, or when the lists are unset', () => {
+    assert.ok(!SECTION.test(reportFor('html', htmlOptions({ content_unformatted: ['code'], void_elements: ['my-icon'] }))));
+    assert.ok(!SECTION.test(reportFor('html', resolved())));
+  });
+
+  it('is computed from the EFFECTIVE value, whichever layer set it (here a .soukformatrc)', () => {
+    const options = resolveFor('html', [
+      { source: 'VS Code settings (tidy.*)', values: { void_elements: ['my-icon'] } },
+      { source: '.soukformatrc', values: { void_elements: ['a b'] } }
+    ]);
+    const report = reportFor('html', options);
+    assert.match(report, SECTION);
+    assert.match(report, /tidy\.void_elements: entry "a b" is not a valid tag name/);
+    assert.match(report, /tidy\.void_elements = \["a b"\] .*← \.soukformatrc/);
+  });
+
+  it('says nothing for a language the options do not apply to', () => {
+    const bad = { content_unformatted: ['a b'], void_elements: ['pre'] };
+    for (const lang of ['css', 'javascript', 'typescript', 'typescriptreact', 'json'] as LangId[]) {
+      assert.ok(!SECTION.test(reportFor(lang, resolveFor(lang, [{ source: 'x', values: bad }]))), lang);
+    }
+  });
+
+  it('shows a list value as JSON, with its source, and an unset list as the empty default', () => {
+    const set = reportFor('html', htmlOptions({ content_unformatted: ['code', 'my-snippet'] }));
+    assert.match(set, /tidy\.content_unformatted = \["code","my-snippet"\] .*← VS Code settings \(tidy\.\*\)/);
+    const unset = reportFor('html', resolved());
+    assert.match(unset, /tidy\.content_unformatted = \[\] .*← \(default\)/);
+    assert.match(unset, /tidy\.void_elements = \[\] .*← \(default\)/);
+  });
+
+  it('lists the six new options for the languages they are declared for, and only there', () => {
+    const has = (lang: LangId, key: string): boolean =>
+      new RegExp(`^  ${key.replace(/\./g, '\\.')} = `, 'm').test(reportFor(lang, resolved()));
+    assert.ok(has('javascript', 'tidy.space_before_conditional'));
+    assert.ok(has('javascript', 'tidy.jslint_happy'));
+    assert.ok(!has('typescript', 'tidy.space_before_conditional'));
+    assert.ok(!has('html', 'tidy.jslint_happy'));
+    assert.ok(has('html', 'tidy.content_unformatted'));
+    assert.ok(has('html', 'tidy.void_elements'));
+    assert.ok(!has('css', 'tidy.void_elements'));
+    assert.ok(has('typescriptreact', 'tidy.prettier.singleAttributePerLine'));
+    assert.ok(!has('typescript', 'tidy.prettier.singleAttributePerLine'));
+    assert.ok(has('typescript', 'tidy.prettier.objectWrap'));
+    assert.ok(!has('css', 'tidy.prettier.objectWrap'));
+  });
+
+  it('reads the two newest Prettier options from the nested bag, with their defaults', () => {
+    const report = reportFor('typescriptreact', resolved());
+    assert.match(report, /tidy\.prettier\.singleAttributePerLine = false .*← \(default\)/);
+    assert.match(report, /tidy\.prettier\.objectWrap = preserve .*← \(default\)/);
+    const set = reportFor(
+      'typescriptreact',
+      resolveFor('typescriptreact', [
+        { source: '.prettierrc', values: { 'prettier.singleAttributePerLine': true, 'prettier.objectWrap': 'collapse' } }
+      ])
+    );
+    assert.match(set, /tidy\.prettier\.singleAttributePerLine = true .*← \.prettierrc/);
+    assert.match(set, /tidy\.prettier\.objectWrap = collapse .*← \.prettierrc/);
   });
 });

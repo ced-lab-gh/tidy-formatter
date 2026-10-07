@@ -13,6 +13,7 @@ import {
   mapLonefyOptions,
   mapLonefyRcText
 } from '../../../src/migration/lonefyOptions';
+import { LONEFY_KEYS } from '../../../src/migration/lonefyKeys';
 import {
   migrationFixtures,
   nonObjectInputs
@@ -59,13 +60,9 @@ describe('migration/lonefyOptions : non-object input is fail-soft', () => {
 });
 
 describe('migration/lonefyOptions : only real tidy.* keys are ever produced', () => {
-  const ALLOWED = new Set([
-    'tidy.indent',
-    'tidy.brace_style',
-    'tidy.wrap_line_length',
-    'tidy.wrap_attributes',
-    'tidy.space_after_anon_function'
-  ]);
+  // The whole vocabulary, taken from the one table the mapper reads, so a key added
+  // there without a fixture (or a package.json entry, see lonefyKeys.test.ts) shows up.
+  const ALLOWED = new Set(Object.values(LONEFY_KEYS).map((spec) => spec.tidyKey));
 
   it('every produced settings key is a known tidy.* id across the whole corpus', () => {
     for (const f of migrationFixtures) {

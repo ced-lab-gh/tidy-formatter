@@ -116,6 +116,19 @@ function delay(ms: number): Promise<void> {
   });
 }
 
+/**
+ * Wait until `done()` holds, polling, instead of betting on a fixed delay: on a
+ * loaded machine the preload can take longer than any fixed guess and the test
+ * would fail for no reason. Gives up after `timeoutMs`, and the assertions that
+ * follow then fail with their own message.
+ */
+async function waitUntil(done: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!done() && Date.now() < deadline) {
+    await delay(5);
+  }
+}
+
 describe('chunks/loader : memoization', () => {
   beforeEach(() => {
     __resetChunksForTests();
@@ -703,7 +716,7 @@ describe('chunks/loader : the idle preload is one-shot and language-aware', () =
     const schedule = scheduleChunkPreload(1, () => ['css', 'scss'], (report) => {
       reports.push(report);
     });
-    await delay(80);
+    await waitUntil(() => reports.length > 0);
     schedule.dispose();
 
     assert.equal(reports.length, 1);
@@ -727,7 +740,7 @@ describe('chunks/loader : the idle preload is one-shot and language-aware', () =
     const schedule = scheduleChunkPreload(1, () => ['typescriptreact'], (report) => {
       reports.push(report);
     });
-    await delay(80);
+    await waitUntil(() => reports.length > 0);
     schedule.dispose();
 
     assert.equal(reports.length, 1);
@@ -745,7 +758,7 @@ describe('chunks/loader : the idle preload is one-shot and language-aware', () =
     const schedule = scheduleChunkPreload(1, () => [], (report) => {
       reports.push(report);
     });
-    await delay(80);
+    await waitUntil(() => reports.length > 0);
     schedule.dispose();
 
     assert.equal(reports.length, 1);
@@ -770,7 +783,8 @@ describe('chunks/loader : the idle preload is one-shot and language-aware', () =
       () => undefined
     );
     assert.equal(reads, 0, 'nothing may be read before the timer fires');
-    await delay(80);
+    await waitUntil(() => reads > 0);
+    await delay(20); // a second read, if any, would land here
     schedule.dispose();
     assert.equal(reads, 1, 'a single read: this is not a listener');
   });
@@ -788,7 +802,7 @@ describe('chunks/loader : the idle preload is one-shot and language-aware', () =
         reports.push(report);
       }
     );
-    await delay(80);
+    await waitUntil(() => reports.length > 0);
     schedule.dispose();
 
     assert.equal(reports.length, 1);
@@ -840,7 +854,7 @@ describe('chunks/loader : the idle preload is one-shot and language-aware', () =
         reports.push(report);
       }
     );
-    await delay(80);
+    await waitUntil(() => reports.length > 0);
     assert.equal(reports.length, 1);
 
     // deactivate() disposes the subscription long after the timer elapsed.
@@ -862,7 +876,7 @@ describe('chunks/loader : the idle preload is one-shot and language-aware', () =
     const schedule = scheduleChunkPreload(1, () => ['css'], (report) => {
       reports.push(report);
     });
-    await delay(80);
+    await waitUntil(() => reports.length > 0);
     schedule.dispose();
 
     assert.equal(reports.length, 1);

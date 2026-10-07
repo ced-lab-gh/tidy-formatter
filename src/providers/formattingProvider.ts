@@ -24,6 +24,14 @@
 //      it); once step 5b restores the slice's own leading whitespace that repair
 //      is invisible again and a break between two adjacent INLINE elements got
 //      written instead. Zero edits, and the user is told which selection to make;
+//   4c. for a SELECTION on the Prettier path only, refuse when the format would
+//      WRITE and the selection overlaps a node that a `// prettier-ignore`
+//      comment OUTSIDE the selection protects (M3-1). A selection hands Prettier
+//      only the selected text, so a directive above the node it protects is not
+//      in what Prettier parses, the node is reprinted as if it had none, and the
+//      guard cannot object (the change is whitespace). Interim rule until a
+//      selection can be formatted against the whole document: zero edits, and
+//      the user is told to use Format Document for that code;
 //   5b. for a SELECTION only, put the slice's own leading and trailing
 //      whitespace runs back around whatever the engine printed. Every
 //      printer trims the edges of the slice it is handed, and at range scope
@@ -79,7 +87,14 @@ import {
   reportedEngineIdFor
 } from '../engine/jsbeautify';
 import { cutsThroughMarkup, withSliceEdges } from '../engine/sliceEdges';
+import {
+  checkSelectionAgainstPrettierIgnore,
+  isPrettierIgnoreLanguage,
+  type CoveredSpan,
+  type SelectionIgnoreCheck
+} from '../engine/prettierIgnore';
 import { resolveDocumentIgnore } from '../ignore/ignoreGate';
+import { ignoreRecordDetail } from '../ignore/soukformatignore';
 import { getTidyOutputChannel } from '../diagnostics/outputChannel';
 import {
   recordLastFormat,
@@ -170,14 +185,56 @@ export const TAG_SPLIT_WARNING_MESSAGE =
 export const TAG_SPLIT_REASON = 'selection boundary inside a tag';
 
 /**
+ * Message for the second abort this provider decides ON ITS OWN (M3-1): a
+ * SELECTION on the Prettier path that would write, over a node that a
+ * `// prettier-ignore` comment OUTSIDE the selection protects. Prettier is handed
+ * only the selected text, so it cannot see that comment and would reprint the
+ * protected node; Format Document hands it the whole file, where the comment is
+ * in view, so that is the remedy named. Interim: the full fix (format against the
+ * whole document and map the answer back to a range) is deferred.
+ *
+ * Unlike the tag-split sentence it does not claim that no check ran: the format
+ * and the guard did run, and the guard would have passed, because the lost
+ * protection is whitespace. What is refused is the write, and the sentence says
+ * why. Content-free like every other surfaced string.
+ */
+export const IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE =
+  'Tidy did not apply the format: the selection covers code that a // prettier-ignore comment outside the selection protects, and a selection format cannot see that comment, so the protection would have been lost. Use Format Document for that code. Your file is intact.';
+
+/**
+ * Reason recorded for that refusal. A CONSTANT for the same two reasons as
+ * TAG_SPLIT_REASON: the status mapping and the message choice both prefix-match
+ * it. It is also what "Explain last format" prints after "Detail:", so it reads
+ * as a sentence fragment.
+ */
+export const IGNORE_OUTSIDE_SELECTION_REASON =
+  'the selection covers code protected by a prettier-ignore comment outside it';
+
+/**
+ * Notice for the one case where the refusal could not be decided: the document
+ * mentions `prettier-ignore` but the check could not read it (the file would not
+ * parse as a whole, or the parser could not be loaded), so which node a comment
+ * governs is unknown. The format proceeds exactly as it did before this rule
+ * existed, and the user is told rather than left guessing. The check reads the
+ * document with the equivalence guard's own parser settings and only runs once
+ * the guard has accepted the write, so this is a fail-safe that should stay
+ * silent in practice. One line, plain ASCII, content-free.
+ */
+export const IGNORE_UNCHECKED_NOTICE =
+  'a prettier-ignore comment in this file could not be checked, so the selection was formatted as before';
+
+/** The id the dispatcher reports for the Prettier engine (PrettierEngine.id). */
+const PRETTIER_ENGINE_ID = 'prettier';
+
+/**
  * The toast to show for an aborted outcome.
  *
  * Two steps, in this order. First the aborts that carry their OWN sentence
  * because the provider knows precisely what happened and what the user should do
- * instead; today that is the tag-split refusal, matched on its reason constant.
- * Then the same one switch as before on the status, so a future FormatStatus
- * still cannot silently inherit the wrong claim: only a status that really
- * carries a guard verdict may use ABORT_WARNING_MESSAGE.
+ * instead; today that is the tag-split refusal and the prettier-ignore refusal,
+ * matched on their reason constants. Then the same one switch as before on the
+ * status, so a future FormatStatus still cannot silently inherit the wrong claim:
+ * only a status that really carries a guard verdict may use ABORT_WARNING_MESSAGE.
  *
  * Every branch keeps the SAME shape ("Tidy did not apply the format: ... Your
  * file is intact."), the same two action buttons and the same sanitisation.
@@ -185,6 +242,9 @@ export const TAG_SPLIT_REASON = 'selection boundary inside a tag';
 function abortMessageFor(status: FormatStatus, reason: string): string {
   if (reason.startsWith(TAG_SPLIT_REASON)) {
     return TAG_SPLIT_WARNING_MESSAGE;
+  }
+  if (reason.startsWith(IGNORE_OUTSIDE_SELECTION_REASON)) {
+    return IGNORE_OUTSIDE_SELECTION_WARNING_MESSAGE;
   }
   return status === 'engine-error'
     ? ENGINE_ERROR_WARNING_MESSAGE
@@ -473,6 +533,9 @@ function statusFromReason(reason: string): FormatStatus {
   // thing, and the recorded detail names the reason. No new FormatStatus, so the
   // Explain command's exhaustive switch keeps compiling.
   if (reason.startsWith(TAG_SPLIT_REASON)) return 'engine-error';
+  // Same family as the tag split: a refusal the provider decided itself, so no
+  // guard verdict is being reported. No new FormatStatus either.
+  if (reason.startsWith(IGNORE_OUTSIDE_SELECTION_REASON)) return 'engine-error';
   if (reason.startsWith('engine error')) return 'engine-error';
   if (reason.startsWith('guard error')) return 'engine-error';
   if (reason.startsWith('ignore-region restore failed')) return 'restore-failed';
@@ -820,6 +883,59 @@ function outcomeToEdits(
 }
 
 /**
+ * M3-1: would this SELECTION write over a node that a `// prettier-ignore`
+ * comment outside it protects? Asked only when the answer can matter: a
+ * selection, on the JS family, printed by Prettier, and only for a format that
+ * would really WRITE (a no-op writes nothing to lose, an abort already has its own
+ * reason), so every other attempt pays nothing and behaves exactly as before. The
+ * engine id is the one the outcome carries, i.e. the printer that really ran on
+ * the selected text (a .js is on Prettier only when that text holds JSX).
+ *
+ * A node the mask layer puts back byte for byte is not exposed, so the spans the
+ * mask protects are handed over, moved into document coordinates (only a .js
+ * selection has a mask on the Prettier path: it masks the marker line and the
+ * first line of the node it marks).
+ *
+ * The check parses the whole document once and only when it mentions the
+ * directive (see engine/prettierIgnore.ts). Anything that stops it from looking,
+ * a chunk that cannot load included, is answered "unchecked", never "safe": the
+ * caller then reports it instead of staying silent.
+ */
+function checkPrettierIgnoreExposure(
+  scope: FormatScope,
+  languageId: LangId,
+  outcome: FormatOutcome,
+  documentText: string,
+  startOffset: number,
+  endOffset: number,
+  mask: EngineMask | undefined
+): SelectionIgnoreCheck {
+  if (
+    scope !== 'selection' ||
+    !outcome.applied ||
+    outcome.engineId !== PRETTIER_ENGINE_ID ||
+    !isPrettierIgnoreLanguage(languageId)
+  ) {
+    return 'safe';
+  }
+  const covered: CoveredSpan[] = (mask?.protectedSpans ?? []).map((span) => ({
+    start: span.start + startOffset,
+    end: span.end + startOffset
+  }));
+  try {
+    return checkSelectionAgainstPrettierIgnore(
+      languageId,
+      documentText,
+      startOffset,
+      endOffset,
+      covered
+    );
+  } catch {
+    return 'unchecked';
+  }
+}
+
+/**
  * Common entry used by both providers. Performs the enable/size pre-checks,
  * resolves options, runs the pipeline and converts the outcome to edits.
  */
@@ -895,7 +1011,7 @@ async function provideEdits(
   const ignoreLookup = resolveDocumentIgnore(document);
   if (ignoreLookup.ignored) {
     recordOutcome(document, languageId, scope, 'ignored-file', {
-      detail: ignoreLookup.path
+      detail: ignoreRecordDetail(ignoreLookup)
     });
     return [];
   }
@@ -1025,25 +1141,52 @@ async function provideEdits(
     return [];
   }
 
+  // The selection covers a node that a prettier-ignore comment OUTSIDE it
+  // protects, on the Prettier path, and the pipeline wants to write (M3-1). Same
+  // discipline as the tag split: only a write is refused.
+  const ignoreCheck = checkPrettierIgnoreExposure(
+    scope,
+    languageId,
+    outcome,
+    fullText,
+    startOffset,
+    endOffset,
+    plan.mask
+  );
+  const uncheckedNotice =
+    ignoreCheck === 'unchecked' ? IGNORE_UNCHECKED_NOTICE : undefined;
+  if (uncheckedNotice !== undefined) {
+    appendChannelNotice(document, languageId, uncheckedNotice);
+  }
+
   // The selection cut through markup AND the pipeline wants to write: that is
   // the only shape that carries the defect this rule exists for, so it is the
   // only one refused. A no-op stays a silent no-op and an abort keeps its own,
-  // more specific reason. New object, never a mutation.
-  const judged: FormatOutcome =
+  // more specific reason. The prettier-ignore refusal follows the same rule (the
+  // two never overlap: one is HTML, the other the JS family). New object, never a
+  // mutation.
+  const refusalReason: string | undefined =
     cutsMarkup && outcome.applied
-      ? {
+      ? TAG_SPLIT_REASON
+      : ignoreCheck === 'exposes'
+        ? IGNORE_OUTSIDE_SELECTION_REASON
+        : undefined;
+  const judged: FormatOutcome =
+    refusalReason === undefined
+      ? outcome
+      : {
           applied: false,
           aborted: true,
-          reason: TAG_SPLIT_REASON,
+          reason: refusalReason,
           engineId: outcome.engineId
-        }
-      : outcome;
+        };
 
   // New object, never a mutation of the outcome the pipeline returned.
+  const notices = joinDetail(plan.unhonouredIgnore, uncheckedNotice);
   const reported: FormatOutcome =
-    plan.unhonouredIgnore === undefined
+    notices === undefined
       ? judged
-      : { ...judged, detail: joinDetail(judged.detail, plan.unhonouredIgnore) };
+      : { ...judged, detail: joinDetail(judged.detail, notices) };
 
   return outcomeToEdits(document, languageId, scope, startOffset, endOffset, reported);
 }

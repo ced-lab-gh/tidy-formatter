@@ -10,8 +10,9 @@
 //   2. PRESERVE   : the load-bearing tokens survive verbatim (e.g. `<T extends`,
 //                   `?.`, `1_000`, `10n`, `#x`, `{...p}`)
 //   3. RE-PARSE   : the formatted output parses again as the same language
-//                   (guard.check(lang, output, output) is trivially equivalent,
-//                   and a re-format does not throw)
+//                   (guard.check answers an identical pair without parsing it, so
+//                   guardCheckNoFastPath is used to make the comparator run on the
+//                   output; and a re-format does not throw)
 //   4. IDEMPOTENT : format(format(x)) === format(x) (SPEC SAFE-03)
 //
 // SPEC refs: ENG-01/ENG-02 (modern syntax), SAFE-01/§12 (no guard false
@@ -19,6 +20,7 @@
 import assert from 'node:assert/strict';
 import { dispatchFormat } from '../../../src/engine/dispatcher';
 import { guard } from '../../../src/safety/guard';
+import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 import {
   complexAcceptFixtures,
   complexKnownBugFixtures
@@ -47,7 +49,9 @@ describe('complex JS/TS/JSX/TSX : accept + preserve + re-parse + idempotence', (
         }
 
         // 1. ACCEPT : a correct format must NOT be rejected by the guard.
-        const verdict = guard.check(f.lang, f.input, out);
+        // guardCheckNoFastPath: a fixture that is already tidy comes back
+        // byte-identical, and guard.check would then answer without parsing.
+        const verdict = guardCheckNoFastPath(f.lang, f.input, out);
         assert.equal(
           verdict.equivalent,
           true,
@@ -60,12 +64,13 @@ describe('complex JS/TS/JSX/TSX : accept + preserve + re-parse + idempotence', (
         // Output must be valid in its own right: re-running the engine on it must
         // not throw (a parse failure on the formatter's own output is a bug).
         const reformatted = await format(f.lang, out);
-        // And the output compared against itself is trivially equivalent : this
-        // exercises the guard parse path on the FORMATTED text (re-parse check).
-        const selfVerdict = guard.check(f.lang, out, out);
+        // The output compared against itself: guard.check would short-circuit on
+        // identical strings, so guardCheckNoFastPath is what really exercises the
+        // guard parse path on the FORMATTED text (re-parse check).
+        const selfVerdict = guardCheckNoFastPath(f.lang, out, out);
         assert.equal(selfVerdict.equivalent, true, selfVerdict.reason ?? '');
         // The reformatted text must still satisfy the guard vs the original.
-        const roundVerdict = guard.check(f.lang, f.input, reformatted);
+        const roundVerdict = guardCheckNoFastPath(f.lang, f.input, reformatted);
         assert.equal(
           roundVerdict.equivalent,
           true,
@@ -120,7 +125,7 @@ describe('complex JS/TS/JSX/TSX : modern syntax the guard now accepts (was a fal
       for (const needle of f.mustContain) {
         assert.ok(out.includes(needle), `expected "${needle}" in:\n${out}`);
       }
-      const verdict = guard.check(f.lang, f.input, out);
+      const verdict = guardCheckNoFastPath(f.lang, f.input, out);
       assert.equal(
         verdict.equivalent,
         true,

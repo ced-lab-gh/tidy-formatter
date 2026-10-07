@@ -241,12 +241,221 @@ export const migrationFixtures: MigrationFixture[] = [
   },
   {
     id: 'MIG-MULTIPLE-UNMAPPED',
-    desc: 'several unknown keys are all surfaced in unmapped',
+    desc: 'several keys with no Tidy equivalent are all surfaced in unmapped',
     ref: '1.T1 / unknown keys surfaced',
-    raw: { indent_size: 2, eol: '\n', preserve_newlines: true, end_with_newline: false },
+    // v0.5.0: eol and preserve_newlines have exact Tidy settings now (see the
+    // fixtures below); these four have none. The shape is kept, the keys changed.
+    raw: { indent_size: 2, indent_char: ' ', end_with_newline: false, unescape_strings: false, e4x: false },
     expect: {
       settings: { 'tidy.indent': 2 },
-      unmapped: ['eol', 'preserve_newlines', 'end_with_newline'],
+      unmapped: ['indent_char', 'end_with_newline', 'unescape_strings', 'e4x'],
+      warningCount: 0
+    }
+  },
+  // --- v0.5.0: the vocabulary widened to EXACT equivalents ---------------------
+  // Each value below is the incumbent's own default (the README screenshot shape),
+  // except where a non-default value is needed to show the mapping is not vacuous.
+  {
+    id: 'MIG-NEWLINES-DEFAULT',
+    desc: 'the incumbent default preserve_newlines + max_preserve_newlines (0 = unlimited in js-beautify JS)',
+    ref: '0.5.0 / same option name, same domain',
+    raw: { preserve_newlines: true, max_preserve_newlines: 0 },
+    expect: {
+      settings: { 'tidy.preserve_newlines': true, 'tidy.max_preserve_newlines': 0 },
+      unmapped: [],
+      warningCount: 0
+    }
+  },
+  {
+    id: 'MIG-JS-SPACING-DEFAULTS',
+    desc: 'the incumbent default JavaScript toggles all map to their tidy.* namesakes',
+    ref: '0.5.0 / same option name, same domain',
+    raw: {
+      space_in_paren: false,
+      space_in_empty_paren: false,
+      break_chained_methods: false,
+      keep_array_indentation: false,
+      comma_first: false
+    },
+    expect: {
+      settings: {
+        'tidy.space_in_paren': false,
+        'tidy.space_in_empty_paren': false,
+        'tidy.break_chained_methods': false,
+        'tidy.keep_array_indentation': false,
+        'tidy.comma_first': false
+      },
+      unmapped: [],
+      warningCount: 0
+    }
+  },
+  {
+    id: 'MIG-JS-JSLINT-CONDITIONAL',
+    desc: 'the incumbent default jslint_happy (false) and space_before_conditional (true)',
+    ref: '0.5.0 / same option name, same domain',
+    raw: { jslint_happy: false, space_before_conditional: true },
+    expect: {
+      settings: { 'tidy.jslint_happy': false, 'tidy.space_before_conditional': true },
+      unmapped: [],
+      warningCount: 0
+    }
+  },
+  {
+    id: 'MIG-JSLINT-NON-BOOL',
+    desc: 'a non-boolean jslint_happy is rejected -> warning',
+    ref: '0.5.0 / boolean validation',
+    raw: { jslint_happy: 1 },
+    expect: {
+      settings: {},
+      unmapped: [],
+      warningCount: 1,
+      warningIncludes: ['jslint_happy']
+    }
+  },
+  {
+    id: 'MIG-CSS-KEYS',
+    desc: 'the CSS family keys: newline_between_rules (incumbent default) and the real selector_separator_newline spelling',
+    ref: '0.5.0 / same option name, same domain',
+    raw: { newline_between_rules: true, selector_separator_newline: false, space_around_combinator: true },
+    expect: {
+      settings: {
+        'tidy.newline_between_rules': true,
+        'tidy.selector_separator_newline': false,
+        'tidy.space_around_combinator': true
+      },
+      unmapped: [],
+      warningCount: 0
+    }
+  },
+  {
+    id: 'MIG-HTML-KEYS',
+    desc: 'the HTML keys: indent_inner_html (incumbent default), indent_scripts, wrap_attributes_indent_size',
+    ref: '0.5.0 / same option name, same domain',
+    raw: { indent_inner_html: false, indent_scripts: 'separate', wrap_attributes_indent_size: 0 },
+    expect: {
+      settings: {
+        'tidy.indent_inner_html': false,
+        'tidy.indent_scripts': 'separate',
+        'tidy.wrap_attributes_indent_size': 0
+      },
+      unmapped: [],
+      warningCount: 0
+    }
+  },
+  {
+    id: 'MIG-OPERATOR-POSITION',
+    desc: 'operator_position maps with its js-beautify values',
+    ref: '0.5.0 / enum parity with package.json',
+    raw: { operator_position: 'after-newline' },
+    expect: {
+      settings: { 'tidy.operator_position': 'after-newline' },
+      unmapped: [],
+      warningCount: 0
+    }
+  },
+  {
+    id: 'MIG-OPERATOR-POSITION-BAD',
+    desc: 'an out-of-enum operator_position is warned, never written',
+    ref: '0.5.0 / enum parity with package.json',
+    raw: { operator_position: 'sideways' },
+    expect: {
+      settings: {},
+      unmapped: [],
+      warningCount: 1,
+      warningIncludes: ['operator_position']
+    }
+  },
+  {
+    id: 'MIG-INDENT-SCRIPTS-BAD',
+    desc: 'an out-of-enum indent_scripts is warned, never written',
+    ref: '0.5.0 / enum parity with package.json',
+    raw: { indent_scripts: 'all' },
+    expect: {
+      settings: {},
+      unmapped: [],
+      warningCount: 1,
+      warningIncludes: ['indent_scripts']
+    }
+  },
+  {
+    id: 'MIG-MAX-PRESERVE-NEGATIVE',
+    desc: 'a negative max_preserve_newlines is out of domain -> warning',
+    ref: '0.5.0 / non-negative integer',
+    raw: { max_preserve_newlines: -1 },
+    expect: {
+      settings: {},
+      unmapped: [],
+      warningCount: 1,
+      warningIncludes: ['max_preserve_newlines']
+    }
+  },
+  {
+    id: 'MIG-MAX-PRESERVE-STRING',
+    desc: 'a numeric-string max_preserve_newlines is parsed like js-beautify does',
+    ref: '0.5.0 / parseInt semantics',
+    raw: { max_preserve_newlines: '3' },
+    expect: {
+      settings: { 'tidy.max_preserve_newlines': 3 },
+      unmapped: [],
+      warningCount: 0
+    }
+  },
+  {
+    id: 'MIG-BOOLEAN-FLAT-STRING',
+    desc: 'the flat (.jsbeautifyrc) path still reads the string "false" as false',
+    ref: '1.T1 / .jsbeautifyrc string booleans kept',
+    raw: { comma_first: 'false' },
+    expect: {
+      settings: { 'tidy.comma_first': false },
+      unmapped: [],
+      warningCount: 0
+    }
+  },
+  // --- eol: only the two real line endings map; "auto" has no Tidy value -------
+  {
+    id: 'MIG-EOL-LF',
+    desc: 'eol "\\n" (the incumbent css default) is exactly tidy.end_of_line lf',
+    ref: '0.5.0 / eol exact values',
+    raw: { eol: '\n' },
+    expect: { settings: { 'tidy.end_of_line': 'lf' }, unmapped: [], warningCount: 0 }
+  },
+  {
+    id: 'MIG-EOL-CRLF',
+    desc: 'eol "\\r\\n" is exactly tidy.end_of_line crlf',
+    ref: '0.5.0 / eol exact values',
+    raw: { eol: '\r\n' },
+    expect: { settings: { 'tidy.end_of_line': 'crlf' }, unmapped: [], warningCount: 0 }
+  },
+  {
+    id: 'MIG-EOL-ESCAPED',
+    desc: 'the two-character escaped spellings js-beautify itself converts map the same',
+    ref: '0.5.0 / eol exact values',
+    raw: { eol: '\\n' },
+    expect: { settings: { 'tidy.end_of_line': 'lf' }, unmapped: [], warningCount: 0 }
+  },
+  {
+    id: 'MIG-EOL-AUTO',
+    desc: 'eol "auto" (the incumbent JavaScript default) has no tidy.end_of_line value: reported, not guessed',
+    ref: '0.5.0 / no exact equivalent stays unmapped',
+    raw: { eol: 'auto' },
+    expect: { settings: {}, unmapped: ['eol'], warningCount: 0 }
+  },
+  {
+    id: 'MIG-EOL-BAD',
+    desc: 'any other eol (a bare CR, lf, a number) is out of domain -> warning',
+    ref: '0.5.0 / eol exact values',
+    raw: { eol: '\r' },
+    expect: { settings: {}, unmapped: [], warningCount: 1, warningIncludes: ['eol'] }
+  },
+  // --- spellings the incumbent ignored: NOT mapped ------------------------------
+  {
+    id: 'MIG-CAMELCASE-IGNORED',
+    desc: 'indentCharacter / selectorSeparatorNewLine / indent_character are not js-beautify options: reported, not imported',
+    ref: '0.5.0 / not a js-beautify option name',
+    raw: { indentCharacter: ' ', selectorSeparatorNewLine: false, indent_character: ' ' },
+    expect: {
+      settings: {},
+      unmapped: ['indentCharacter', 'selectorSeparatorNewLine', 'indent_character'],
       warningCount: 0
     }
   },

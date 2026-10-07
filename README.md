@@ -82,11 +82,18 @@ walkthrough:
   setting. Tidy installs no save hook either way: VS Code
   core owns the save lifecycle.
 - **`tidy.runMigration`**, *“Tidy: Migrate from JS-CSS-HTML Formatter”*. Reads
-  your project’s `.jsbeautifyrc` (best-effort, and **only** when the workspace is
-  trusted, ignored in Restricted Mode), shows a recap of exactly which `tidy.*`
-  settings it would import, and writes them at Workspace scope **only after you
-  confirm**. It then offers (separately, opt-in) to run `tidy.useAsFormatter`,
-  and a button to open the Extensions view on lonefy so you can disable it.
+  the configuration lonefy really reads (the first found of `.vscode/formatter.json`
+  in your first workspace folder and the global `formatter.json` of lonefy’s own
+  install folder, else a `.jsbeautifyrc`, which other beautify extensions read;
+  best-effort, and **only** when the workspace is trusted, ignored in
+  Restricted Mode), shows a recap of exactly
+  which `tidy.*` settings it would import and which file they come from, and
+  writes them **only after you confirm**: at Workspace scope, except settings
+  that come from lonefy’s global file, which are written at User scope and never
+  into a repository’s `settings.json`. A write that fails part-way is rolled
+  back and any key that cannot be restored is named. It then offers (separately,
+  opt-in) to run `tidy.useAsFormatter`, and, only while lonefy is installed and
+  enabled, a button to open the Extensions view on it so you can disable it.
 
 If lonefy is detected when Tidy activates, you may also see a single, non-modal
 notification offering to migrate. It is **one-shot and deduplicated**: it appears
@@ -95,22 +102,48 @@ never repeated. Acting without consent is the second most common complaint in th
 review corpus (26 of the 85 one-star reviews, behind 53 about broken output), so
 Tidy will not nag.
 
-### What gets imported from `.jsbeautifyrc`
+### What gets imported
 
-`tidy.runMigration` maps the legacy js-beautify options the incumbent read to
-their Tidy equivalents. Five keys carry over faithfully; any unrecognised key is
-surfaced as *“not carried over”* (never written), and any recognised key with an
-out-of-range value is reported and dropped (never written):
+lonefy reads `.vscode/formatter.json`, a JSON file with one section per language
+(`{ "javascript": { "indent_size": 2 }, "css": { "indent_size": 2 }, "html": { "indent_size": 2 } }`).
+`tidy.runMigration` reads that file (or, failing it, the two other sources above:
+the first one found is used and the recap names it) and turns each section into
+language-specific settings, the way lonefy applied it:
 
-| `.jsbeautifyrc` key (lonefy) | Tidy setting | Notes |
+| Section of the file | Written into |
+|---|---|
+| `css` | `[css]` and `[scss]` |
+| `javascript` | `[javascript]` and `[json]` |
+| `html` | `[html]` |
+
+There is no `[less]` or `[jsonc]` block, because lonefy never formatted those
+languages. A key is imported only when Tidy has a setting with the same meaning
+and the same range of values, and only for a language where that setting does
+something and where lonefy’s own js-beautify read it (so `[json]` receives only
+`indent_size` and `eol`). Any other key is surfaced as *“not carried over”*
+(never written), and any recognised key with an out-of-range value is reported
+and dropped (never written). The keys that carry over:
+
+| Section | js-beautify keys (lonefy) | Tidy setting |
 |---|---|---|
-| `indent_size` | `tidy.indent` | Integer in `[1, 16]`; out-of-range values are dropped with a note. |
-| `brace_style` | `tidy.brace_style` | One of `collapse`, `expand`, `end-expand`, `none`, `collapse-preserve-inline`. |
-| `wrap_line_length` | `tidy.wrap_line_length` | Non-negative integer; `0` disables wrapping. |
-| `wrap_attributes` | `tidy.wrap_attributes` | One of `auto`, `force`, `force-aligned`, `force-expand-multiline`, `aligned-multiple`, `preserve`, `preserve-aligned`. |
-| `space_after_anon_function` | `tidy.space_after_anon_function` | Boolean. |
+| all three | `indent_size`, `eol` | `tidy.indent` (integer in `[1, 16]`), `tidy.end_of_line` (`"\n"` is `lf`, `"\r\n"` is `crlf`; `"auto"` has no equivalent and is not carried over) |
+| `javascript` | `brace_style`, `wrap_line_length`, `space_after_anon_function`, `space_before_conditional`, `jslint_happy`, `preserve_newlines`, `max_preserve_newlines`, `space_in_paren`, `space_in_empty_paren`, `break_chained_methods`, `keep_array_indentation`, `comma_first`, `operator_position` | the `tidy.*` setting of the same name |
+| `css` | `preserve_newlines`, `selector_separator_newline`, `newline_between_rules`, `space_around_combinator` | the `tidy.*` setting of the same name |
+| `html` | `preserve_newlines`, `max_preserve_newlines`, `wrap_line_length`, `wrap_attributes`, `wrap_attributes_indent_size`, `indent_inner_html`, `indent_scripts` | the `tidy.*` setting of the same name |
 
-`.jsbeautifyrc` import is a **best-effort convenience, not a marketing promise**. Most lonefy users ran it with no config at all. Tidy also reads your existing VS
+Two things are deliberately not imported. lonefy’s **`onSave`** key is
+recognised and never proposed: `true` is lonefy’s own default, so its presence
+says nothing about what you chose, and the migration never enables format on
+save. And **`eol` is not absolute any more**: `tidy.end_of_line` yields to
+`files.eol` and `.editorconfig`, whereas lonefy applied `eol` unconditionally.
+
+A `.jsbeautifyrc` is read last, because lonefy itself never reads that file (other
+beautify extensions do); its sections are mapped the same way, and its top-level
+flat keys are mapped to the plain `tidy.*` settings. Top-level flat keys in a
+`formatter.json` are reported instead, because lonefy ignores them there.
+
+The import is a **best-effort convenience, not a marketing promise**. Most lonefy
+users ran it with no config file at all. Tidy also reads your existing VS
 Code settings (`editor.tabSize`, `editor.insertSpaces`, per-language overrides)
 directly, so in most cases there is nothing to port over.
 
@@ -232,7 +265,7 @@ Tidy's core promise: **we will never write a file that fails an equivalence chec
   exhaustively: an ISO timestamp, the file's name, its language id, the engine id,
   the status, whether it was a selection, and one short sanitized reason (which,
   for a file skipped by an ignore rule, is the path of the `.soukformatignore`
-  that excluded it). **Tidy never copies your document into it**, and the reason
+  that excluded it, or, when Tidy could not evaluate that file, the reason why). **Tidy never copies your document into it**, and the reason
   is cut to its first line and capped at 200 characters before it is stored or
   printed, so a parser error's multi-line **code frame** (the excerpt of your file
   a parser prints under its message) can never reach it. What that cut keeps is
@@ -356,13 +389,11 @@ That's it: there is no Tidy-specific "format on save" toggle, because Tidy deleg
 
 Plain `.js` files are formatted with js-beautify for familiarity, but if Tidy detects JSX inside them it automatically re-routes to the real parser rather than emit broken output.
 
-Tidy also reads your project's **`.editorconfig`** cascade (honouring `root = true`) and maps `indent_style`, `indent_size` / `tab_width`, `end_of_line`, `insert_final_newline`, `trim_trailing_whitespace` and `max_line_length`. A team `.editorconfig` therefore wins over plain VS Code settings. Opt out with `"tidy.editorconfig": false`. In Restricted Mode the workspace `.editorconfig` is ignored (it is workspace-authored content), falling back to built-in and user settings.
+Tidy also reads your project's **`.editorconfig`** cascade (honouring `root = true`) and maps `indent_style`, `indent_size` / `tab_width`, `end_of_line`, `insert_final_newline`, `trim_trailing_whitespace` and `max_line_length` (`off` means no limit). A team `.editorconfig` therefore wins over plain VS Code settings. Opt out with `"tidy.editorconfig": false`. In Restricted Mode the workspace `.editorconfig` is ignored (it is workspace-authored content), falling back to built-in and user settings.
 
-For the files Prettier actually prints (TypeScript, TSX, JSX, and a plain `.js` file that turns out to contain JSX), Tidy also honours your project's existing **Prettier config**: the data variants (`.prettierrc`, `.prettierrc.json`/`.json5`/`.yaml`/`.yml`/`.toml`) or the `prettier` key of `package.json`, found in Prettier's own search order (nearest config wins, `package.json` first) but never above the workspace folder the file lives in. Only ten AST-safe stylistic keys are read (`printWidth`, `tabWidth`, `useTabs`, `semi`, `singleQuote`, `jsxSingleQuote`, `trailingComma`, `bracketSpacing`, `bracketSameLine`, `arrowParens`); anything else, including `parser`, `plugins` and per-glob `overrides`, is ignored with a note in *Show Effective Configuration*, and a `prettier` key that names a shareable config instead of spelling out options is not resolved. Code-based configs (`.prettierrc.js`, `prettier.config.mjs`, ...) are **never executed**: when one is the nearest config, Tidy skips the layer entirely rather than guessing. The layer sits between `.editorconfig` and `.soukformatrc`, so your `.soukformatrc` keeps the last word, with one documented exception for line width (see below). It applies to saved files inside a workspace folder (an untitled buffer has no project to read). Opt out with `"tidy.prettier.respectProjectConfig": false`. Always ignored in Restricted Mode.
+For the files Prettier actually prints (TypeScript, TSX, JSX, and a plain `.js` file that turns out to contain JSX), Tidy also honours your project's existing **Prettier config**: the data variants (`.prettierrc`, `.prettierrc.json`/`.json5`/`.yaml`/`.yml`/`.toml`) or the `prettier` key of `package.json`, found in Prettier's own search order (nearest config wins, `package.json` first) but never above the workspace folder the file lives in. Only twelve AST-safe stylistic keys are read (`printWidth`, `tabWidth`, `useTabs`, `semi`, `singleQuote`, `jsxSingleQuote`, `trailingComma`, `bracketSpacing`, `bracketSameLine`, `arrowParens`, `singleAttributePerLine`, `objectWrap`); anything else, including `parser`, `plugins` and per-glob `overrides`, is ignored with a note in *Show Effective Configuration*, and a `prettier` key that names a shareable config instead of spelling out options is not resolved. Code-based configs (`.prettierrc.js`, `prettier.config.mjs`, ...) are **never executed**: when one is the nearest config, Tidy skips the layer entirely rather than guessing. The layer sits between `.editorconfig` and `.soukformatrc`, so your `.soukformatrc` keeps the last word. It applies to saved files inside a workspace folder (an untitled buffer has no project to read). Opt out with `"tidy.prettier.respectProjectConfig": false`. Always ignored in Restricted Mode.
 
-**Known deviation, line width.** One end-to-end case does not follow the layer order above, and it is better stated than hidden. For the files Prettier prints, Tidy sets the printer width from the shared width option first (`tidy.wrap_line_length`, which is also where `.editorconfig`'s `max_line_length` and a `.soukformatrc` `wrap_line_length` land), then overwrites it with `tidy.prettier.printWidth` whenever that key has a value. So a `tidy.prettier.printWidth` sitting in plain VS Code settings beats an `.editorconfig` `max_line_length` **and** a `.soukformatrc` `wrap_line_length`, even though both are higher layers. Measured on an 88-character line: `max_line_length = 120` alone leaves it on one line, but adding `"tidy.prettier.printWidth": 40` wraps it at 40, and a `.soukformatrc` asking for 120 wraps at 40 too.
-
-Nothing else deviates, and the workaround is exact: **express the width in the same vocabulary as the layer you want to win.** A `printWidth` written in `.soukformatrc` (or in your `.prettierrc`) does take precedence over the VS Code setting, because it is then the same key being layered. The real fix is to resolve one width value before the engine runs; it changes the output of projects that are already configured, so it ships in the next minor release rather than in this patch.
+**Line width follows the layer order too.** For the files Prettier prints, `tidy.wrap_line_length` (which is also where `.editorconfig`'s `max_line_length` and a `.soukformatrc` `wrap_line_length` land) and `tidy.prettier.printWidth` are two spellings of one value: Tidy takes the width from the highest layer that sets either, whichever key spelled it. So a `tidy.prettier.printWidth` in plain VS Code settings loses to an `.editorconfig` `max_line_length` and to a `.soukformatrc` `wrap_line_length`, and a `wrap_line_length` in VS Code settings loses to a `.soukformatrc` `printWidth`. Inside a single layer, `tidy.prettier.printWidth` wins over `wrap_line_length`, and a `[lang]` value beats a global one. A width of `0` (or an `.editorconfig` `max_line_length = off`) means no limit; a width nobody set is Prettier's default of 80.
 
 `.sass` (indented syntax) and Vue/Astro single-file components are **not** in this build; they are on the roadmap for a future release.
 
@@ -438,6 +469,8 @@ Write a comment (in the host language's syntax) to keep part of a file exactly a
 
 **Engine coverage.** For TS/TSX/JSX (the Prettier path) `// prettier-ignore` is honoured **natively at the node level** by Prettier itself, the richer, syntax-aware behaviour. For CSS/SCSS/LESS/HTML, JSON/JSONC and `javascript` (js-beautify, and jsonc-parser for JSON/JSONC) Tidy protects `tidy-ignore-*` **regions** itself via a mask-and-restore step behind the guard. That list is a list of **language ids**, not of engines, so it is not the same as "every path Prettier does not print": a `.js` file that contains JSX is routed to Prettier and is still region-masked by Tidy, and on that one path both mechanisms apply. Node-level masking on that path is best-effort: if a coarse span can't be spliced back safely, the guard simply rejects and the file stays intact (never corruption). Node-level directives are richest on the Prettier path; this mask-and-restore limitation is documented rather than risked.
 
+**Format Selection and `// prettier-ignore`.** During *Format Selection* on the Prettier path, Prettier is handed only the selected lines, so it cannot see a `// prettier-ignore` comment that sits outside the selection. When the selection covers code that such a comment protects, Tidy writes nothing and tells you to use *Format Document* for that code; if it cannot parse the document to decide, it says so and formats the selection as before.
+
 ### `.soukformatignore`
 
 Drop a `.soukformatignore` at your project root (or any sub-folder) to exclude files from formatting entirely: Tidy leaves them **byte-identical**. It uses familiar **gitignore syntax**:
@@ -449,12 +482,15 @@ dist/
 vendor/**/*.js
 
 # …but DO keep this one tidy (negation re-includes it)
-!vendor/keep.css
+!vendor/keep.js
 ```
 
-- Last matching pattern wins; a trailing `!negation` re-includes a previously-excluded path (git semantics).
-- The lookup walks up from the file and stops at the **first** `.soukformatignore` it finds: the nearest one wins outright. A `.soukformatignore` further up (your project root) is **not** merged into it, and is not consulted at all once a nearer one exists. Patterns are always matched relative to the folder holding the file that won.
-- It is read only in **trusted** workspaces (ignored in Restricted Mode → the file is formatted). If the ignore file can't be read, Tidy fails **safe** and formats normally.
+- **The patterns follow git's rules.** `*`, `?`, `**` and a trailing `/` (folders only) work as in `.gitignore`, and so do character classes and ranges (`[abc]`, `[!a]`, `[a-z]`); `***` behaves as `**`. A pattern without a `/` applies at any depth and to the contents of a folder. The file may start with a byte-order mark, leading spaces are kept as part of a pattern, and lines end at a line feed (a CRLF file works; a lone carriage return does not end a line, as in git).
+- Last matching pattern wins; a later `!negation` re-includes a previously-excluded file. As in git, **a folder that is excluded cannot be re-included file by file**: to keep one file of `dist/`, exclude `dist/*` rather than `dist/`, then re-include the file.
+- **Case**: on every OS, exclusion patterns ignore case (`DIST/` excludes `dist/`), while `!` re-inclusions respect it. In doubt, Tidy leaves the file alone.
+- The lookup walks up from the file, as far as the root of the drive, or 64 folders up for a file nested more deeply (a file opened outside any workspace folder included), and stops at the **first** `.soukformatignore` it finds: the nearest one wins outright. A `.soukformatignore` further up (your project root) is **not** merged into it, and is not consulted at all once a nearer one exists. Patterns are always matched relative to the folder holding the file that won.
+- It is read only in **trusted** workspaces (ignored in Restricted Mode → the file is formatted). If the ignore file can't be read at all, Tidy fails **safe** and formats normally.
+- **If Tidy can read the file but cannot evaluate it, it leaves the files it governs alone, and says why.** A file larger than 1 MiB, or too costly to evaluate (pathological patterns), excludes every file under that `.soukformatignore`'s folder. A line that cannot be evaluated (for example one over 1 024 characters, or ending in a lone backslash) does too, except the files that a later valid `!` line re-includes, until it is fixed or removed; a `!` line that cannot be evaluated excludes nothing and re-includes nothing. The reason appears in the output channel, in *Explain Last Format* and in *Show Effective Configuration*.
 - Turn it off entirely with `"tidy.respectSoukformatignore": false`.
 
 ### Preview command (read-only diff + atomic undo)
@@ -505,7 +541,7 @@ When a workspace already configures another formatter or fixer (Prettier via `.p
 | Value | Behavior |
 |---|---|
 | `notify` *(default)* | Show a **one-time**, informational notification per workspace naming the formatters and fixers it found (Prettier, Biome, dprint, ESLint). Deduplicated via `globalState`, never a repeat nag. |
-| `silent-defer` | Acknowledge the competitor without notifying. Still writes nothing and disables nothing. |
+| `silent-defer` | No notification, and nothing is read: Tidy does not scan the workspace for a competitor at activation in this mode. Writes nothing and disables nothing. |
 | `off` | Ignore detection entirely (no read, no notification). |
 
 **The anti-hijack contract (non-negotiable):** deference **never** changes `editor.defaultFormatter`, **never** disables Tidy silently, and **never** writes any setting on its own. The notification is purely informational: it reminds you that you can disable Tidy per language (`tidy.<lang>.enable`) for this workspace if you prefer the other tool to own formatting. The choice, and any write, is always yours. A `.prettierignore` on its own does **not** trigger deference (it only narrows what Prettier would touch, it doesn't configure Prettier as a formatter), and `.eslintignore` is excluded for the same reason. Detection reads workspace files only in **trusted** workspaces. Detecting a Prettier config and *reading* one are two separate things: the `.prettierrc` layer described under [Supported languages](#supported-languages) shapes Tidy's own output when you invoke it, while detection here only ever produces this one notice.
@@ -516,14 +552,14 @@ When a workspace already configures another formatter or fixer (Prettier via `.p
 
 ## Key settings
 
-All settings live under the `tidy.*` namespace. Indentation defaults come from your editor (`editor.tabSize` / `editor.insertSpaces`); the `tidy.*` values below are fallbacks used only when neither the editor nor a project config provides one.
+All settings live under the `tidy.*` namespace. Indentation comes from your editor (`editor.tabSize` / `editor.insertSpaces`) unless you set `tidy.indent`, which overrides the editor's tab size; the other `tidy.*` values below are defaults, used when no layer sets them. A project config (`.editorconfig`, `.prettierrc`, `.soukformatrc`) wins over all of them.
 
 | Setting | Default | What it does |
 |---|---|---|
 | `tidy.<lang>.enable` | `true` | Per-language switch (`tidy.css.enable`, `tidy.typescript.enable`, …). Set to `false` to remove Tidy as a formatter for that language. |
-| `tidy.indent` | `4` | Fallback indent size (js-beautify `indent_size`) when the editor provides none. |
-| `tidy.brace_style` | `collapse` | Brace placement (`collapse`, `expand`, `end-expand`, `none`, `collapse-preserve-inline`). |
-| `tidy.wrap_line_length` | `0` | Max characters per line before wrapping; `0` disables wrapping. For the files Prettier prints, `tidy.prettier.printWidth` overrides it (see **Known deviation, line width**). |
+| `tidy.indent` | `4` | Indent size in spaces. When you set it, it overrides `editor.tabSize` (and the size VS Code detected in the file); a project config (`.editorconfig`, `.prettierrc`, `.soukformatrc`) still wins. Spaces versus tabs stays with `editor.insertSpaces`. |
+| `tidy.brace_style` | `collapse` | Brace placement for JavaScript printed by js-beautify (`collapse`, `expand`, `end-expand`, `none`, `collapse-preserve-inline`). No effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a `.js` file that contains JSX, which Prettier prints. |
+| `tidy.wrap_line_length` | `0` | Max characters per line before wrapping; `0` disables wrapping. Used for HTML and JavaScript (js-beautify) and, as the print width, for TypeScript, TSX and JSX (Prettier), where an unset value keeps Prettier's 80 and `0` means no limit. No effect on JSON, and js-beautify does not wrap CSS, SCSS or LESS by width. It shares one value with `tidy.prettier.printWidth`: whichever is set in the higher layer wins (see **Line width follows the layer order too**). |
 | `tidy.wrap_attributes` | `auto` | How HTML attributes wrap (`auto`, `force`, `force-aligned`, `force-expand-multiline`, `aligned-multiple`, `preserve`, `preserve-aligned`). |
 | `tidy.space_after_anon_function` | `false` | Add a space after an anonymous `function` keyword. |
 | `tidy.maxFileSizeKB` | `5120` | Skip (with a notice) documents larger than this, so huge files never freeze the editor. `0` disables the guard. For JSON and JSONC, `tidy.json.maxFileSizeKB` takes precedence. |
@@ -535,17 +571,17 @@ All settings live under the `tidy.*` namespace. Indentation defaults come from y
 | `tidy.deferToOtherFormatters` | `notify` | How Tidy reacts when another formatter or fixer (Prettier/Biome/dprint/ESLint) is already configured: `notify` (one-time notice), `silent-defer` (no notice), or `off`. **Never** changes your default formatter. See [Deference behavior](#deference-behavior-coexisting-with-other-formatters). |
 | `tidy.statusBar.enable` | `true` | Show the Tidy status bar item (passive file state + a short transient result after each attempt). Purely observational; see [Status bar](#status-bar). |
 
-**The wider option set ("not enough options", fixed).** Beyond the headline knobs above, Tidy exposes **21** js-beautify options by family plus **8** AST-safe Prettier stylistic options for TS/JSX: 29 style settings in all. That is a curated subset, not the whole of js-beautify, which declares 47 options across its core/CSS/HTML/JavaScript modules; keys such as `end_with_newline`, `space_before_conditional`, `content_unformatted`, `void_elements`, `wrap_attributes_min_attrs`, `jslint_happy` and `templating` are **not** exposed today. If one you need is missing, [open an issue](#feedback) and say which. A few of the 29:
+**The wider option set ("not enough options", fixed).** Beyond the headline knobs above, Tidy exposes **25** js-beautify options by family plus **10** AST-safe Prettier stylistic options for TS/JSX: 35 style settings in all. That is a curated subset, not the whole of js-beautify, which declares 47 options across its core/CSS/HTML/JavaScript modules; keys such as `end_with_newline`, `wrap_attributes_min_attrs` and `templating` are **not** exposed today. If one you need is missing, [open an issue](#feedback) and say which. A few of the 35:
 
 | Setting | Applies to | What it does |
 |---|---|---|
-| `tidy.preserve_newlines` / `tidy.max_preserve_newlines` | all | Keep existing blank lines (and cap how many). |
-| `tidy.space_in_paren`, `tidy.break_chained_methods`, `tidy.keep_array_indentation`, `tidy.comma_first`, `tidy.operator_position` | JavaScript | Fine-grained js-beautify JS layout. |
+| `tidy.preserve_newlines` / `tidy.max_preserve_newlines` | CSS/SCSS/LESS, HTML, JavaScript | Keep existing blank lines (and cap how many). No effect on JSON, or on the files Prettier prints. |
+| `tidy.space_in_paren`, `tidy.break_chained_methods`, `tidy.keep_array_indentation`, `tidy.comma_first`, `tidy.operator_position`, `tidy.space_before_conditional`, `tidy.jslint_happy` | JavaScript | Fine-grained js-beautify JS layout. |
 | `tidy.selector_separator_newline`, `tidy.newline_between_rules`, `tidy.space_around_combinator` | CSS/SCSS/LESS | CSS rule + selector spacing. |
-| `tidy.indent_inner_html`, `tidy.indent_scripts`, `tidy.wrap_attributes_indent_size` | HTML | HTML structure + attribute wrapping. |
-| `tidy.prettier.singleQuote`, `tidy.prettier.semi`, `tidy.prettier.jsxSingleQuote`, `tidy.prettier.trailingComma`, `tidy.prettier.bracketSpacing`, `tidy.prettier.bracketSameLine`, `tidy.prettier.arrowParens`, `tidy.prettier.printWidth` | TS/TSX/JSX/JS | **Stylistic only**, quote style, semicolons, trailing commas, parens, line width. Each is AST-invariant, so the equivalence guard still accepts the result. |
+| `tidy.indent_inner_html`, `tidy.indent_scripts`, `tidy.wrap_attributes_indent_size`, `tidy.content_unformatted`, `tidy.void_elements` | HTML | HTML structure + attribute wrapping. The two tag lists can only **add** tag names: the tags the guard relies on (`pre`, `textarea`, `xmp`, `listing`, `plaintext`) stay protected whatever you write. |
+| `tidy.prettier.singleQuote`, `tidy.prettier.semi`, `tidy.prettier.jsxSingleQuote`, `tidy.prettier.trailingComma`, `tidy.prettier.bracketSpacing`, `tidy.prettier.bracketSameLine`, `tidy.prettier.arrowParens`, `tidy.prettier.printWidth`, `tidy.prettier.singleAttributePerLine`, `tidy.prettier.objectWrap` | TS/TSX/JSX/JS | **Stylistic only**, quote style, semicolons, trailing commas, parens, line width, one JSX attribute per line, object-literal wrapping (`singleAttributePerLine` is for TSX, JSX and `.js` with JSX). Each is AST-invariant, so the equivalence guard still accepts the result. |
 
-**Per-language overrides.** All 29 **style** options (the two tables of `tidy.*` formatting knobs above, from `tidy.indent` through `tidy.prettier.arrowParens`) are `language-overridable`, so you can scope any of them to one language in your `settings.json`. The **behaviour** switches are not: `tidy.<lang>.enable` is already per-language by construction, and `tidy.maxFileSizeKB`, `tidy.json.maxFileSizeKB`, `tidy.editorconfig`, `tidy.prettier.respectProjectConfig`, `tidy.soukformatrc`, `tidy.respectSoukformatignore`, `tidy.deferToOtherFormatters` and `tidy.statusBar.enable` cannot be put inside a `[language]` block. Their reach is not uniform, either: `tidy.prettier.respectProjectConfig`, `tidy.soukformatrc` and `tidy.respectSoukformatignore` are declared `resource`-scoped, so in a multi-root workspace each folder can carry its own value and Tidy reads the one belonging to the file being formatted. The rest (`tidy.<lang>.enable`, `tidy.maxFileSizeKB`, `tidy.json.maxFileSizeKB`, `tidy.editorconfig`, `tidy.deferToOtherFormatters` and `tidy.statusBar.enable`) are window-scoped: one value for the whole window, and a folder-level override of them is ignored by VS Code.
+**Per-language overrides.** All 35 **style** options (the two tables of `tidy.*` formatting knobs above, from `tidy.indent` through `tidy.prettier.objectWrap`) are `language-overridable`, so you can scope any of them to one language in your `settings.json`. The **behaviour** switches are not: `tidy.<lang>.enable` is already per-language by construction, and `tidy.maxFileSizeKB`, `tidy.json.maxFileSizeKB`, `tidy.editorconfig`, `tidy.prettier.respectProjectConfig`, `tidy.soukformatrc`, `tidy.respectSoukformatignore`, `tidy.deferToOtherFormatters` and `tidy.statusBar.enable` cannot be put inside a `[language]` block. Their reach is not uniform, either: `tidy.editorconfig`, `tidy.prettier.respectProjectConfig`, `tidy.soukformatrc` and `tidy.respectSoukformatignore` are declared `resource`-scoped, so in a multi-root workspace each folder can carry its own value and Tidy reads the one belonging to the file being formatted. The rest (`tidy.<lang>.enable`, `tidy.maxFileSizeKB`, `tidy.json.maxFileSizeKB`, `tidy.deferToOtherFormatters` and `tidy.statusBar.enable`) are window-scoped: one value for the whole window, and a folder-level override of them is ignored by VS Code.
 
 ```jsonc
 {
@@ -569,27 +605,30 @@ All settings live under the `tidy.*` namespace. Indentation defaults come from y
 }
 ```
 
-A malformed `.soukformatrc` never breaks formatting: it is ignored with a warning and Tidy falls back to the lower layers. It is read only in trusted workspaces.
+A malformed `.soukformatrc` never breaks formatting: it is ignored with a warning and Tidy falls back to the lower layers. It is read only in trusted workspaces, and it may start with a byte-order mark. The `files` globs of `overrides` follow the same git rules as `.soukformatignore`, with these differences: matching is **case-sensitive on every OS**, as in Prettier and EditorConfig, so a team file gives the same options everywhere; a leading `!` or `#` is an ordinary character (there is no re-include and no comment); trailing spaces are kept.
 
 **Diagnosing your config:** run **Tidy: Show Effective Configuration** from the Command Palette to see every resolved option *and the exact source of each value* (VS Code global, `tidy.<lang>`, `.editorconfig`, `.prettierrc`, `.soukformatrc`, or a glob override). This is the direct answer to "why is it indenting with 4 spaces?", no guesswork, no hours of debugging.
 
+**Finding out who reformats a file:** run **Tidy: Who Formats This File?** when a file changes and you cannot tell which extension is responsible. It reports, read-only, the default formatter for the file's language and the settings scope that set it, what happens on save, whether the JS-CSS-HTML Formatter is present, and which other formatters the workspace is configured for. It cannot see an extension that formats on save through its own save hook, because VS Code gives extensions no way to observe that; the report says so every time and points to *Help: Start Extension Bisect*.
+
 ### Commands
 
-All eight Tidy commands live in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
+All nine Tidy commands live in the Command Palette (`Ctrl+Shift+P`) under the **Tidy**
 category, but three of them are **gated on the active language** and are listed only while a
 file Tidy supports is focused: *Show Effective Configuration*, *Preview Format (Diff)* and
 *Explain Last Format* all carry `"enablement": "editorLangId in tidy.supportedLanguages"` in
-the manifest. The other five are always listed.
+the manifest. The other six are always listed.
 
 | Command id | Title | What it does |
 |---|---|---|
 | `tidy.showEffectiveConfiguration` | Tidy: Show Effective Configuration | Shows every resolved option and the exact source of each value. |
 | `tidy.useAsFormatter` | Tidy: Use Tidy as My Formatter | Opt in per language: writes `editor.defaultFormatter` (Workspace by default) for the languages you pick, then optionally `editor.formatOnSave` for the same languages, each only after an explicit confirmation with an exact recap; the format-on-save write has a one-click Revert. Cancelling writes nothing. |
-| `tidy.runMigration` | Tidy: Migrate from JS-CSS-HTML Formatter | Imports a legacy `.jsbeautifyrc` into `tidy.*` settings after a confirmation recap (trusted workspaces only), then optionally runs *Use Tidy as My Formatter*. |
+| `tidy.runMigration` | Tidy: Migrate from JS-CSS-HTML Formatter | Imports lonefy's real configuration (its `.vscode/formatter.json`, else its global `formatter.json`, else a `.jsbeautifyrc`) into `tidy.*` settings after a confirmation recap (trusted workspaces only), then optionally runs *Use Tidy as My Formatter*. The import never enables format on save; that follow-up asks about it separately and enables it only after your confirmation. |
 | `tidy.previewFormat` | Tidy: Preview Format (Diff) | Opens a **read-only** diff of what Tidy would change, then applies it on an explicit *Apply* click as a **single undo entry**. Opening the diff writes nothing. See [Preview command](#preview-command-read-only-diff--atomic-undo). |
 | `tidy.openPlayground` | Tidy: Open Playground | Opens two **untitled** scratch documents (the messy CSS and TSX samples from this README) so you can try **Preview Format (Diff)** in 30 seconds without touching any file on disk. It opens editors and nothing else: no file is created, no setting is written. |
 | `tidy.reportIssue` | Tidy: Report an Issue | Opens a **prefilled GitHub issue** with your environment (Tidy version, VS Code version, OS, the active file's language) already filled in, so a bug report takes seconds. Read-only: it opens a browser tab and writes nothing. |
 | `tidy.explainLastFormat` | Tidy: Explain Last Format | Tells you what Tidy's most recent format did on the active file, or **why it did nothing** (safety guard, an ignore rule, the size limit, another default formatter, a disabled language). Per-file: it answers for the file you are looking at, not for whatever Tidy formatted last. It reads the same bounded session window as *Show Format History* (the 50 most recent attempts, all files together), so once 50 later attempts have pushed a file's record out of that window, Tidy reports that it has not formatted that file this session. Writes a content-free trace to the **Tidy Formatter** output channel. Read-only. |
+| `tidy.whoFormats` | Tidy: Who Formats This File? | Tells you, for the active file, which extension and which settings would format it, and what happens on save: the default formatter and the scope that set it, `editor.formatOnSave` and the other save-time settings, whether lonefy is present, and which other formatters the workspace is configured for. The report goes to the **Tidy Formatter** output channel, with a short answer in a notification. It also states what no API can show: an extension that formats on save through its own save hook (VS Code's *Help: Start Extension Bisect* finds it). Read-only: it writes no setting and no file, and it is listed whatever language is focused. |
 | `tidy.showFormatHistory` | Tidy: Show Format History | A chronological view of this session's format attempts (the 50 most recent across all files, newest first): status icon, file, language and age. Older attempts are dropped, and the list starts empty again after a window reload. Picking an entry writes the full explanation to the **Tidy Formatter** output channel. In-memory only, content-free, read-only. |
 
 ---
@@ -657,13 +696,13 @@ No. Tidy detects it and shows a one-time, informational notice (`tidy.deferToOth
 Yes, run **Tidy: Preview Format (Diff)** for a read-only side-by-side diff, then *Apply* it as a single undo entry. See [Preview command](#preview-command-read-only-diff--atomic-undo).
 
 **Does it read `.editorconfig`?**
-Yes. Tidy reads the `.editorconfig` cascade (respecting `root = true`) and maps the common keys (`indent_style`, `indent_size`/`tab_width`, `end_of_line`, `insert_final_newline`, `trim_trailing_whitespace`, `max_line_length`). Disable with `"tidy.editorconfig": false`.
+Yes. Tidy reads the `.editorconfig` cascade (respecting `root = true`) and maps the common keys (`indent_style`, `indent_size`/`tab_width`, `end_of_line`, `insert_final_newline`, `trim_trailing_whitespace`, `max_line_length`, where `off` means no limit). Disable with `"tidy.editorconfig": false`.
 
 **Can I configure it with a project file?**
 Yes. Tidy reads a `.soukformatrc` (JSONC) from your project root, per-language sections plus ordered glob `overrides`, layered above `.editorconfig` and shared across the team. See [Key settings](#key-settings) for the schema. (YAML support is on the roadmap.)
 
 **Does Tidy read my `.prettierrc`?**
-Yes, for the files Prettier prints: TypeScript, TSX, JSX, and a plain `.js` file that contains JSX. Tidy reads the same data config files Prettier does (`.prettierrc`, `.prettierrc.json`/`.json5`/`.yaml`/`.yml`/`.toml`, or the `prettier` key of `package.json`), in Prettier's own search order but never above your workspace folder, and honours the ten AST-safe stylistic keys, layered between `.editorconfig` and `.soukformatrc`. Code-based configs (`.prettierrc.js` and friends) are never executed, and a shareable config reference is not resolved. Disable with `"tidy.prettier.respectProjectConfig": false`.
+Yes, for the files Prettier prints: TypeScript, TSX, JSX, and a plain `.js` file that contains JSX. Tidy reads the same data config files Prettier does (`.prettierrc`, `.prettierrc.json`/`.json5`/`.yaml`/`.yml`/`.toml`, or the `prettier` key of `package.json`), in Prettier's own search order but never above your workspace folder, and honours the twelve AST-safe stylistic keys, layered between `.editorconfig` and `.soukformatrc`. Code-based configs (`.prettierrc.js` and friends) are never executed, and a shareable config reference is not resolved. Disable with `"tidy.prettier.respectProjectConfig": false`.
 
 **Where's the indented-`.sass` / Vue support?**
 Not in this build. The remaining roadmap covers `.soukformatrc` YAML, real CSS-in-JS reformatting, Vue SFCs, and more languages. Ignore directives, `.soukformatignore`, the preview diff, deference notifications, and Open VSX distribution **are** shipped, see [Ignore & coexistence](#ignore--coexistence).

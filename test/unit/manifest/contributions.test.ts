@@ -67,7 +67,9 @@ const EXPECTED_TITLES: Record<string, string> = {
   'tidy.reportIssue': 'Report an Issue',
   'tidy.explainLastFormat': 'Explain Last Format',
   // ADD-14: the session-wide companion of Explain Last Format.
-  'tidy.showFormatHistory': 'Show Format History'
+  'tidy.showFormatHistory': 'Show Format History',
+  // v0.5.0: read-only report of which formatter owns the active file's language.
+  'tidy.whoFormats': 'Who Formats This File?'
 };
 
 /** The three active-file diagnostic commands gated by enablement, and only them. */
@@ -84,7 +86,7 @@ function findCommand(id: string): CommandContribution {
 }
 
 describe('manifest : command titles are Title Case (ADD-10)', () => {
-  it('contributes exactly the 8 known commands, no more, no less', () => {
+  it('contributes exactly the 9 known commands, no more, no less', () => {
     assert.deepEqual(
       manifest.contributes.commands.map((c) => c.command).sort(),
       Object.keys(EXPECTED_TITLES).sort()
@@ -139,6 +141,17 @@ describe('manifest : enablement clause (ADD-10)', () => {
       findCommand('tidy.showFormatHistory').enablement,
       undefined,
       'the history command must not be gated on editorLangId'
+    );
+  });
+
+  it('leaves tidy.whoFormats palette-available on any language', () => {
+    // A user asks "who reformatted this?" precisely when the file may be in a
+    // language Tidy does not handle, so gating it on Tidy's languages would hide
+    // it exactly when it is needed. It answers "open a file first" with none.
+    assert.equal(
+      findCommand('tidy.whoFormats').enablement,
+      undefined,
+      'the who-formats command must not be gated on editorLangId'
     );
   });
 

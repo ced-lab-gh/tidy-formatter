@@ -69,6 +69,21 @@ function coerceIndentNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+/** The value of the shared width key that disables width-driven wrapping. */
+const NO_WRAP_WIDTH = 0;
+
+/**
+ * Map an EditorConfig `max_line_length` to the shared `wrap_line_length`: a
+ * positive integer is kept, 'off' (any case) becomes {@link NO_WRAP_WIDTH}, and
+ * anything else, 'unset' and 0 included, yields undefined (not forwarded).
+ */
+function mapMaxLineLength(value: unknown): number | undefined {
+  if (typeof value === 'string' && value.trim().toLowerCase() === 'off') {
+    return NO_WRAP_WIDTH;
+  }
+  return coerceIndentNumber(value);
+}
+
 /**
  * Map a resolved set of EditorConfig properties (already cascaded for one file)
  * onto a single ConfigLayer in the canonical vocabulary expected by
@@ -82,7 +97,7 @@ function coerceIndentNumber(value: unknown): number | undefined {
  *   end_of_line             -> endOfLine ('lf' | 'crlf'; 'cr' dropped)
  *   insert_final_newline    -> insertFinalNewline
  *   trim_trailing_whitespace-> trimTrailingWhitespace
- *   max_line_length         -> engineOptions.wrap_line_length
+ *   max_line_length         -> engineOptions.wrap_line_length (off => 0, no wrap)
  *   charset                 -> engineOptions.charset (inspectable only)
  *
  * The resolver applies the alias/inversion/coercion for the typed keys, so we
@@ -127,10 +142,12 @@ export function mapEditorConfigLayer(
     values.trim_trailing_whitespace = props.trim_trailing_whitespace;
   }
 
-  // max_line_length -> engine wrap_line_length. EditorConfig allows the literal
-  // 'off' to disable; only forward a real positive integer (the engine reads a
-  // number) so 'off' / garbage never reaches the beautifier as a bad value.
-  const maxLineLength = coerceIndentNumber(
+  // max_line_length -> engine wrap_line_length. A real positive integer is
+  // forwarded as is; the literal 'off' ("no enforced limit") becomes 0, the
+  // shared value that disables wrapping (the resolver turns it into an unbounded
+  // Prettier width, which is how Prettier's own EditorConfig mapping reads 'off').
+  // Garbage and 'unset' are not forwarded, so the lower layer still governs.
+  const maxLineLength = mapMaxLineLength(
     (props as Props).max_line_length as unknown
   );
   if (maxLineLength !== undefined) {

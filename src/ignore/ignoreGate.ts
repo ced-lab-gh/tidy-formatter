@@ -1,13 +1,17 @@
 // VS Code-facing gate for the .soukformatignore file lookup (Axe 4.T3).
 //
 // This is the single thin seam that lets the provider consult the project-level
-// .soukformatignore while honouring the same two policy gates the .editorconfig /
+// .soukformatignore while honouring the same policy gates the .editorconfig /
 // .soukformatrc readers use:
 //   1. opt-out  `tidy.respectSoukformatignore` (default true) is not disabled;
 //   2. Workspace Trust : a .soukformatignore is workspace-authored content, so in
 //      Restricted Mode we must not read it (the file is formatted, fail-safe);
 //   3. the document has a real on-disk path (scheme 'file'); virtual / untitled
 //      documents have no tree to walk and are never ignored by this path.
+//
+// The lookup walks up to the root of the disk, like git: a .soukformatignore above
+// the opened folder applies, and so does one for a document outside every
+// workspace folder (an exclusion file can only make Tidy format less).
 //
 // The matching itself lives in the PURE soukformatignore module (resolveIgnore);
 // this module only applies the VS Code policy gates, so the ignore logic stays

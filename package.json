@@ -2,7 +2,7 @@
   "name": "tidy-formatter",
   "displayName": "Tidy: JS/CSS/HTML Formatter & Beautifier",
   "description": "Format & beautify JavaScript, TypeScript, JSX/TSX, CSS, SCSS, LESS, HTML & JSON. A safe, config-respecting replacement for JS-CSS-HTML Formatter that never touches your files unless you ask.",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "publisher": "ced-lab",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -103,6 +103,11 @@
         "command": "tidy.showFormatHistory",
         "title": "Show Format History",
         "category": "Tidy"
+      },
+      {
+        "command": "tidy.whoFormats",
+        "title": "Who Formats This File?",
+        "category": "Tidy"
       }
     ],
     "submenus": [
@@ -180,7 +185,7 @@
           {
             "id": "tidy.gettingStarted.migration",
             "title": "Migrating from JS-CSS-HTML Formatter",
-            "description": "Run [Tidy: Migrate from JS-CSS-HTML Formatter](command:tidy.runMigration) to import your legacy .jsbeautifyrc options and switch over safely.",
+            "description": "Run [Tidy: Migrate from JS-CSS-HTML Formatter](command:tidy.runMigration) to import your JS-CSS-HTML Formatter settings (its .vscode/formatter.json) and switch over safely.",
             "media": {
               "markdown": "media/walkthrough/migration.md"
             },
@@ -295,8 +300,8 @@
             "maximum": 16,
             "scope": "language-overridable",
             "order": 1,
-            "description": "Indentation size used when neither the editor nor a project config provides one (js-beautify indent_size).",
-            "markdownDescription": "Indentation size used when neither the editor nor a project config provides one (js-beautify indent_size).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+            "description": "Indentation size in spaces. When you set it, it overrides the editor tab size (editor.tabSize, or the size VS Code detected in the file); a project config (.editorconfig, .prettierrc, .soukformatrc) still wins over it. Spaces versus tabs stays governed by editor.insertSpaces.",
+            "markdownDescription": "Indentation size in spaces. When you set it, it overrides the editor tab size (editor.tabSize, or the size VS Code detected in the file); a project config (.editorconfig, .prettierrc, .soukformatrc) still wins over it. Spaces versus tabs stays governed by editor.insertSpaces.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
           "tidy.end_of_line": {
             "type": "string",
@@ -315,8 +320,8 @@
             "default": true,
             "scope": "language-overridable",
             "order": 3,
-            "description": "Keep existing blank lines between statements/rules (js-beautify preserve_newlines).",
-            "markdownDescription": "Keep existing blank lines between statements/rules (js-beautify preserve_newlines).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+            "description": "Keep existing blank lines between statements/rules (js-beautify preserve_newlines). Applies to CSS, SCSS, LESS, HTML and JavaScript; it has no effect on JSON, or on files Prettier prints (TypeScript, TSX, JSX, and JavaScript that contains JSX).",
+            "markdownDescription": "Keep existing blank lines between statements/rules (js-beautify preserve_newlines). Applies to CSS, SCSS, LESS, HTML and JavaScript; it has no effect on JSON, or on files Prettier prints (TypeScript, TSX, JSX, and JavaScript that contains JSX).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
           "tidy.max_preserve_newlines": {
             "type": "integer",
@@ -324,16 +329,16 @@
             "minimum": 0,
             "scope": "language-overridable",
             "order": 4,
-            "description": "Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines).",
-            "markdownDescription": "Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+            "description": "Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines). Applies to CSS, SCSS, LESS, HTML and JavaScript; it has no effect on JSON, or on files Prettier prints (TypeScript, TSX, JSX, and JavaScript that contains JSX).",
+            "markdownDescription": "Maximum number of consecutive blank lines to keep (js-beautify max_preserve_newlines). Applies to CSS, SCSS, LESS, HTML and JavaScript; it has no effect on JSON, or on files Prettier prints (TypeScript, TSX, JSX, and JavaScript that contains JSX).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
           "tidy.indent_empty_lines": {
             "type": "boolean",
             "default": false,
             "scope": "language-overridable",
             "order": 5,
-            "description": "Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines).",
-            "markdownDescription": "Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+            "description": "Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines). Applies to CSS, SCSS, LESS, HTML and JavaScript; it has no effect on JSON, or on files Prettier prints (TypeScript, TSX, JSX, and JavaScript that contains JSX).",
+            "markdownDescription": "Keep indentation on otherwise-empty lines (js-beautify indent_empty_lines). Applies to CSS, SCSS, LESS, HTML and JavaScript; it has no effect on JSON, or on files Prettier prints (TypeScript, TSX, JSX, and JavaScript that contains JSX).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
           "tidy.wrap_line_length": {
             "type": "integer",
@@ -341,8 +346,8 @@
             "minimum": 0,
             "scope": "language-overridable",
             "order": 6,
-            "description": "Maximum characters per line before wrapping; 0 disables wrapping (js-beautify wrap_line_length).",
-            "markdownDescription": "Maximum characters per line before wrapping; 0 disables wrapping (js-beautify wrap_line_length).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+            "description": "Maximum characters per line before wrapping; 0 disables wrapping. Used for HTML and JavaScript (js-beautify wrap_line_length) and, as the print width, for TypeScript, TSX and JSX (Prettier). It has no effect on JSON, and js-beautify does not wrap CSS, SCSS or LESS by width. For the Prettier languages an unset value keeps Prettier's default of 80. It shares one value with tidy.prettier.printWidth: whichever is set in the higher layer wins.",
+            "markdownDescription": "Maximum characters per line before wrapping; 0 disables wrapping. Used for HTML and JavaScript (js-beautify wrap_line_length) and, as the print width, for TypeScript, TSX and JSX (Prettier). It has no effect on JSON, and js-beautify does not wrap CSS, SCSS or LESS by width. For the Prettier languages an unset value keeps Prettier's default of 80. It shares one value with tidy.prettier.printWidth: whichever is set in the higher layer wins.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       },
@@ -362,8 +367,8 @@
             ],
             "scope": "language-overridable",
             "order": 1,
-            "description": "Brace placement style (js-beautify brace_style).",
-            "markdownDescription": "Brace placement style (js-beautify brace_style).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+            "description": "Brace placement style for JavaScript files printed by js-beautify (js-beautify brace_style). It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier prints those with its own brace placement.",
+            "markdownDescription": "Brace placement style for JavaScript files printed by js-beautify (js-beautify brace_style). It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier prints those with its own brace placement.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
           "tidy.space_after_anon_function": {
             "type": "boolean",
@@ -425,6 +430,22 @@
             "order": 8,
             "description": "Where line-breaking operators are placed relative to the newline (js-beautify operator_position).",
             "markdownDescription": "Where line-breaking operators are placed relative to the newline (js-beautify operator_position).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.space_before_conditional": {
+            "type": "boolean",
+            "default": true,
+            "scope": "language-overridable",
+            "order": 9,
+            "description": "Put a space between if, for, while or switch and its opening parenthesis: if (a) when on, if(a) when off (js-beautify space_before_conditional). It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier always prints if (a).",
+            "markdownDescription": "Put a space between if, for, while or switch and its opening parenthesis: if (a) when on, if(a) when off (js-beautify space_before_conditional). It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier always prints if (a).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.jslint_happy": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 10,
+            "description": "JSLint-style output for JavaScript (js-beautify jslint_happy): a space after the function keyword of an anonymous function, and case labels level with their switch instead of indented under it. It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier prints those with its own style.",
+            "markdownDescription": "JSLint-style output for JavaScript (js-beautify jslint_happy): a space after the function keyword of an anonymous function, and case labels level with their switch instead of indented under it. It has no effect on CSS, HTML or JSON, nor on TypeScript, TSX, JSX or a JavaScript file that contains JSX: Prettier prints those with its own style.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       },
@@ -508,6 +529,36 @@
             "order": 4,
             "description": "How <script>/<style> contents are indented inside HTML (js-beautify indent_scripts).",
             "markdownDescription": "How <script>/<style> contents are indented inside HTML (js-beautify indent_scripts).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.content_unformatted": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+              "patternErrorMessage": "A tag name: a letter, then letters, digits, hyphens or underscores."
+            },
+            "uniqueItems": true,
+            "maxItems": 128,
+            "scope": "language-overridable",
+            "order": 5,
+            "description": "Extra HTML tag names whose content is left exactly as written, for example [\"code\", \"my-snippet\"] (js-beautify content_unformatted). They are added to the tags that are always preserved (pre, textarea, xmp, listing, plaintext), which stay whatever you write. Tag names only: letters, digits, hyphens and underscores. Invalid entries are ignored and listed in Show Effective Configuration.",
+            "markdownDescription": "Extra HTML tag names whose content is left exactly as written, for example [\"code\", \"my-snippet\"] (js-beautify content_unformatted). They are added to the tags that are always preserved (pre, textarea, xmp, listing, plaintext), which stay whatever you write. Tag names only: letters, digits, hyphens and underscores. Invalid entries are ignored and listed in Show Effective Configuration.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.void_elements": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+              "patternErrorMessage": "A tag name: a letter, then letters, digits, hyphens or underscores."
+            },
+            "uniqueItems": true,
+            "maxItems": 128,
+            "scope": "language-overridable",
+            "order": 6,
+            "description": "Extra HTML tag names printed as void elements, like br and img: tags that never have a closing tag, for example [\"my-icon\"] (js-beautify void_elements). They are added to the standard HTML void elements, which always stay. Tag names only: letters, digits, hyphens and underscores; elements whose text must stay as written (pre, textarea, xmp, listing, plaintext, script, style) are refused. Invalid entries are ignored and listed in Show Effective Configuration.",
+            "markdownDescription": "Extra HTML tag names printed as void elements, like br and img: tags that never have a closing tag, for example [\"my-icon\"] (js-beautify void_elements). They are added to the standard HTML void elements, which always stay. Tag names only: letters, digits, hyphens and underscores; elements whose text must stay as written (pre, textarea, xmp, listing, plaintext, script, style) are refused. Invalid entries are ignored and listed in Show Effective Configuration.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       },
@@ -521,8 +572,8 @@
             "minimum": 1,
             "scope": "language-overridable",
             "order": 1,
-            "description": "Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only.",
-            "markdownDescription": "Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+            "description": "Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only. It shares one value with tidy.wrap_line_length: whichever is set in the higher layer wins.",
+            "markdownDescription": "Target line width before Prettier wraps TS/JSX code (Prettier printWidth). Stylistic only. It shares one value with tidy.wrap_line_length: whichever is set in the higher layer wins.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
           "tidy.prettier.semi": {
             "type": "boolean",
@@ -588,6 +639,26 @@
             "order": 8,
             "description": "Include parentheses around a sole arrow-function parameter (Prettier arrowParens). Stylistic only.",
             "markdownDescription": "Include parentheses around a sole arrow-function parameter (Prettier arrowParens). Stylistic only.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.singleAttributePerLine": {
+            "type": "boolean",
+            "default": false,
+            "scope": "language-overridable",
+            "order": 9,
+            "description": "Put every JSX attribute on its own line as soon as an element has more than one (Prettier singleAttributePerLine). Applies to TSX, JSX and a JavaScript file that contains JSX; it has no effect on plain TypeScript, which has no JSX, nor on JavaScript that js-beautify prints. Stylistic only; does not change the AST.",
+            "markdownDescription": "Put every JSX attribute on its own line as soon as an element has more than one (Prettier singleAttributePerLine). Applies to TSX, JSX and a JavaScript file that contains JSX; it has no effect on plain TypeScript, which has no JSX, nor on JavaScript that js-beautify prints. Stylistic only; does not change the AST.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
+          "tidy.prettier.objectWrap": {
+            "type": "string",
+            "default": "preserve",
+            "enum": [
+              "preserve",
+              "collapse"
+            ],
+            "scope": "language-overridable",
+            "order": 10,
+            "description": "How an object literal written with a line break after its opening brace is printed: 'preserve' keeps it expanded, 'collapse' joins it onto one line when it fits (Prettier objectWrap). Applies to TypeScript, TSX, JSX and a JavaScript file that contains JSX; it has no effect on JavaScript that js-beautify prints. Stylistic only; does not change the AST.",
+            "markdownDescription": "How an object literal written with a line break after its opening brace is printed: 'preserve' keeps it expanded, 'collapse' joins it onto one line when it fits (Prettier objectWrap). Applies to TypeScript, TSX, JSX and a JavaScript file that contains JSX; it has no effect on JavaScript that js-beautify prints. Stylistic only; does not change the AST.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }
         }
       },
@@ -598,6 +669,7 @@
           "tidy.editorconfig": {
             "type": "boolean",
             "default": true,
+            "scope": "resource",
             "order": 1,
             "description": "Read the project's .editorconfig cascade (honouring root=true) and let it override plain VS Code settings. Disable to ignore .editorconfig entirely. Workspace .editorconfig is always ignored in Restricted Mode.",
             "markdownDescription": "Read the project's .editorconfig cascade (honouring root=true) and let it override plain VS Code settings. Disable to ignore .editorconfig entirely. Workspace .editorconfig is always ignored in Restricted Mode.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
@@ -689,7 +761,7 @@
     "postcss": "^8.4.35",
     "postcss-less": "^6.0.0",
     "postcss-scss": "^4.0.9",
-    "prettier": "^3.2.0",
+    "prettier": "^3.5.0",
     "smol-toml": "^1.3.1"
   },
   "devDependencies": {
