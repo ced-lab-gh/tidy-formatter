@@ -1,14 +1,19 @@
 // Vue SFC integration suite (ADD-15): runs INSIDE a real VS Code Electron host.
-// Uses untitled documents with an explicit languageId (the test host ships no
-// Vue language extension; VS Code accepts any languageId on openTextDocument)
-// and queries the registered provider directly via executeFormatDocumentProvider.
+// Uses untitled documents with an explicit languageId and queries the registered
+// provider directly via executeFormatDocumentProvider. The hermetic host ships no
+// Vue extension, and VS Code does NOT accept an unregistered languageId (it falls
+// back to plaintext), so test/integration/vue-language-stub declares the id.
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import { activateExtension } from './helpers';
 import { VUE_BASIC } from '../fixtures/vueFixtures';
 
 async function openVueDocument(content: string): Promise<vscode.TextDocument> {
-  return vscode.workspace.openTextDocument({ language: 'vue', content });
+  const document = await vscode.workspace.openTextDocument({ language: 'vue', content });
+  // Without this, a missing language stub would turn every "zero edits" test
+  // below into a vacuous pass on a plaintext document.
+  assert.equal(document.languageId, 'vue', 'the host must know the vue languageId');
+  return document;
 }
 
 async function formatEdits(

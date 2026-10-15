@@ -1,0 +1,20 @@
+{
+  "name": "tidy-test-vue-language",
+  "displayName": "Vue language stub (Tidy integration tests only)",
+  "description": "Declares the 'vue' languageId so the test host knows it. Tidy itself never contributes the language (a Vue extension such as Volar does). Never packaged: test/** is in .vscodeignore.",
+  "version": "0.0.0",
+  "publisher": "tidy-test",
+  "private": true,
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "vue",
+        "aliases": ["Vue"],
+        "extensions": [".vue"]
+      }
+    ]
+  }
+}
