@@ -50,6 +50,7 @@ PUBLISHING.md
 # ── Local-only internal working docs (strategy / mining / growth /
 #    build reports / vsix archive), consolidated under _internal/. ──
 _internal/**
+.claude/**
 STRUCTURE.md
 HANDOFF.md
 

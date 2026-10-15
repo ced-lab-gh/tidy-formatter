@@ -11,7 +11,7 @@
 //
 // SPEC QA-04: the five anti-hijack guarantees (no format on save when disabled;
 // defer to another defaultFormatter; cursor not at EOF; single save; disable
-// unregisters) can only be proven inside a real Electron host — that is what
+// unregisters) can only be proven inside a real Electron host: that is what
 // this config drives. It is CI-friendly under xvfb on Linux.
 import { defineConfig } from '@vscode/test-cli';
 import { fileURLToPath } from 'node:url';
@@ -35,7 +35,7 @@ export default defineConfig({
   mocha: {
     ui: 'bdd',
     // Suite-level ceiling. Individual suites set their own per-suite this.timeout
-    // (CI-aware: generous under process.env.CI, strict locally) — this value is
+    // (CI-aware: generous under process.env.CI, strict locally); this value is
     // the outer cap that must not be tighter than any of them. 120s comfortably
     // covers the cold first integration run on a slow/shared CI runner (VS Code
     // download + Electron boot + readiness poll) without masking a real hang.
