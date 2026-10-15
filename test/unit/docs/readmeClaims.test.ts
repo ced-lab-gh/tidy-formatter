@@ -779,10 +779,12 @@ describe('README : the before/after blocks are the real engine output', () => {
 
   for (const c of CASES) {
     it(`the ${c.fence} "after" block equals dispatchFormat at tabSize 4`, async () => {
+      // LF like the README blocks: a Windows checkout (core.autocrlf) gives CRLF
+      // samples, and the engine keeps the input's line endings.
       const input = readFileSync(
         path.join(REPO_ROOT, 'samples', c.sample),
         'utf8'
-      );
+      ).replace(/\r\n/g, '\n');
       const output = await dispatchFormat({
         languageId: c.lang,
         code: input,
