@@ -2497,7 +2497,7 @@ describe('CHANGELOG : the 0.3.0 settings count is the count that shipped', () =>
   });
 
   it('the 0.5.0 entry sits above 0.4.3 and has its four sections', () => {
-    const start = CHANGELOG.indexOf('## [0.5.0] - 2026-10-07');
+    const start = CHANGELOG.indexOf('## [0.5.0] - 2026-10-15');
     const next = CHANGELOG.indexOf('## [0.4.3]');
     assert.ok(start >= 0, 'the 0.5.0 entry must exist');
     assert.ok(start < next, 'and sit above 0.4.3');

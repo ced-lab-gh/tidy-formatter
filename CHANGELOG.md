@@ -4,7 +4,7 @@ All notable changes to **Tidy** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.5.0] - 2026-10-07
+## [0.5.0] - 2026-10-15
 
 The release that makes Tidy's settings do what their descriptions say, lets the
 migration read the incumbent's real configuration, and adds a command that shows
