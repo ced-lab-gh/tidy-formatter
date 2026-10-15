@@ -20,6 +20,9 @@ import { guardCheckNoFastPath } from '../../helpers/guardCheck';
 
 // AST-equivalent bodies whose TEXT differs: accepted if compared as JavaScript,
 // refused if compared verbatim.
+// Whitespace-like characters are built by code point, never typed: they are invisible in the source.
+const ch = (code: number): string => String.fromCharCode(code);
+
 const BODY_IN = 'var a=1;';
 const BODY_OUT = 'var a = 1;';
 
@@ -69,14 +72,14 @@ describe('safety/guard : <script> classification follows the HTML standard (C1)'
   // Not executable per the standard. These were ACCEPTED before C1 (compared as
   // JavaScript); they are refused now (compared verbatim).
   const NOT_EXECUTABLE: ReadonlyArray<readonly [string, string]> = [
-    ['U+00A0 before the type', ' type=" text/javascript"'],
-    ['U+00A0 after the type', ' type="text/javascript "'],
+    ['U+00A0 before the type', ' type="' + ch(0x00a0) + 'text/javascript"'],
+    ['U+00A0 after the type', ' type="text/javascript' + ch(0x00a0) + '"'],
     ['U+000B (vertical tab) before the type', ' type="\u000bmodule"'],
-    ['U+FEFF before the type', ' type="﻿module"'],
-    ['U+2003 before the type', ' type=" text/javascript"'],
-    ['U+3000 before the type', ' type="　module"'],
-    ['U+2028 before the type', ' type=" module"'],
-    ['U+2029 after the type', ' type="text/javascript "'],
+    ['U+FEFF before the type', ' type="' + ch(0xfeff) + 'module"'],
+    ['U+2003 before the type', ' type="' + ch(0x2003) + 'text/javascript"'],
+    ['U+3000 before the type', ' type="' + ch(0x3000) + 'module"'],
+    ['U+2028 before the type', ' type="' + ch(0x2028) + 'module"'],
+    ['U+2029 after the type', ' type="text/javascript' + ch(0x2029) + '"'],
     ['a type made of ASCII spaces only', ' type=" "'],
     ['language="vbscript"', ' language="vbscript"'],
     ['language="json"', ' language="json"'],
