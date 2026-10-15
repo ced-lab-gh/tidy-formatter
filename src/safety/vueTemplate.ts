@@ -114,6 +114,9 @@ const PARSE5_VOID = new Set([
 // parse5 reads these as raw text (or drops them); Vue reads their content as markup.
 const REFUSED_TAG_SOURCE =
   /<(?:html|head|body|frameset|frame|plaintext|xmp|iframe|noscript|noembed|noframes|listing)[\s/>]/i;
+// parse5 enters SVG/MathML content for svg or math in any case, Vue only in
+// lowercase: <Svg> or <MATH> is a component for Vue, foreign content for parse5.
+const MIXED_CASE_FOREIGN_TAG = /<(?!svg[\s/>]|math[\s/>])(?:[sS][vV][gG]|[mM][aA][tT][hH])[\s/>]/;
 const LEADING_NEWLINE_TAGS = new Set(['pre', 'textarea']);
 const TEXT_ONLY_TAGS = new Set(['script', 'style', 'textarea', 'title']);
 
@@ -364,7 +367,7 @@ function sameCounts(a: Map<string, number>, b: Map<string, number>): boolean {
 }
 
 function buildTree(source: string): VNode[] {
-  if (REFUSED_TAG_SOURCE.test(source)) {
+  if (REFUSED_TAG_SOURCE.test(source) || MIXED_CASE_FOREIGN_TAG.test(source)) {
     unsupported('contains a tag parse5 and Vue read differently');
   }
   if (/\r(?!\n)/.test(source)) {

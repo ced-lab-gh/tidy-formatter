@@ -7,6 +7,24 @@ import { vueTemplateEqual } from '../../../src/safety/vueTemplate';
 
 const accepts = (a: string, b: string): boolean => vueTemplateEqual(a, b).equivalent;
 
+describe('safety/vueTemplate : a component named like svg or math (audit 24, N1)', () => {
+  // parse5 enters SVG/MathML content for <Svg> or <MATH> whatever the case; Vue
+  // only for lowercase svg and math, so for Vue these are components whose
+  // <title> or <textarea> is raw text. The two readings differ: refuse.
+  it('refuses a template with <Svg>, <SVG> or <Math>', () => {
+    const input = '<Svg><title><x-t>\n</x-t></title><path d="M0"/></Svg>';
+    const output = '<Svg>\n  <title><x-t>\n    </x-t></title>\n  <path d="M0" />\n</Svg>';
+    assert.equal(vueTemplateEqual(input, output).equivalent, false);
+    assert.equal(vueTemplateEqual('<SVG><b>x</b></SVG>', '<SVG>\n  <b>x</b>\n</SVG>').equivalent, false);
+    assert.equal(vueTemplateEqual('<Math/>', '<Math />').equivalent, false);
+  });
+
+  it('still accepts lowercase svg and math, and names that only start with them', () => {
+    assert.equal(vueTemplateEqual('<svg><path d="M0"/></svg>', '<svg>\n  <path d="M0" />\n</svg>').equivalent, true);
+    assert.equal(vueTemplateEqual('<div><SvgIcon/></div>', '<div>\n  <SvgIcon />\n</div>').equivalent, true);
+  });
+});
+
 describe('safety/vueTemplate : whitespace as Vue condenses it (V1, V2)', () => {
   it('rejects a space between two elements becoming a line break', () => {
     assert.equal(accepts('<a/> <b/>', '<a/>\n<b/>'), false);
