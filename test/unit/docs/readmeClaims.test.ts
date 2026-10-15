@@ -20,6 +20,7 @@ import {
 } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { chunksForLanguages } from '../../../src/chunks/loader';
 import {
   HISTORY_LIMIT,
@@ -808,8 +809,36 @@ describe('README : the before/after blocks are the real engine output', () => {
           `--- real output ---\n${output}\n--- README blocks ---\n` +
           blocks.map((b) => JSON.stringify(b)).join('\n')
       );
-    });
+    }).timeout(10000); // the engine call is slow under a loaded machine; assertions unchanged
   }
+
+  it('the HTML card after is the real engine output at tabSize 4', async () => {
+    // The card's before and after live in the generator. Importing it does not
+    // run the generator: that happens only when the script is executed directly.
+    const visuals = (await import(
+      pathToFileURL(path.join(REPO_ROOT, 'scripts/build-visuals.mjs')).href
+    )) as { HTML_BEFORE: string; HTML_AFTER: string };
+    const output = await dispatchFormat({
+      languageId: 'html',
+      code: visuals.HTML_BEFORE,
+      options: {
+        tabSize: 4,
+        insertSpaces: true,
+        engineOptions: defaultEngineOptions(),
+        sources: {}
+      }
+    });
+    assert.equal(
+      guard.check('html', visuals.HTML_BEFORE, output).equivalent,
+      true,
+      'the HTML card output must itself pass the guard'
+    );
+    assert.equal(
+      visuals.HTML_AFTER,
+      output,
+      'the HTML card must show exactly what the engine prints at tabSize 4'
+    );
+  }).timeout(10000);
 
   it('the CSS block is 4-space indented, as the default tab size implies', () => {
     const after = fencedBlocks('css').find((b) =>
@@ -962,13 +991,34 @@ describe('house style : the generated visuals carry no em dash either', () => {
   });
 
   it('the committed SVGs (the exact source of the PNGs) carry none', () => {
-    for (const name of ['css.svg', 'tsx.svg']) {
+    for (const name of ['html.svg', 'css.svg', 'tsx.svg']) {
       const svg = readFileSync(
         path.join(REPO_ROOT, 'media/before-after', name),
         'utf8'
       );
       assert.ok(!svg.includes(EM_DASH), `${name} must not render an em dash`);
       assert.ok(svg.includes('After : Tidy'), `${name} must be regenerated`);
+    }
+  });
+});
+
+/* --- 11b. the README shows the three committed PNG cards, HTML first ----- */
+
+describe('README : the before/after images are the committed PNG cards', () => {
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  it('the cards appear in order, HTML first, and each file is a real PNG', () => {
+    const srcs = [...README.matchAll(/!\[[^\]]*\]\((media\/before-after\/[^)]+)\)/g)].map(
+      (m) => m[1]
+    );
+    assert.deepEqual(srcs, [
+      'media/before-after/html.png',
+      'media/before-after/css.png',
+      'media/before-after/tsx.png'
+    ]);
+    for (const src of srcs) {
+      const bytes = readFileSync(path.join(REPO_ROOT, src));
+      assert.ok(bytes.subarray(0, 8).equals(PNG_SIGNATURE), `${src} must be a PNG`);
     }
   });
 });

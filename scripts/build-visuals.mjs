@@ -6,14 +6,17 @@
 // What it makes (into media/before-after/):
 //   - css.png / css.svg  : messy.css  → Format Document → out/messy.css
 //   - tsx.png / tsx.svg  : messy.tsx  → Format Document → out/messy.tsx
+//   - html.png / html.svg: HTML_BEFORE → Format Document → HTML_AFTER
 // Each is a 920px-wide, two-panel "Before" | "After : Tidy" card on a dark
 // (#0d1117) field, monospace code, syntax highlighting, a brand-teal (#168F7D)
 // accent on the Tidy side, and a caption. The TSX card additionally annotates
 // that the JSX stayed valid and the `?.` / `??` operators were preserved.
 //
-// The content is REAL: it is read verbatim from this repo's samples/ folder
-// (before) and samples/out/ folder (after): the same inputs shown in README's
-// "Before / after" section. Nothing is faked.
+// The content is REAL: css and tsx are read verbatim from this repo's samples/
+// folder (before) and samples/out/ folder (after): the same inputs shown in
+// README's "Before / after" section. The html card has no samples/ pair: its
+// before is HTML_BEFORE below and its after is the real engine output for it
+// at tabSize 4 (test/unit/docs checks that). Nothing is faked.
 //
 // Method: we build a self-contained SVG and rasterise it to PNG with
 // @resvg/resvg-js (a devDependency, NOT a runtime dependency of the extension;
@@ -22,7 +25,7 @@
 // rasterisation step remains to be run.
 //
 // Usage (from the extension root):  node scripts/build-visuals.mjs
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -268,6 +271,83 @@ function tokenizeTsx(lines) {
   return out;
 }
 
+// --- HTML tokeniser (same contract: one [{ t, c }] array per line) -----------
+// Tags, attribute names and values, comments and text each get a colour. The
+// body of a <script> is handed line by line to the TSX tokeniser.
+function tokenizeHtml(lines) {
+  let inScript = false; // inside a <script> body
+  let opensScript = false; // the tag being read is an opening <script>
+  let inTag = false; // inside <...>
+  let valueNext = false; // the next attribute token is a value
+  const out = [];
+  for (const line of lines) {
+    if (inScript && !line.includes('</script')) {
+      out.push(tokenizeTsx([line])[0]);
+      continue;
+    }
+    const toks = [];
+    let i = 0;
+    while (i < line.length) {
+      const ch = line[i];
+      if (/\s/.test(ch)) {
+        let j = i;
+        while (j < line.length && /\s/.test(line[j])) j += 1;
+        toks.push({ t: line.slice(i, j), c: C.ink });
+        i = j;
+      } else if (!inTag && line.startsWith('<!--', i)) {
+        const end = line.indexOf('-->', i + 4);
+        const j = end === -1 ? line.length : end + 3;
+        toks.push({ t: line.slice(i, j), c: C.comment });
+        i = j;
+      } else if (!inTag && ch === '<') {
+        const closing = line[i + 1] === '/';
+        const nameAt = i + (closing ? 2 : 1);
+        let j = nameAt;
+        while (j < line.length && /[\w!-]/.test(line[j])) j += 1;
+        const name = line.slice(nameAt, j).toLowerCase();
+        toks.push({ t: line.slice(i, nameAt), c: C.punct });
+        toks.push({ t: line.slice(nameAt, j), c: C.tag });
+        opensScript = !closing && name === 'script';
+        if (closing && name === 'script') inScript = false;
+        inTag = true;
+        i = j;
+      } else if (inTag && (ch === '>' || line.startsWith('/>', i))) {
+        const t = ch === '>' ? '>' : '/>';
+        toks.push({ t, c: C.punct });
+        if (t === '>' && opensScript) inScript = true;
+        opensScript = false;
+        inTag = false;
+        valueNext = false;
+        i += t.length;
+      } else if (inTag && (ch === '"' || ch === "'")) {
+        const end = line.indexOf(ch, i + 1);
+        const j = end === -1 ? line.length : end + 1;
+        toks.push({ t: line.slice(i, j), c: C.str });
+        valueNext = false;
+        i = j;
+      } else if (inTag && ch === '=') {
+        toks.push({ t: '=', c: C.punct });
+        valueNext = true;
+        i += 1;
+      } else if (inTag) {
+        let j = i;
+        while (j < line.length && !/[\s=<>"'\/]/.test(line[j])) j += 1;
+        if (j === i) j = i + 1;
+        toks.push({ t: line.slice(i, j), c: valueNext ? C.str : C.attr });
+        valueNext = false;
+        i = j;
+      } else {
+        let j = i;
+        while (j < line.length && !/[\s<]/.test(line[j])) j += 1;
+        toks.push({ t: line.slice(i, j), c: C.ink });
+        i = j;
+      }
+    }
+    out.push(toks);
+  }
+  return out;
+}
+
 // --- SVG builders ------------------------------------------------------------
 function codeLineSvg(x, y, toks) {
   const spans = toks.map((tk) => `<tspan fill="${tk.c}">${esc(tk.t)}</tspan>`).join('');
@@ -366,9 +446,9 @@ function operatorUnderlinesSvg(afterLines, codeX, codeTop) {
   return parts.join('\n');
 }
 
-function buildSvg({ beforeRel, afterRel, filenameBefore, filenameAfter, tokenizer, caption, annotate }) {
-  const beforeLines = readSample(beforeRel);
-  const afterLines = readSample(afterRel);
+function buildSvg({ beforeRel, afterRel, beforeText, afterText, filenameBefore, filenameAfter, tokenizer, caption, annotate }) {
+  const beforeLines = beforeText === undefined ? readSample(beforeRel) : beforeText.split('\n');
+  const afterLines = afterText === undefined ? readSample(afterRel) : afterText.split('\n');
   const beforeToks = tokenizer(beforeLines);
   const afterToks = tokenizer(afterLines);
   const nLinesMax = Math.max(beforeLines.length, afterLines.length);
@@ -432,6 +512,57 @@ function buildSvg({ beforeRel, afterRel, filenameBefore, filenameAfter, tokenize
 }
 
 // --- Image definitions -------------------------------------------------------
+// --- HTML card: the before is a small malformed document (glued attributes,
+// broken indentation, a list folded onto one line, a short script). The after
+// is the real engine output for it at tabSize 4, checked by test/unit/docs.
+const HTML_BEFORE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shop</title>
+</head>
+<body>
+      <header class="site"id="top"><h1>Mood Shop</h1>
+<ul><li><a href="/">Home</a></li><li><a href="/shop">Shop</a></li><li><a href="/faq">FAQ</a></li></ul>
+   </header>
+<p id="hi"class=lead>Hi <b>you</b></p>
+<script>
+const n=3;function go(){return n*2}
+</script>
+</body>
+</html>`;
+
+const HTML_AFTER = `<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>Shop</title>
+</head>
+
+<body>
+    <header class="site" id="top">
+        <h1>Mood Shop</h1>
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/shop">Shop</a></li>
+            <li><a href="/faq">FAQ</a></li>
+        </ul>
+    </header>
+    <p id="hi" class=lead>Hi <b>you</b></p>
+    <script>
+        const n = 3;
+
+        function go() {
+            return n * 2
+        }
+    </script>
+</body>
+
+</html>`;
+
+export { HTML_BEFORE, HTML_AFTER };
+
 const IMAGES = [
   {
     name: 'css',
@@ -452,6 +583,16 @@ const IMAGES = [
     tokenizer: tokenizeTsx,
     caption: 'JSX stays valid : <div /> never becomes < div / > · ?. and ?? preserved · AST-equivalence verified.',
     annotate: true
+  },
+  {
+    name: 'html',
+    beforeText: HTML_BEFORE,
+    afterText: HTML_AFTER,
+    filenameBefore: 'messy.html',
+    filenameAfter: 'messy.html',
+    tokenizer: tokenizeHtml,
+    caption: 'glued attributes spaced · folded list expanded · script formatted · verified against a parse5 tree.',
+    annotate: null
   }
 ];
 
@@ -500,7 +641,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+// Run only when executed directly, so the docs tests can import HTML_BEFORE and
+// HTML_AFTER without rewriting media/before-after/.
+const isMain =
+  process.argv[1] !== undefined &&
+  realpathSync.native(process.argv[1]) === realpathSync.native(fileURLToPath(import.meta.url));
+if (isMain) main().catch((err) => {
   // eslint-disable-next-line no-console
   console.error('[build-visuals] failed:', err);
   process.exit(1);

@@ -16,21 +16,25 @@ If you arrived here after a formatter quietly rewrote your code on save, that is
 ## See it in action
 
 <!--
-  These two images are generated PNGs committed at media/before-after/css.png
-  and media/before-after/tsx.png. Keep them PNG on purpose: the VS Code
+  These three images are generated PNGs committed at media/before-after/html.png,
+  media/before-after/css.png and media/before-after/tsx.png. Keep them PNG on purpose: the VS Code
   Marketplace rewrites relative image paths to raw.githubusercontent.com and
   renders PNG reliably on the listing, whereas SVG is NOT guaranteed to render
-  there. If a build only produces .svg siblings, point the two srcs below at
-  css.svg / tsx.svg as a fallback, but the committed, Marketplace-safe asset
-  must stay PNG. Regenerate the pair from the real samples/ (before) and
-  samples/out/ (after) files before publishing.
+  there. If a build only produces .svg siblings, point the srcs below at
+  html.svg / css.svg / tsx.svg as a fallback, but the committed, Marketplace-safe asset
+  must stay PNG. Regenerate the set with `node scripts/build-visuals.mjs` before
+  publishing, once samples/out/ matches the real engine output: css and tsx read
+  samples/ (before) and samples/out/ (after), and the HTML card has its sample
+  inside the script. Until then, the script rewrites css.png with stale samples/out/messy.css.
 -->
+
+![HTML before and after: glued attributes get their spaces back, the folded `<ul>` becomes one item per line, and the script is spaced and indented.](media/before-after/html.png)
 
 ![CSS before and after: collapsed, comma-jammed rules become readable blocks while the `>` combinator and `calc(100% - 20px)` survive intact.](media/before-after/css.png)
 
 ![TSX before and after: minified React reflowed by a real parser, `<div className="card" … />` stays valid JSX and `n?.toString() ?? "none"` keeps both its `?.` and `??` operators.](media/before-after/tsx.png)
 
-These are the real [`samples/`](./samples) inputs run through *Format Document*, the messy original next to Tidy's output. Nothing changed meaning along the way: if a format would mangle a JSX tag or split a `?.` into `? .`, the equivalence guard discards the result and leaves your file untouched.
+The CSS and TSX cards are the real [`samples/`](./samples) inputs run through *Format Document*. The HTML card uses a small sample of the same kind, formatted by the same engine at a tab size of 4. In every card the messy original sits next to Tidy's output. Nothing changed meaning along the way: if a format would mangle a JSX tag or split a `?.` into `? .`, the equivalence guard discards the result and leaves your file untouched.
 
 ---
 
