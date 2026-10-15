@@ -16,11 +16,12 @@ A patch release that closes four of the known limitations listed for 0.5.0. Noth
 
 ### Changed
 
-- **A `.soukformatignore` is read once and kept until it changes**, instead of on every format. Tidy checks the file's size, timestamps and identity before reusing it, and reads it again when it cannot prove the file is unchanged (a file changed in the last two seconds, or a file system with coarse timestamps). For a 1 MiB file, a format after the first one went from about 200 ms to about 10 to 40 ms.
+- **A `.soukformatignore` is read once and kept until it changes**, instead of on every format. Tidy checks the file's size, timestamps and identity before reusing it, and reads it again when it cannot prove the file is unchanged (a file changed in the last two seconds, or a file system with coarse timestamps). At most 1 MiB of ignore files is kept in memory at once. For a 1 MiB file of ordinary patterns, a format after the first one went from about 200 ms to about 10 to 40 ms; a file full of character classes still costs about a quarter of a second to evaluate.
 
 ### Known limitations
 
-- On a network share modified from another machine, the cached `.soukformatrc` or `.soukformatignore` can stay stale for a few seconds (the share's attribute cache).
+- On a network share modified from another machine, the cached `.soukformatrc` or `.soukformatignore` can stay stale for as long as the share caches file attributes (a few seconds on SMB, up to a minute on NFS by default).
+- If this machine's clock runs more than two seconds ahead of the clock of the disk holding the file, two same-size rewrites in quick succession can leave the cached version in use until the file changes again.
 
 ## [0.5.0] - 2026-10-15
 

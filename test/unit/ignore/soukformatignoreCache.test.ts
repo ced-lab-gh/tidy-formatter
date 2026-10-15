@@ -156,6 +156,21 @@ describe('ignore/soukformatignore : F3 the parsed file is memoised by identity',
     assert.equal(countReads(() => resolveIgnore(documents[0])).reads, 1, 'oldest was evicted');
   });
 
+  it('bounds memory by source bytes: two large ignore files are not held together', () => {
+    // 600 KiB each: one fits under the 1 MiB byte bound, both do not.
+    const big = '*.css\n' + '# padding line for the byte bound\n'.repeat(18_000);
+    const documents = ['b1', 'b2'].map((name) => {
+      const dir = join(root, name);
+      mkdirSync(dir);
+      writeFileSync(join(dir, SOUKFORMATIGNORE_FILENAME), big);
+      return join(dir, 'a.css');
+    });
+    resolveIgnore(documents[0]);
+    resolveIgnore(documents[1]);
+    assert.equal(countReads(() => resolveIgnore(documents[1])).reads, 0, 'the newest is held');
+    assert.equal(countReads(() => resolveIgnore(documents[0])).reads, 1, 'the older was evicted');
+  });
+
   it('an ignore file that disappears is not served from the memo', () => {
     resolveIgnore(file);
     rmSync(ignoreFile);

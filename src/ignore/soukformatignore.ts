@@ -435,6 +435,22 @@ export function isFailClosedDetail(detail: string | undefined): boolean {
 /** Most parsed ignore files kept in memory at once (one per distinct file path). */
 const MAX_CACHED_IGNORE_FILES = 32;
 
+/**
+ * Most SOURCE bytes kept parsed at once, summed over the entries. Parsed patterns
+ * weigh tens of times their source, so this, not the file count, bounds memory:
+ * one ignore file at its 1 MiB cap still fits, thirty-two of them do not.
+ */
+const MAX_CACHED_IGNORE_BYTES = MAX_SOUKFORMATIGNORE_BYTES;
+
+/** Sum of the source sizes of the cached entries. */
+function cachedIgnoreBytes(): number {
+  let total = 0;
+  for (const entry of ignoreCache.values()) {
+    total += entry.identity.size;
+  }
+  return total;
+}
+
 /** A parsed ignore file kept in memory, valid while its identity is unchanged. */
 interface CachedIgnoreFile {
   readonly identity: FileIdentity;
@@ -485,11 +501,16 @@ function loadParsedIgnore(located: LocatedIgnoreFile): ParsedIgnoreFile | undefi
   const parsed = parseLines(text);
   ignoreCache.delete(located.path);
   if (canProveFreshness(located, clock())) {
-    if (ignoreCache.size >= MAX_CACHED_IGNORE_FILES) {
+    // Evict the oldest entries until both the count and the byte bound hold.
+    while (
+      ignoreCache.size >= MAX_CACHED_IGNORE_FILES ||
+      (ignoreCache.size > 0 && cachedIgnoreBytes() + located.size > MAX_CACHED_IGNORE_BYTES)
+    ) {
       const oldest = ignoreCache.keys().next();
-      if (oldest.done !== true) {
-        ignoreCache.delete(oldest.value);
+      if (oldest.done === true) {
+        break;
       }
+      ignoreCache.delete(oldest.value);
     }
     const { size, mtimeNs, ctimeNs, ino, dev } = located;
     ignoreCache.set(located.path, { identity: { size, mtimeNs, ctimeNs, ino, dev }, parsed });
