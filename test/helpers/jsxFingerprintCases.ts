@@ -135,7 +135,7 @@ export const EDGE_CASES: readonly string[] = [
   'const f = <T,>(x: T) => x;',
   'const f = <T extends unknown>(x: T) => <A b={x} />;',
   'const f = <const T,>(x: T) => x;',
-  'const f = async <T,>(x: T) => x;',
+  'const f = async (x: T) => x;', // the generic form after `async` is pinned in the "MORE than the reference" test
   'f<T>(x); g<T, U>(y); new H<T>();',
   'a < b; c > d; e << f; g >> h;',
   'const x = y as Array<string>;',
@@ -278,7 +278,7 @@ class Gen {
       case 9: return `f<T>(a); const b = a < c; const d = ${el};`;
       case 10: return `const t = \`\${x}\`; const a = ${el}; const u = \`\${y}\`;`;
       case 11: return `@dec(${el}) class C { #q = 1; }`;
-      case 12: return `const g = async <T,>(x: T) => ${el};`;
+      case 12: return `const g = async (x: T) => ${el};`;
       case 13: return `foo(${this.genericArrow('x')}, ${el});`;
       case 14: return `const o = { m: ${this.genericArrow(el)}, n: ${el} };`;
       case 15: return `const r = a ? (b) : ${el};`;

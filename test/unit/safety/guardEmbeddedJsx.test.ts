@@ -77,7 +77,9 @@ describe('safety/guard : JSX tag boundaries inside an executable <script> (ADD-1
     ['wrapped attributes with the closing `>` on its own line', 'const a = <Foo bar={1}>x</Foo>;', 'const a = <Foo\n  bar={1}\n>\n  x\n</Foo>;', true],
     ['a self-closing tag exploded over several lines', 'const a = <Foo bar={1} />;', 'const a = <Foo\n  bar={1}\n/>;', true],
     ['both sides already detached, nothing moved', 'const a = < Foo />;', 'const a = < Foo />;\n', true],
-    ['detached on the input side, glued on the output side', 'const a = < Foo />;', 'const a = <Foo />;', false]
+    ['detached on the input side, glued on the output side', 'const a = < Foo />;', 'const a = <Foo />;', false],
+    ['D3: opening `<` of a generic arrow after `async` detached', 'const f = async <T,>(x: T) => x;', 'const f = async < T,>(x: T) => x;', false],
+    ['D3: a generic arrow after `async` left glued', 'const f = async <T,>(x: T) => x;', 'const f = async <T,>(\n  x: T\n) => x;', true]
   ];
 
   for (const [label, inputJs, outputJs, accepted] of PARITY_ROWS) {
