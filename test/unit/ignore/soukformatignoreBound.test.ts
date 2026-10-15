@@ -87,6 +87,20 @@ describe('ignore/soukformatignore : the walk goes up to the root of the disk', (
       assert.equal(findSoukformatignore(deepFile), above);
     });
 
+    it('a file more than 64 folders deep still finds the ignore file at the top', () => {
+      // 0.5.0 stopped after 64 levels; the walk is lexical and always ends at the root.
+      let deep = ws;
+      for (let level = 0; level < 70; level += 1) {
+        deep = join(deep, 'd');
+      }
+      mkdirSync(deep, { recursive: true });
+      const deepFile = join(deep, 'x.css');
+      writeFileSync(deepFile, '');
+      const above = ignoreIn(root);
+      assert.equal(findSoukformatignore(deepFile), above);
+      assert.equal(resolveIgnore(deepFile).ignored, true);
+    });
+
     it('a directory named .soukformatignore is not a file: the walk goes past it', () => {
       mkdirSync(join(ws, 'src', SOUKFORMATIGNORE_FILENAME));
       const above = ignoreIn(root);

@@ -12,10 +12,12 @@ import { join } from 'node:path';
 import {
   parseIgnorePatterns,
   isIgnoredFile,
+  toPosixRelative,
   findSoukformatignore,
   resolveIgnore,
   SOUKFORMATIGNORE_FILENAME
 } from '../../../src/ignore/soukformatignore';
+import { evaluatePatterns } from '../../../src/ignore/glob';
 
 describe('ignore/soukformatignore : parseIgnorePatterns + isIgnoredFile (pure)', () => {
   it('ignores a minified file matched by *.min.css', () => {
@@ -55,8 +57,18 @@ describe('ignore/soukformatignore : parseIgnorePatterns + isIgnoredFile (pure)',
 
   it('normalises OS-native separators and a leading "./" in the relative path', () => {
     const patterns = parseIgnorePatterns('dist/\n');
-    assert.equal(isIgnoredFile('dist\\bundle.js', patterns), true);
     assert.equal(isIgnoredFile('./dist/bundle.js', patterns), true);
+    assert.equal(toPosixRelative('dist\\bundle.js', 'win32'), 'dist/bundle.js');
+    assert.equal(toPosixRelative('./dist//bundle.js', 'linux'), 'dist/bundle.js');
+  });
+
+  it('keeps a backslash inside a file name outside Windows, as git does', () => {
+    // On Linux and macOS "src\app.js" is ONE file name, and git matches it as such.
+    assert.equal(toPosixRelative('src\\app.js', 'linux'), 'src\\app.js');
+    assert.equal(toPosixRelative('src\\app.js', 'darwin'), 'src\\app.js');
+    // The matcher itself takes POSIX paths: the backslash stays inside the name.
+    const patterns = parseIgnorePatterns('s*p.js\n');
+    assert.equal(evaluatePatterns(patterns, toPosixRelative('src\\app.js', 'linux')).ignored, true);
   });
 
   it('F1: a lone CR is part of the pattern, not a line break (like git)', () => {

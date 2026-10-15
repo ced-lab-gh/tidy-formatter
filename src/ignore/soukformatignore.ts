@@ -200,7 +200,7 @@ export function decideIgnore(relPath: string, patterns: readonly IgnorePattern[]
   if (typeof relPath !== 'string' || relPath === '' || patterns.length === 0) {
     return { ignored: false };
   }
-  return evaluatePatterns(patterns, toPosix(relPath));
+  return evaluatePatterns(patterns, toPosixRelative(relPath));
 }
 
 /**
@@ -211,9 +211,14 @@ export function isIgnoredFile(relPath: string, patterns: readonly IgnorePattern[
   return decideIgnore(relPath, patterns).ignored;
 }
 
-/** Normalise OS-native separators and a leading "./" to a clean POSIX path. */
-function toPosix(p: string): string {
-  return p.split(/[\\/]/).filter((seg) => seg !== '' && seg !== '.').join('/');
+/**
+ * Normalise a relative path to POSIX, dropping "." and empty segments. On
+ * Windows "\" is a separator too; elsewhere it is an ordinary file-name
+ * character, as git treats it, so it stays inside its segment.
+ */
+export function toPosixRelative(p: string, platform: string = process.platform): string {
+  const separators = platform === 'win32' ? /[\\/]/ : /\//;
+  return p.split(separators).filter((seg) => seg !== '' && seg !== '.').join('/');
 }
 
 /**
@@ -328,8 +333,8 @@ interface LocatedIgnoreFile {
  * Walk up from a file's directory to the nearest .soukformatignore and return it
  * with the size the stat that found it reported: one stat per level, and the
  * size feeds the cap without a second syscall. Goes up to the root of the disk,
- * like git (see the header). Bounded to 64 levels (a stop against a symlink loop
- * or a pathological path); a stat error (permission, not a directory) is
+ * like git (see the header). The walk is lexical (no symlink is followed), so it
+ * always ends at the root; a stat error (permission, not a directory) is
  * fail-soft and the walk keeps going.
  */
 function locateSoukformatignore(startFsPath: string): LocatedIgnoreFile | undefined {
@@ -338,7 +343,7 @@ function locateSoukformatignore(startFsPath: string): LocatedIgnoreFile | undefi
   }
 
   let dir = dirname(resolve(startFsPath));
-  for (let depth = 0; depth < 64; depth += 1) {
+  for (;;) {
     const candidate = join(dir, SOUKFORMATIGNORE_FILENAME);
     try {
       const stats = statSync(candidate, { throwIfNoEntry: false });
@@ -356,13 +361,12 @@ function locateSoukformatignore(startFsPath: string): LocatedIgnoreFile | undefi
     }
     dir = parent;
   }
-  return undefined;
 }
 
 /**
  * Walk up from a file's directory to the nearest .soukformatignore, up to the
  * root of the disk. Returns its absolute path, or undefined if none exists.
- * Bounded against symlink loops. Uses only node:fs (no workspace APIs).
+ * The walk is lexical, so it always ends. Uses only node:fs (no workspace APIs).
  */
 export function findSoukformatignore(startFsPath: string): string | undefined {
   return locateSoukformatignore(startFsPath)?.path;
