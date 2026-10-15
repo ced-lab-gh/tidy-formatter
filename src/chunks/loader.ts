@@ -612,7 +612,10 @@ const CHUNKS_BY_LANGUAGE: Readonly<Record<LangId, readonly ChunkName[]>> = {
   javascript: ['chunk-guard-js'],
   typescript: ['chunk-prettier', 'chunk-guard-js'],
   typescriptreact: ['chunk-prettier', 'chunk-guard-js'],
-  javascriptreact: ['chunk-prettier', 'chunk-guard-js']
+  javascriptreact: ['chunk-prettier', 'chunk-guard-js'],
+  // Vue SFC: parse5 splits and verifies the template, postcss verifies the
+  // styles; <script> is verbatim so it needs no JS verifier.
+  vue: ['chunk-guard-html', 'chunk-guard-css']
 };
 
 // A Map, not the record itself: languageIds arrive from the host as arbitrary

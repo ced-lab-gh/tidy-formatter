@@ -55,7 +55,8 @@ export const ACTION_USE_TIDY_LABEL = 'Use Tidy as my Formatter';
 const SUPPORTED_LANGUAGES: ReadonlySet<string> = new Set(SUPPORTED_LANG_IDS);
 
 const SUPPORTED_LANGUAGES_SENTENCE =
-  'Tidy formats HTML, CSS, SCSS, LESS, JavaScript, TypeScript, JSX/TSX, JSON and JSONC.';
+  'Tidy formats HTML, CSS, SCSS, LESS, JavaScript, TypeScript, JSX/TSX, JSON, ' +
+  'JSONC and Vue single-file components.';
 
 /** vscode-free view of the active editor + config the builder needs. */
 export interface ExplainContext {

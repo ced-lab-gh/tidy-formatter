@@ -114,12 +114,17 @@ export function activate(context: vscode.ExtensionContext): void {
         documentProvider
       )
     );
-    context.subscriptions.push(
-      vscode.languages.registerDocumentRangeFormattingEditProvider(
-        selector,
-        rangeProvider
-      )
-    );
+    // v1 (ADD-15): Vue SFC formatting is whole-document only. The block splice
+    // needs the complete document, so no range provider is registered for
+    // 'vue'; every other language keeps both providers.
+    if (languageId !== 'vue') {
+      context.subscriptions.push(
+        vscode.languages.registerDocumentRangeFormattingEditProvider(
+          selector,
+          rangeProvider
+        )
+      );
+    }
   }
 
   context.subscriptions.push(

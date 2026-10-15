@@ -68,7 +68,8 @@ const SUPPORTED_LANGUAGES: readonly LangId[] = [
   'javascript',
   'typescript',
   'typescriptreact',
-  'javascriptreact'
+  'javascriptreact',
+  'vue'
 ];
 
 const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set(SUPPORTED_LANGUAGES);

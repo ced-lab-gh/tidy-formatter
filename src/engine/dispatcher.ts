@@ -14,12 +14,14 @@ import type { Engine, FormatRequest, LangId } from '../types';
 import { JsBeautifyEngine } from './jsbeautify';
 import { mayContainJsx } from './jsxScan';
 import { PrettierEngine } from './prettier';
+import { VueSfcEngine } from './vueSfc';
 
 // Engines are stateless adapters, so a single shared instance per engine is safe
 // and avoids per-call allocation. The actual parser/library load is lazy inside
 // each engine's format() call (see SPEC §5 "moteurs lazy-loadés").
 const jsBeautifyEngine = new JsBeautifyEngine();
 const prettierEngine = new PrettierEngine();
+const vueSfcEngine = new VueSfcEngine();
 
 // SPEC §4 matrix: these languages always go through the real-parser engine
 // because js-beautify provably corrupts JSX/TSX and generics.
@@ -62,6 +64,10 @@ const JSX_HINT = /<(?:[A-Za-z_$][\w.:-]*|>)/;
  * dispatchFormat where the code is available.
  */
 export function pickEngine(lang: LangId): Engine {
+  // Vue SFCs have a dedicated block-orchestrating engine (ADD-15).
+  if (lang === 'vue') {
+    return vueSfcEngine;
+  }
   if (PRETTIER_LANGS.has(lang)) {
     return prettierEngine;
   }

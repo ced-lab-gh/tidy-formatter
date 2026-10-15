@@ -54,7 +54,13 @@ import { SUPPORTED_LANG_IDS, type LangId, type ResolvedOptions } from '../../../
  * derived from ONE source. Each is deliberately messy enough that the engine
  * really reprints it, otherwise the sweep would prove nothing about the printer.
  */
-const SAMPLES: Readonly<Record<LangId, string>> = {
+// 'vue' is outside this matrix by design (ADD-15): its skeleton and script blocks
+// are restored byte-for-byte, so the document-level EOL and final-newline policy
+// cannot apply to them. Its block-level EOL is covered by engine/vueSfc.test.ts.
+type MatrixLang = Exclude<LangId, 'vue'>;
+const isMatrixLang = (lang: LangId): lang is MatrixLang => lang !== 'vue';
+
+const SAMPLES: Readonly<Record<MatrixLang, string>> = {
   css: '.a {\ncolor: red;\n}\n.b {\ncolor: blue;\n}\n',
   scss: '.a {\ncolor: red;\n.c { color: green; }\n}\n',
   less: '.a {\ncolor: red;\n.c { color: green; }\n}\n',
@@ -127,7 +133,7 @@ const endsWithNewline = (text: string): boolean => /[\r\n]$/.test(text);
 /* -------------------------------------------------------------------------- */
 
 describe('engine : line endings across the whole format matrix (C-04, completed)', () => {
-  for (const lang of SUPPORTED_LANG_IDS) {
+  for (const lang of SUPPORTED_LANG_IDS.filter(isMatrixLang)) {
     it(`${lang}: 36 combinations, and not one of them rewrites the document's EOL uninvited`, async () => {
       for (const s of SHAPES) {
         const input = reshape(SAMPLES[lang], s);
@@ -226,7 +232,7 @@ describe('engine : line endings across the whole format matrix (C-04, completed)
 /* The exact pre-fix cases, named                                              */
 /* -------------------------------------------------------------------------- */
 
-const PRETTIER_LANGS: readonly LangId[] = [
+const PRETTIER_LANGS: readonly MatrixLang[] = [
   'typescript',
   'typescriptreact',
   'javascriptreact'

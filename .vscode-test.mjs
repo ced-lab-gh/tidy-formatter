@@ -24,6 +24,10 @@ export default defineConfig({
   // sources live in test/integration/**/*.test.ts.
   files: 'out/test/integration/**/*.test.js',
   version: 'stable',
+  // The extension under test, plus a declarative stub that registers the 'vue'
+  // languageId: a real Vue extension provides it, the hermetic host has none
+  // and silently falls back to plaintext (ADD-15 vue.test.ts). Never packaged.
+  extensionDevelopmentPath: [here, resolve(here, 'test/integration/vue-language-stub')],
   // Open a clean, minimal fixture workspace so workspace-scoped settings
   // (editor.formatOnSave, editor.defaultFormatter, tidy.<lang>.enable) and
   // real on-disk save lifecycle are exercised deterministically.

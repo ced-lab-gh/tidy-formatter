@@ -27,7 +27,8 @@ const SUPPORTED_NON_TEMPLATE: ReadonlySet<LangId> = new Set<LangId>([
   'javascript',
   'typescript',
   'typescriptreact',
-  'javascriptreact'
+  'javascriptreact',
+  'vue'
 ]);
 
 /**

@@ -106,6 +106,8 @@ interface CommentSyntax {
 function commentSyntaxFor(lang: LangId): CommentSyntax {
   switch (lang) {
     case 'html':
+    case 'vue':
+      // A .vue file's top level is HTML-like: SGML comments carry the markers.
       return { block: ['<!--', '-->'], quotes: NO_QUOTES, markup: true };
     case 'css':
     case 'scss':

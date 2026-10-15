@@ -12,7 +12,8 @@ export type LangId =
   | 'javascript'
   | 'typescript'
   | 'typescriptreact'
-  | 'javascriptreact';
+  | 'javascriptreact'
+  | 'vue';
 
 /**
  * The single source of truth for the languageIds Tidy handles. Both the formatting
@@ -29,7 +30,8 @@ export const SUPPORTED_LANG_IDS: readonly LangId[] = [
   'javascript',
   'typescript',
   'typescriptreact',
-  'javascriptreact'
+  'javascriptreact',
+  'vue'
 ];
 
 export interface ResolvedOptions {
