@@ -290,7 +290,9 @@ describe('safety/guard : JSX boundary fingerprint, AST positions against the tok
     ];
     const tally = runAll(files.map((file) => readFileSync(file, 'utf8')));
     assertNoDisagreement(tally);
-    assert.ok(tally.compared >= 6, `expected at least 6 repo files, got ${tally.compared}`);
+    // Thresholds count only the files git tracks (four .tsx): a clean CI checkout
+    // has nothing else here, while a local tree may hold untracked extras.
+    assert.ok(tally.compared >= 4, `expected at least 4 repo files, got ${tally.compared}`);
     assert.ok(tally.jsxBearing >= 4, `expected at least 4 JSX-bearing repo files, got ${tally.jsxBearing}`);
   });
 
