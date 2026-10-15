@@ -232,6 +232,10 @@ export const UNHONOURED_IGNORE_MASK_UNAVAILABLE =
  * ONLY the selected span on a range format (see
  * {@link UNHONOURED_IGNORE_PRETTIER_PATH}). Moved verbatim from
  * providers/formattingProvider.ts (ADD-02).
+ *
+ * 'vue' is deliberately ABSENT (ADD-15 v1): the Vue engine owns its own
+ * block-level mask/restore, and in-source ignore REGIONS inside an SFC are a
+ * documented v1 limitation (the FILE-level marker works via commentSyntaxFor).
  */
 const REGION_MASKING_LANGUAGES: ReadonlySet<LangId> = new Set<LangId>([
   'css',

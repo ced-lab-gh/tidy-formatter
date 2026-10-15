@@ -167,7 +167,8 @@ describe('commands/useAsFormatter : planUseAsFormatter language validation', () 
       'javascript',
       'typescript',
       'typescriptreact',
-      'javascriptreact'
+      'javascriptreact',
+      'vue'
     ];
     const plan = planUseAsFormatter(input, true);
     assert.deepEqual(plan.langs, input);
@@ -175,7 +176,7 @@ describe('commands/useAsFormatter : planUseAsFormatter language validation', () 
 
   it('drops unsupported / junk languageIds without throwing', () => {
     const plan = planUseAsFormatter(
-      ['css', 'python', '', 'rust', 'html', 'vue'],
+      ['css', 'python', '', 'rust', 'html', 'astro'],
       true
     );
     assert.deepEqual(plan.langs, ['css', 'html']);

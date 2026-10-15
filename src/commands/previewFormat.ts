@@ -404,7 +404,8 @@ const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set<LangId>([
   'javascript',
   'typescript',
   'typescriptreact',
-  'javascriptreact'
+  'javascriptreact',
+  'vue'
 ]);
 
 function toSupportedLangId(languageId: string): LangId | undefined {

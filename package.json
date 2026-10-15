@@ -57,7 +57,8 @@
     "onLanguage:javascript",
     "onLanguage:typescript",
     "onLanguage:typescriptreact",
-    "onLanguage:javascriptreact"
+    "onLanguage:javascriptreact",
+    "onLanguage:vue"
   ],
   "contributes": {
     "commands": [
@@ -271,11 +272,18 @@
             "description": "Enable Tidy as a formatting provider for JSX (JavaScript React).",
             "markdownDescription": "Enable Tidy as a formatting provider for JSX (JavaScript React).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
+          "tidy.vue.enable": {
+            "type": "boolean",
+            "default": true,
+            "order": 11,
+            "description": "Enable Tidy as a formatting provider for Vue single-file components (v1 formats template and style blocks; script blocks are kept verbatim).",
+            "markdownDescription": "Enable Tidy as a formatting provider for Vue single-file components (v1 formats template and style blocks; script blocks are kept verbatim).\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
+          },
           "tidy.maxFileSizeKB": {
             "type": "integer",
             "default": 5120,
             "minimum": 0,
-            "order": 11,
+            "order": 12,
             "description": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard. For JSON and JSONC documents, tidy.json.maxFileSizeKB takes precedence over this value.",
             "markdownDescription": "Skip formatting (with a notification) for documents larger than this size in KB. 0 disables the size guard. For JSON and JSONC documents, tidy.json.maxFileSizeKB takes precedence over this value.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           },
@@ -283,7 +291,7 @@
             "type": "integer",
             "default": 10240,
             "minimum": 0,
-            "order": 12,
+            "order": 13,
             "description": "Size cap in KB for JSON and JSONC documents only, taking precedence over tidy.maxFileSizeKB for these two languages. JSON gets a higher default because Tidy formats it on a fast linear path and verifies it with a cheap value-equality check, so large files such as package-lock.json format instead of being skipped. 0 disables the cap for JSON/JSONC. When this setting is unset, an explicitly configured tidy.maxFileSizeKB still applies to JSON.",
             "markdownDescription": "Size cap in KB for JSON and JSONC documents only, taking precedence over tidy.maxFileSizeKB for these two languages. JSON gets a higher default because Tidy formats it on a fast linear path and verifies it with a cheap value-equality check, so large files such as package-lock.json format instead of being skipped. 0 disables the cap for JSON/JSONC. When this setting is unset, an explicitly configured tidy.maxFileSizeKB still applies to JSON.\n\nDocs: [Key settings](https://github.com/ced-lab-gh/tidy-formatter#key-settings)."
           }

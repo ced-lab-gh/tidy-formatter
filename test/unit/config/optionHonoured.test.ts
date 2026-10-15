@@ -42,7 +42,10 @@ const SAMPLES: Readonly<Record<CatalogLang, string>> = {
   jsonc: `{"a":1,\n\n\n"b":"${LOREM}"}\n`,
   typescript: JS,
   typescriptreact: JS,
-  javascriptreact: JS
+  javascriptreact: JS,
+  // A Vue SFC prints its <template> with the html engine and its <style> with
+  // the css engine, so it has blank lines at depth 0 and inside a block too.
+  vue: `<template>\n<div>\n\n\n\n<p>${LOREM}</p>\n\n\n\n<p>y</p>\n</div>\n</template>\n<style>\n${CSS}</style>\n`
 };
 
 const NEWLINE_OPTIONS: ReadonlyArray<{
@@ -271,6 +274,9 @@ const TS_ANGLE = 'const id = <T,>(v: T) => v;\nconst n = <number>x;\n';
 
 type SampleKind = 'js' | 'html' | 'jsx-attrs' | 'objects';
 
+/** A Vue SFC whose template holds the given markup (the style part is not needed here). */
+const inTemplate = (markup: string): string => `<template>${markup}</template>\n`;
+
 /** Samples per language; an option changes a language if ANY of its samples changes. */
 function samplesFor(kind: SampleKind): Readonly<Record<CatalogLang, readonly string[]>> {
   const others = {
@@ -285,6 +291,7 @@ function samplesFor(kind: SampleKind): Readonly<Record<CatalogLang, readonly str
       return {
         ...others,
         html: [`<div><script>${JS_CONTROL}</script><p>${LOREM}</p></div>\n`],
+        vue: [inTemplate(`<div><script>${JS_CONTROL}</script><p>${LOREM}</p></div>\n`)],
         javascript: [JS_CONTROL],
         typescript: [JS_CONTROL],
         typescriptreact: [JS_CONTROL],
@@ -294,6 +301,7 @@ function samplesFor(kind: SampleKind): Readonly<Record<CatalogLang, readonly str
       return {
         ...others,
         html: [HTML_TAGS],
+        vue: [inTemplate(HTML_TAGS)],
         javascript: [JS_CONTROL],
         typescript: [JS_CONTROL],
         typescriptreact: [JS_CONTROL],
@@ -304,6 +312,7 @@ function samplesFor(kind: SampleKind): Readonly<Record<CatalogLang, readonly str
       return {
         ...others,
         html: [HTML_TAGS],
+        vue: [inTemplate(HTML_TAGS)],
         // A .js file is printed by Prettier only when it holds JSX, so both shapes
         // are tried: the option works on a .js file if it works on either.
         javascript: [JSX_AND_OBJECT, JS_CONTROL],
@@ -348,7 +357,7 @@ const SIX: readonly SixOption[] = [
     bag: (v) => ({ content_unformatted: v }),
     dflt: [],
     nonDefault: ['code'],
-    expected: ['html']
+    expected: ['html', 'vue']
   },
   {
     settingKey: 'tidy.void_elements',
@@ -356,7 +365,7 @@ const SIX: readonly SixOption[] = [
     bag: (v) => ({ void_elements: v }),
     dflt: [],
     nonDefault: ['my-icon'],
-    expected: ['html']
+    expected: ['html', 'vue']
   },
   {
     settingKey: 'tidy.prettier.singleAttributePerLine',

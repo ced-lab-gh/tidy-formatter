@@ -67,7 +67,8 @@ export type CatalogLang =
   | 'javascript'
   | 'typescript'
   | 'typescriptreact'
-  | 'javascriptreact';
+  | 'javascriptreact'
+  | 'vue';
 
 /**
  * One catalogue entry. The shape is deliberately flat and JSON-serialisable so a
@@ -98,8 +99,12 @@ export interface OptionEntry {
   readonly description: string;
 }
 
-// js-beautify CSS-family languages.
-const CSS_LANGS: readonly CatalogLang[] = ['css', 'scss', 'less'];
+// js-beautify CSS-family languages. 'vue' is included because an SFC's <style>
+// blocks run through the same css/scss/less engine (ADD-15).
+const CSS_LANGS: readonly CatalogLang[] = ['css', 'scss', 'less', 'vue'];
+// js-beautify HTML options. 'vue' is included because an SFC's <template> block
+// runs through the js-beautify html engine (ADD-15).
+const HTML_LANGS: readonly CatalogLang[] = ['html', 'vue'];
 // js-beautify JS family (plain js only; ts/tsx/jsx go through prettier).
 const JSBEAUTIFY_JS_LANGS: readonly CatalogLang[] = ['javascript'];
 // Prettier stylistic options apply to the real-parser languages.
@@ -128,7 +133,8 @@ const JSBEAUTIFY_NEWLINE_LANGS: readonly CatalogLang[] = [
   'scss',
   'less',
   'html',
-  'javascript'
+  'javascript',
+  'vue'
 ];
 // Shared sentence for the three descriptions that use JSBEAUTIFY_NEWLINE_LANGS,
 // so the caveat cannot drift between them.
@@ -195,7 +201,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
       'preserve',
       'preserve-aligned'
     ],
-    languages: ['html'],
+    languages: HTML_LANGS,
     scope: 'language-overridable',
     description: 'How HTML attributes are wrapped (js-beautify wrap_attributes).'
   },
@@ -388,7 +394,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     engineKey: 'indent_inner_html',
     type: 'boolean',
     default: false,
-    languages: ['html'],
+    languages: HTML_LANGS,
     scope: 'language-overridable',
     description:
       'Indent <head> and <body> sections inside <html> (js-beautify indent_inner_html).'
@@ -400,7 +406,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     type: 'string',
     default: 'normal',
     enum: ['keep', 'separate', 'normal'],
-    languages: ['html'],
+    languages: HTML_LANGS,
     scope: 'language-overridable',
     description:
       'How <script>/<style> contents are indented inside HTML (js-beautify indent_scripts).'
@@ -411,7 +417,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     engineKey: 'wrap_attributes_indent_size',
     type: 'integer',
     default: 4,
-    languages: ['html'],
+    languages: HTML_LANGS,
     scope: 'language-overridable',
     description:
       'Indent size for wrapped HTML attributes (js-beautify wrap_attributes_indent_size).'
@@ -424,7 +430,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     engineKey: 'content_unformatted',
     type: 'string-list',
     default: [],
-    languages: ['html'],
+    languages: HTML_LANGS,
     scope: 'language-overridable',
     description:
       'Extra HTML tag names whose content is left exactly as written, for example ["code", "my-snippet"] (js-beautify content_unformatted). They are added to the tags that are always preserved (pre, textarea, xmp, listing, plaintext), which stay whatever you write. Tag names only: letters, digits, hyphens and underscores. Invalid entries are ignored and listed in Show Effective Configuration.'
@@ -435,7 +441,7 @@ export const OPTION_CATALOG: readonly OptionEntry[] = [
     engineKey: 'void_elements',
     type: 'string-list',
     default: [],
-    languages: ['html'],
+    languages: HTML_LANGS,
     scope: 'language-overridable',
     description:
       'Extra HTML tag names printed as void elements, like br and img: tags that never have a closing tag, for example ["my-icon"] (js-beautify void_elements). They are added to the standard HTML void elements, which always stay. Tag names only: letters, digits, hyphens and underscores; elements whose text must stay as written (pre, textarea, xmp, listing, plaintext, script, style) are refused. Invalid entries are ignored and listed in Show Effective Configuration.'

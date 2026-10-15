@@ -73,6 +73,7 @@ const EXPECTED_SECTIONS: readonly { title: string; keys: readonly string[] }[] =
       'tidy.typescript.enable',
       'tidy.typescriptreact.enable',
       'tidy.javascriptreact.enable',
+      'tidy.vue.enable',
       'tidy.maxFileSizeKB',
       'tidy.json.maxFileSizeKB'
     ]

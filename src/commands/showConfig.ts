@@ -47,7 +47,8 @@ const SUPPORTED_LANGUAGE_SET: ReadonlySet<string> = new Set<LangId>([
   'javascript',
   'typescript',
   'typescriptreact',
-  'javascriptreact'
+  'javascriptreact',
+  'vue'
 ]);
 
 /** Placeholder shown when no precedence layer attributed a value. */

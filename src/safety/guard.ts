@@ -54,6 +54,13 @@ import {
   significanceOf,
   type WhitespaceContext
 } from './htmlWhitespace';
+import {
+  isSupportedTemplateBlock,
+  skeletonSegments,
+  splitVueSfc,
+  styleGuardLangFor,
+  type VueBlock
+} from '../vue/sfcBlocks';
 
 // --- shared verdicts -------------------------------------------------------
 
@@ -1464,6 +1471,115 @@ export function htmlTreeEqual(input: string, output: string): GuardVerdict {
   return EQUIVALENT;
 }
 
+// --- Vue SFC ---------------------------------------------------------------
+
+/**
+ * Serialise a block's attributes into an order-insensitive key. Attribute order
+ * is not meaningful on an SFC block tag, but names AND values are: `scoped`,
+ * `setup`, `lang="scss"` all change meaning, so both sides must match exactly.
+ */
+function vueBlockAttrsKey(block: VueBlock): string {
+  return JSON.stringify(
+    block.attrs
+      .map((attr): [string, string] => [attr.name, attr.value])
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
+  );
+}
+
+/**
+ * Equivalence for Vue single-file components (ADD-15, v1).
+ *
+ * Both sides are re-split independently (parse5 + source offsets), then:
+ *   - the block sequence must match (count, tag names, attributes),
+ *   - the skeleton BETWEEN blocks (comments, blank lines, stray text) must be
+ *     byte-identical: v1 never formats it,
+ *   - each <template> in a supported language is compared with the HTML tree
+ *     guard (Vue directives are plain parse5 attributes: names and values are
+ *     compared verbatim, never rewritten),
+ *   - each <style> in a supported dialect is compared with the PostCSS tree
+ *     guard for that dialect (css/scss/less),
+ *   - every <script> block, custom block, and unsupported-language block must
+ *     be byte-identical: that is the v1 "script restored verbatim" promise,
+ *     PROVEN here rather than assumed from the engine's construction.
+ *
+ * Any split failure on either side is a rejection: we never accept what we
+ * cannot re-parse and re-verify. A chunk LOAD failure is not a split failure:
+ * splitVueSfc lets it propagate, so it leaves guard.check as a throw.
+ */
+export function vueSfcEqual(input: string, output: string): GuardVerdict {
+  const inputSplit = splitVueSfc(input);
+  if (inputSplit === undefined) {
+    return rejected('input did not parse as a Vue SFC');
+  }
+  const outputSplit = splitVueSfc(output);
+  if (outputSplit === undefined) {
+    return rejected('formatted output did not parse as a Vue SFC');
+  }
+
+  const inputBlocks = inputSplit.blocks;
+  const outputBlocks = outputSplit.blocks;
+  if (inputBlocks.length !== outputBlocks.length) {
+    return rejected('SFC top-level block structure changed after formatting');
+  }
+
+  const inputSkeleton = skeletonSegments(input, inputBlocks);
+  const outputSkeleton = skeletonSegments(output, outputBlocks);
+  for (let i = 0; i < inputSkeleton.length; i += 1) {
+    if (inputSkeleton[i] !== outputSkeleton[i]) {
+      return rejected('content between SFC blocks changed after formatting');
+    }
+  }
+
+  for (let i = 0; i < inputBlocks.length; i += 1) {
+    const before = inputBlocks[i];
+    const after = outputBlocks[i];
+
+    if (before.tagName !== after.tagName) {
+      return rejected('SFC block tags changed after formatting');
+    }
+    if (vueBlockAttrsKey(before) !== vueBlockAttrsKey(after)) {
+      return rejected(`attributes of a <${before.tagName}> block changed after formatting`);
+    }
+
+    const innerBefore = input.slice(before.innerStart, before.innerEnd);
+    const innerAfter = output.slice(after.innerStart, after.innerEnd);
+
+    // A byte-identical body is trivially equivalent under any parser. This is
+    // what lets a block the engine kept verbatim because it cannot be parsed
+    // (a broken <style>) stay verbatim without vetoing the blocks around it.
+    if (innerBefore === innerAfter) {
+      continue;
+    }
+
+    if (before.kind === 'template' && isSupportedTemplateBlock(before)) {
+      const verdict = htmlTreeEqual(innerBefore, innerAfter);
+      if (!verdict.equivalent) {
+        return verdict;
+      }
+      continue;
+    }
+
+    if (before.kind === 'style') {
+      const cssLang = styleGuardLangFor(before);
+      if (cssLang !== undefined) {
+        const verdict = cssTreeEqual(cssLang, innerBefore, innerAfter);
+        if (!verdict.equivalent) {
+          return verdict;
+        }
+        continue;
+      }
+    }
+
+    // <script> blocks (v1 keeps them verbatim), custom blocks, and any block in
+    // a language we cannot analyse: only a byte-identical body is provably safe.
+    if (innerBefore !== innerAfter) {
+      return rejected(`a <${before.tagName}> block was modified (kept verbatim in v1)`);
+    }
+  }
+
+  return EQUIVALENT;
+}
+
 // --- JSON / JSONC ----------------------------------------------------------
 
 /**
@@ -1810,6 +1926,8 @@ function checkByLang(lang: LangId, input: string, output: string): GuardVerdict 
       return cssTreeEqual(lang, input, output);
     case 'html':
       return htmlTreeEqual(input, output);
+    case 'vue':
+      return vueSfcEqual(input, output);
     case 'json':
     case 'jsonc':
       return jsonEqual(input, output);

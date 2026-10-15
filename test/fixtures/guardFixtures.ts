@@ -710,5 +710,34 @@ export const guardFixtures: GuardFixture[] = [
     input: '{"__proto__":{"p":1},"a":1}',
     output: '{\n  "a": 1,\n  "__proto__": {\n    "p": 1\n  }\n}',
     equivalent: true
+  },
+
+  // ---- Vue SFC (ADD-15) ---------------------------------------------------
+  {
+    id: 'GUARD-VUE-SCRIPT-MUTATION',
+    desc: 'any byte change inside an SFC <script> block must be rejected (v1 verbatim promise)',
+    ref: 'ADD-15 spec item 4',
+    lang: 'vue',
+    input: '<template>\n<p>x</p>\n</template>\n<script>\nlet a=1\n</script>\n',
+    output: '<template>\n<p>x</p>\n</template>\n<script>\nlet a = 1\n</script>\n',
+    equivalent: false
+  },
+  {
+    id: 'GUARD-VUE-TEMPLATE-REINDENT',
+    desc: 'a pure template reindent is a legitimate reformatting and must be accepted',
+    ref: 'ADD-15 spec item 2',
+    lang: 'vue',
+    input: '<template>\n<div v-if="ok"><span>a</span></div>\n</template>\n',
+    output: '<template>\n    <div v-if="ok">\n        <span>a</span>\n    </div>\n</template>\n',
+    equivalent: true
+  },
+  {
+    id: 'GUARD-VUE-STYLE-VALUE-CHANGE',
+    desc: 'a css value change inside an SFC <style> block must be rejected',
+    ref: 'ADD-15 spec item 3',
+    lang: 'vue',
+    input: '<template>\n<p>x</p>\n</template>\n<style>\n.a { color: red; }\n</style>\n',
+    output: '<template>\n<p>x</p>\n</template>\n<style>\n.a { color: blue; }\n</style>\n',
+    equivalent: false
   }
 ];

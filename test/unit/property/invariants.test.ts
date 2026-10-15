@@ -71,6 +71,7 @@ function reparse(lang: LangId, code: string): void {
     case 'less':
       (parseLess as unknown as (c: string) => unknown)(code);
       return;
+    case 'vue': // not in the corpus (see engine/vueSfc.test.ts); HTML-like top level
     case 'html':
       if (/<(!doctype|html)\b/i.test(code)) {
         parseHtml(code);
