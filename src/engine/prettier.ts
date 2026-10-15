@@ -20,7 +20,7 @@ import type { Options as PrettierOptions } from 'prettier';
 // was corrupted and the endings were never left MIXED, but a CRLF project got
 // one answer for a .css and a different one for a .ts, which is the exact
 // inconsistency a local copy of the policy caused in the first place (C-04).
-import { loadPrettierChunk, type PrettierChunkModule } from '../chunks/loader';
+import { isChunkLoadError, loadPrettierChunk, type PrettierChunkModule } from '../chunks/loader';
 import type { Engine, FormatRequest, LangId, ResolvedOptions } from '../types';
 import { postProcess } from './postProcess';
 
@@ -376,7 +376,13 @@ export class PrettierEngine implements Engine {
       return await loadPrettierChunk();
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`prettier engine unavailable: ${message}`);
+      const wrapped = new Error(`prettier engine unavailable: ${message}`);
+      // Keep the chunk-load brand: the Vue engine tells "the printer is
+      // unavailable" (abort, zero edits) from "this block does not format"
+      // (verbatim) with isChunkLoadError, and the wrapping must not hide it (V8).
+      throw isChunkLoadError(error)
+        ? Object.assign(wrapped, { isChunkLoadError: true as const, chunk: error.chunk })
+        : wrapped;
     }
   }
 

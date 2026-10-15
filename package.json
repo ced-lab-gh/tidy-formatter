@@ -784,6 +784,7 @@
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.3.9",
     "@vscode/vsce": "^2.24.0",
+    "@vue/compiler-dom": "3.5.25",
     "c8": "^11.0.0",
     "esbuild": "^0.20.0",
     "eslint": "^8.57.0",

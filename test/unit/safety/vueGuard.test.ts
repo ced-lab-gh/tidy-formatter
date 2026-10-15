@@ -31,10 +31,18 @@ describe('safety/vueGuard : accepts legitimate reformatting', () => {
 
   it('accepts a pure template reindent', () => {
     const out = SFC.replace(
+      '\n  <div v-if="ok" :cls="a">Hello</div>\n',
+      '\n\n    <div v-if="ok" :cls="a">Hello</div>\n\n'
+    );
+    assert.equal(vueSfcEqual(SFC, out).equivalent, true);
+  });
+
+  it('rejects text that gains edge whitespace: Vue keeps it as a space (audit 21, V2)', () => {
+    const out = SFC.replace(
       '  <div v-if="ok" :cls="a">Hello</div>',
       '    <div v-if="ok" :cls="a">\n        Hello\n    </div>'
     );
-    assert.equal(vueSfcEqual(SFC, out).equivalent, true);
+    assert.equal(vueSfcEqual(SFC, out).equivalent, false);
   });
 
   it('accepts a whitespace-only style change', () => {

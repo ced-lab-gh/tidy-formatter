@@ -77,6 +77,38 @@ describe('vue/sfcBlocks : splitVueSfc refuses what it cannot slice safely', () =
   });
 });
 
+describe('vue/sfcBlocks : names as written, duplicate attributes (audit 21, V3, V4)', () => {
+  it('keeps the tag and attribute names with the case written in the source', () => {
+    const block = splitVueSfc('<script SETUP lang="ts">let a</script>')!.blocks[0];
+    assert.equal(block.tagName, 'script');
+    assert.equal(block.rawTagName, 'script');
+    assert.deepEqual(
+      block.attrs.map((attr) => [attr.name, attr.rawName]),
+      [
+        ['setup', 'SETUP'],
+        ['lang', 'lang']
+      ]
+    );
+  });
+
+  it('reads a standard block name case-exactly: <Script> is a custom block for Vue', () => {
+    const block = splitVueSfc('<Script>let a</Script>')!.blocks[0];
+    assert.equal(block.kind, 'custom');
+    assert.equal(block.rawTagName, 'Script');
+    assert.equal(splitVueSfc('<TEMPLATE>x</TEMPLATE>')!.blocks[0].kind, 'custom');
+  });
+
+  it('cannot split a file whose block tag repeats an attribute (parse5 and Vue disagree)', () => {
+    assert.equal(splitVueSfc('<template lang="html" lang="pug">\ndiv\n</template>'), undefined);
+    assert.equal(splitVueSfc('<script setup lang="ts" lang="js">let a</script>'), undefined);
+    assert.equal(splitVueSfc('<style lang="css" lang="stylus">.a{}</style>'), undefined);
+  });
+
+  it('does not mind a duplicate attribute deeper in the template', () => {
+    assert.ok(splitVueSfc('<template>\n<div a="1" a="2"></div>\n</template>'));
+  });
+});
+
 describe('vue/sfcBlocks : skeletonSegments', () => {
   it('returns blocks.length + 1 segments covering every inter-block byte', () => {
     const source = 'A<template>t</template>B<style>s</style>C';
