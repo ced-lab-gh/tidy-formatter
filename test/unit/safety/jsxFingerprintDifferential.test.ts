@@ -219,7 +219,7 @@ describe('safety/guard : JSX boundary fingerprint, AST positions against the tok
       ['const f = <T,>(x: T) => x;', 'open:glued'],
       ['const f = < T,>(x: T) => x;', 'open:split'],
       ['const f = <T,>(x: T) => < A />;', 'open:glued|open:split'],
-      ['const f = async <T,>(x: T) => x;', ''],
+      // (the async form is not here: only the AST version marks it, see the test below)
       ['f<T>(x); a < b;', '']
     ];
     for (const [code, marks] of expected) {
@@ -237,10 +237,20 @@ describe('safety/guard : JSX boundary fingerprint, AST positions against the tok
     // parameters and the walk marks that `<`. The difference only ever refuses a
     // detached `< T,>` the reference let through: stricter, never looser. It is
     // pinned here so that nobody "fixes" it back to equality by dropping the mark.
+    //
+    // D3 adds the generic arrow after `async`: babel lexes that `<` as a plain
+    // token too (the arrow starts at `async`, its type parameters at the `<`), so
+    // the reference marked nothing and `async < T,>(x: T) => x` was accepted. It is
+    // marked like every other generic arrow now.
     const stricter: ReadonlyArray<readonly [string, string]> = [
       ['if (a) <T,>(x: T) => x;', 'if (a) < T,>(x: T) => x;'],
       ['while (a) <T,>(x: T) => x;', 'while (a) < T,>(x: T) => x;'],
-      ['function* g() { yield <T,>(y: T) => y; }', 'function* g() { yield < T,>(y: T) => y; }']
+      ['function* g() { yield <T,>(y: T) => y; }', 'function* g() { yield < T,>(y: T) => y; }'],
+      ['const f = async <T,>(x: T) => x;', 'const f = async < T,>(x: T) => x;'],
+      ['const f = async <T extends unknown>(x: T) => x;', 'const f = async < T extends unknown>(x: T) => x;'],
+      ['foo(async <T,>(x: T) => x);', 'foo(async < T,>(x: T) => x);'],
+      ['const f = (async <T,>(x: T) => x);', 'const f = (async < T,>(x: T) => x);'],
+      ['class K { p = async <T,>(x: T) => x; }', 'class K { p = async < T,>(x: T) => x; }']
     ];
     for (const [glued, detached] of stricter) {
       assert.deepEqual(viaReference(glued), { produced: true, fingerprint: '' }, `reference: ${show(glued)}`);
@@ -251,6 +261,25 @@ describe('safety/guard : JSX boundary fingerprint, AST positions against the tok
         `the detached generic arrow must be refused: ${show(detached)}`
       );
     }
+  });
+
+  it('leaves the `<` of a generic in TYPE position unmarked, the reference and the AST alike (D3 does not reach them)', () => {
+    const typePosition: readonly string[] = [
+      'type F = <T,>(x: T) => T;',
+      'type F = < T,>(x: T) => T;',
+      'interface I { f: <T,>(x: T) => void }',
+      'declare function f<T,>(x: T): void;',
+      'class C { async m<T,>(x: T) {} }',
+      'async function f<T,>(x: T) {}'
+    ];
+    for (const code of typePosition) {
+      assert.deepEqual(viaReference(code), { produced: true, fingerprint: '' }, `reference: ${show(code)}`);
+      assert.deepEqual(viaAst(code), { produced: true, fingerprint: '' }, `ast: ${show(code)}`);
+    }
+    assert.equal(
+      guard.check('typescriptreact', 'type F = <T,>(x: T) => T;', 'type F = < T,>(x: T) => T;').equivalent,
+      true
+    );
   });
 
   it('agrees on every string in every fixture module of the repo', () => {

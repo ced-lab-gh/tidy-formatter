@@ -429,10 +429,11 @@ export const JSX_TEXT_WHITESPACE_REASON =
  * NOT A NEW RULE. The returned string is the one the token version returned
  * (same marks, same order) on every input compared so far, with ONE known
  * difference, in the strict direction: after `if (...)`, `while (...)`,
- * `for (...)`, `with (...)`, a block or `yield`, the tokenizer reads the `<` of
- * a generic arrow as a plain `<` and the token version marked nothing, while
- * the AST still holds the arrow and this walk marks it. A detached `< T,>` there
- * is now refused; nothing the token version refused is accepted.
+ * `for (...)`, `with (...)`, a block or `yield`, and after `async` (D3), the
+ * tokenizer reads the `<` of a generic arrow as a plain `<` and the token version
+ * marked nothing, while the AST still holds the arrow and this walk marks it. A
+ * detached `< T,>` there is now refused; nothing the token version refused is
+ * accepted.
  * test/unit/safety/jsxFingerprintDifferential.test.ts keeps the token version as
  * a reference, compares the two over every JSX-bearing fixture of the repo, the
  * edge cases of the review and generated input, and pins that one difference by
@@ -490,8 +491,9 @@ function tagOpenAdjacency(
  * token version of this fingerprint therefore marked it, and so must this one:
  * without the mark, a formatter that detached it (`< T,>(x: T) => x`, same AST)
  * would be accepted where the token version refused it, which is a relaxation.
- * `async <T,>(...)` is lexed as a plain `<` and leaves no such token, which is why
- * the arrow must START at the `<` (the type parameters start where it does).
+ * `async <T,>(...)` is lexed as a plain `<` and leaves no such token, but it is
+ * marked all the same (D3): the arrow starts at `async`, so there the `<` is where
+ * the type parameters start. Any other arrow must START at its `<`.
  * The differential test is what says this list is complete: it fails if a
  * @babel/parser upgrade ever changes which `<` is left behind.
  */
@@ -506,7 +508,11 @@ function genericArrowOpenAdjacency(
   if (typeParameters === null || typeof typeParameters !== 'object') {
     return undefined;
   }
-  const at = node.start;
+  // D3: an ASYNC arrow starts at `async`, its type parameters at the `<` after it.
+  // That `<` is a plain token (no `jsxTagStart`), so the token version marked
+  // nothing there and `async < T,>(x: T) => x` was accepted. Marking it is
+  // stricter, never looser. Any other arrow must still start at its `<`.
+  const at = node.async === true ? typeParameters.start : node.start;
   if (typeParameters.start !== at) {
     return undefined;
   }
@@ -1088,24 +1094,51 @@ interface HtmlShape {
  */
 const EMBEDDED_CODE_TAGS = new Set(['script', 'style']);
 
+// The HTML standard's "ASCII whitespace": TAB, LF, FF, CR and SPACE, and nothing
+// else. `String.prototype.trim` also removes U+000B, U+00A0, U+FEFF, U+2000-200A,
+// U+2028/2029 and U+3000, which the standard leaves in the `type` it reads.
+const HTML_ASCII_WHITESPACE_EDGES = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g;
+
+/** Lower-case A-Z only (the standard's ASCII case-insensitivity); `toLowerCase` maps U+212A to `k`. */
+function asciiLowerCase(value: string): string {
+  return value.replace(/[A-Z]/g, (ch) => ch.toLowerCase());
+}
+
 /**
- * Read a <script>'s `type` attribute (lower-cased) so we can tell executable JS
- * (`text/javascript`, `module`, absent) from data blocks (`application/json`,
- * `importmap`, ...). parse5 lower-cases attribute names already.
+ * The script block's type string, as the HTML standard derives it ("prepare the
+ * script element", C1). A non-empty `type` wins and loses only ASCII whitespace
+ * at its edges. With no `type`, or an empty one, a non-empty `language` gives
+ * `text/<language>` (whitespace kept: ` javascript` is not JavaScript), and with
+ * neither the script is `text/javascript`. `fromLanguage` marks the last
+ * derivation: such a block is never read as JSON data. A `type` of ASCII
+ * whitespace only is a non-empty value that strips to the empty string, which no
+ * JavaScript type matches, so it is not executable. parse5 lower-cases attribute
+ * names already.
  */
-function scriptType(attrs: Array<{ name: string; value: string }> | undefined): string {
-  if (!Array.isArray(attrs)) {
-    return '';
+function scriptType(attrs: Array<{ name: string; value: string }> | undefined): {
+  type: string;
+  fromLanguage: boolean;
+} {
+  const valueOf = (name: string): string | undefined =>
+    Array.isArray(attrs) ? attrs.find((attr) => attr.name === name)?.value : undefined;
+  const typeValue = valueOf('type');
+  if (typeValue !== undefined && typeValue !== '') {
+    return {
+      type: asciiLowerCase(typeValue.replace(HTML_ASCII_WHITESPACE_EDGES, '')),
+      fromLanguage: false
+    };
   }
-  const typeAttr = attrs.find((attr) => attr.name === 'type');
-  return typeAttr ? typeAttr.value.trim().toLowerCase() : '';
+  const language = valueOf('language');
+  if (language === undefined || language === '') {
+    return { type: 'text/javascript', fromLanguage: false };
+  }
+  return { type: `text/${asciiLowerCase(language)}`, fromLanguage: true };
 }
 
 // <script> types that carry JS to execute. Anything else (application/json,
 // importmap, application/ld+json, a template type, ...) is opaque data and is
 // compared as canonical JSON when it parses, else verbatim.
 const JS_SCRIPT_TYPES = new Set([
-  '',
   'text/javascript',
   'application/javascript',
   'text/ecmascript',
@@ -1182,7 +1215,7 @@ function canonicalizeEmbeddedCode(
     }
   }
   // parentTag === 'script'
-  const type = scriptType(parentAttrs);
+  const { type, fromLanguage } = scriptType(parentAttrs);
   if (JS_SCRIPT_TYPES.has(type)) {
     // `String.prototype.trim` removes exactly ECMAScript's WhiteSpace +
     // LineTerminator, which IS this body's language, so here the wide set is the
@@ -1213,7 +1246,7 @@ function canonicalizeEmbeddedCode(
       return `verbatim:${raw}`;
     }
   }
-  if (type.includes('json')) {
+  if (!fromLanguage && type.includes('json')) {
     try {
       // RAW, not trimmed: jsonc-parser's scanner skips exactly the four code
       // points RFC 8259 allows between tokens, so a reindent still compares
