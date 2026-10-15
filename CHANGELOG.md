@@ -4,6 +4,31 @@ All notable changes to **Tidy** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-10-15
+
+Tidy 1.0: Vue single-file components, two more gaps of the safety guard closed, and a commitment. From this release on, the settings (`tidy.*`) and the command ids follow semantic versioning: renaming or removing one waits for a 2.0.
+
+### Added
+
+- **Vue single-file components, v1: template and style under guard, script kept verbatim.** Tidy now formats the `vue` language (activation `onLanguage:vue` only; the language itself comes from your Vue extension, for example Volar). A `.vue` file is split into its top-level blocks with source-exact offsets: the `<template>` block is formatted with the js-beautify HTML engine and verified with the parse5 tree guard (Vue directives such as `v-if`, `:prop` and `@event` are opaque attributes, never rewritten); each `<style>` block is formatted with the engine of its `lang` (css, scss or less, including the Prettier fallback) and verified with the PostCSS guard for that dialect; every `<script>` block, custom block and the text between blocks is restored byte-for-byte. A whole-document guard then re-splits the result and proves block structure, block attributes, the text between blocks and every block body before a single edit is returned; any failure means zero edits.
+  - New setting `tidy.vue.enable` (default `true`). The HTML options (`tidy.wrap_attributes`, `tidy.indent_inner_html`, `tidy.content_unformatted`, `tidy.void_elements`, ...) govern the template and the CSS options govern style blocks, including `[vue]` overrides and a `"vue"` section in `.soukformatrc`. The blank-line options (`tidy.preserve_newlines`, `tidy.max_preserve_newlines`, `tidy.indent_empty_lines`) apply to both.
+  - No save, focus or change hook, as everywhere else; `editor.defaultFormatter` is written only through the confirmed *Use Tidy as My Formatter* flow.
+
+### Fixed
+
+- **A `<script>` that the browser does not run is no longer compared as JavaScript.** Tidy read the script `type` with a trim that also removed non-breaking and other Unicode spaces the HTML standard keeps, and it ignored the `language` attribute. A data block such as `<script language="vbscript">`, or a `type` padded with a non-breaking space, was therefore checked as code, and a reformat that kept the code tree but changed the block's text could be written. The type is now read as the standard reads it: only TAB, LF, FF, CR and space are stripped, an empty or missing `type` falls back to `language`, and a block that is not JavaScript by that reading is compared byte for byte (JSON data blocks keep their JSON comparison). Ordinary scripts are not affected.
+- **The `<` of a generic arrow function after `async` is now protected like the other generic arrows.** `async <T,>(x: T) => x` could be rewritten as `async < T,>(x: T) => x` without the guard noticing; it is refused now. Generics in type position (`type F = <T,>(x: T) => T`) are not touched.
+
+### Changed
+
+- The README opens with an HTML before/after image, next to the CSS and TSX ones.
+
+### Known limitations
+
+- **Vue v1 limits**: `<script>` blocks are not formatted yet (they are provably byte-identical instead); a `pug` template or a style dialect Tidy cannot verify (stylus, indented sass) makes the whole file a clean no-op; region ignore markers are not supported inside `.vue` files (the top-of-file `<!-- tidy-ignore-file -->` marker works, and a region marker earns a notice that says so); formatting is whole-document only. The `files.eol` policy applies to the formatted blocks only, since the text between blocks and the script blocks are restored as they are, and Tidy's own final-newline policy is not applied to a `.vue` file (VS Code's `files.insertFinalNewline` still acts on save).
+- A `// @ts-expect-error`, `// @ts-ignore` or `// eslint-disable-next-line` comment governs the next line, and `// eslint-disable-line` its own line. The guard checks that these comments are not lost, not that the line they govern keeps the same code: a reformat that wraps or merges that line moves the suppression onto other code. A check for this was measured before this release on 2 119 real files: it would have refused 37 of them (1.75 %, about one in five of the files that contain such a comment), above the 0.5 % set as the limit, so it is not part of this release. Runtime behaviour is never affected; only what the type checker or linter suppresses can move.
+- Unchanged from 0.5.1: on a network share modified from another machine, a cached `.soukformatrc` or `.soukformatignore` can stay stale for as long as the share caches file attributes, and a machine clock more than two seconds ahead of the disk's clock can keep a cached version in use after two quick same-size rewrites.
+
 ## [0.5.1] - 2026-10-15
 
 A patch release that closes four of the known limitations listed for 0.5.0. Nothing changes for an ordinary project.

@@ -1785,7 +1785,7 @@ describe('walkthrough : migration.md carries the measured incumbent figures', ()
       'the notice is triggered by the extension being installed, not by the file'
     );
     assert.ok(
-      body.includes('triggered by the abandoned extension being **installed**'),
+      body.includes('triggered by that extension being **installed**'),
       'the page must name the real trigger'
     );
     // Pinned to the predicate that decides it.
@@ -2114,7 +2114,7 @@ describe('README : the one-star split is the corpus count, not an editorial line
     const body = page('formatonsave.md');
     assert.ok(
       body.includes(
-        'is the second most common complaint about the abandoned *JS-CSS-HTML Formatter*'
+        'is the second most common complaint about *JS-CSS-HTML Formatter*, not updated since 2017'
       ),
       'the page must not crown this complaint any more'
     );
@@ -2521,7 +2521,7 @@ describe('CHANGELOG : the 0.3.0 settings count is the count that shipped', () =>
     'tidy.void_elements',
     'tidy.prettier.singleAttributePerLine',
     'tidy.prettier.objectWrap',
-    // 0.5.0 (ADD-15): the per-language switch for Vue single-file components.
+    // 1.0.0 (ADD-15): the per-language switch for Vue single-file components.
     'tidy.vue.enable'
   ];
 
@@ -2572,9 +2572,15 @@ describe('CHANGELOG : the 0.3.0 settings count is the count that shipped', () =>
   it('the 0.5.0 entry names the six new settings and the new command', () => {
     const start = CHANGELOG.indexOf('## [0.5.0]');
     const entry = CHANGELOG.slice(start, CHANGELOG.indexOf('## [0.4.3]'));
-    for (const key of ADDED_AFTER_030.slice(1)) {
+    // The last key (tidy.vue.enable) shipped in 1.0.0, not 0.5.0.
+    for (const key of ADDED_AFTER_030.slice(1, -1)) {
       assert.ok(entry.includes('`' + key + '`'), `0.5.0 must name ${key}`);
     }
+    const entry100 = CHANGELOG.slice(
+      CHANGELOG.indexOf('## [1.0.0]'),
+      CHANGELOG.indexOf('## [0.5.1]')
+    );
+    assert.ok(entry100.includes('`tidy.vue.enable`'), '1.0.0 must name tidy.vue.enable');
     assert.ok(entry.includes('`tidy.whoFormats`'));
     assert.ok(entry.includes('Who Formats This File?'));
   });

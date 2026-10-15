@@ -303,6 +303,7 @@ languages can reach:
 | JSON, JSONC | nothing at all: their printer and their value check are already in the host bundle |
 | JavaScript | the Babel verifier |
 | TypeScript, TSX, JSX | the Prettier printer and the Babel verifier |
+| Vue | parse5 (splits and verifies the template) and the PostCSS verifier (styles). `<script>` stays verbatim and loads nothing |
 
 A session with only stylesheets open therefore warms the PostCSS verifier and
 nothing else. The chunk that carries the TypeScript printer is never *preloaded*
@@ -390,6 +391,7 @@ That's it: there is no Tidy-specific "format on save" toggle, because Tidy deleg
 | TypeScript | real parser (Prettier) | AST equivalence |
 | TSX (TypeScript React) | real parser (Prettier) | AST equivalence |
 | JSX (JavaScript React) | real parser (Prettier) | AST equivalence |
+| Vue SFC (v1) | js-beautify html + CSS family per block | per-block parse5/PostCSS compare + whole-document SFC guard; `<script>` kept verbatim |
 
 Plain `.js` files are formatted with js-beautify for familiarity, but if Tidy detects JSX inside them it automatically re-routes to the real parser rather than emit broken output.
 
@@ -399,7 +401,7 @@ For the files Prettier actually prints (TypeScript, TSX, JSX, and a plain `.js` 
 
 **Line width follows the layer order too.** For the files Prettier prints, `tidy.wrap_line_length` (which is also where `.editorconfig`'s `max_line_length` and a `.soukformatrc` `wrap_line_length` land) and `tidy.prettier.printWidth` are two spellings of one value: Tidy takes the width from the highest layer that sets either, whichever key spelled it. So a `tidy.prettier.printWidth` in plain VS Code settings loses to an `.editorconfig` `max_line_length` and to a `.soukformatrc` `wrap_line_length`, and a `wrap_line_length` in VS Code settings loses to a `.soukformatrc` `printWidth`. Inside a single layer, `tidy.prettier.printWidth` wins over `wrap_line_length`, and a `[lang]` value beats a global one. A width of `0` (or an `.editorconfig` `max_line_length = off`) means no limit; a width nobody set is Prettier's default of 80.
 
-`.sass` (indented syntax) and Vue/Astro single-file components are **not** in this build; they are on the roadmap for a future release.
+Vue single-file components are supported since 1.0.0 (v1: template and style blocks; `<script>` is kept verbatim, see the Vue section below). `.sass` (indented syntax) and Astro components are **not** in this build; they remain on the roadmap.
 
 ---
 
@@ -418,6 +420,12 @@ A third thing decides whether Tidy writes at all: whether the whitespace it move
 ### CSS, SCSS & LESS
 
 CSS, SCSS and LESS are all first-class: Tidy beautifies collapsed rules into readable blocks, aligns declarations, and controls selector and rule spacing (`tidy.selector_separator_newline`, `tidy.newline_between_rules`, `tidy.space_around_combinator`). Run *Format Document* on a `.css`, `.scss` or `.less` file, or opt in per language with **Tidy: Use Tidy as My Formatter**. Every result is checked against a PostCSS tree before it is written, so fragile constructs like `calc()` and SCSS interpolation (`#{…}`) survive formatting instead of being mangled.
+
+### Vue (v1: template + style)
+
+Tidy formats `.vue` single-file components with the same prove-it-first pipeline as everything else. The `<template>` block goes through the HTML engine and the parse5 tree guard (Vue directives such as `v-if`, `:prop` and `@event` are treated as opaque attributes and never rewritten); each `<style>` block goes through the CSS engine for its `lang` (css, scss or less) and the PostCSS tree guard for that dialect; `<script>` blocks, custom blocks (`<docs>`, `<i18n>`, ...) and everything between blocks are restored byte-for-byte. After reassembly, a dedicated whole-document guard re-splits the output and verifies block structure, block attributes and every block body; any doubt means zero edits.
+
+Explicit v1 limits: `<script>` is not formatted yet (it is provably byte-identical instead); a `pug` template or a style dialect Tidy cannot verify (stylus, indented sass) makes the whole file a clean no-op; region ignore markers are not supported inside `.vue` (the top-of-file `<!-- tidy-ignore-file -->` marker works); formatting is whole-document only. The `vue` language itself comes from your Vue extension (for example Volar): without one, VS Code never activates Tidy for `.vue` files. Disable with `"tidy.vue.enable": false`.
 
 ### JavaScript & TypeScript
 
@@ -447,9 +455,9 @@ In short: keep Prettier exactly as it is. Tidy only ever runs on the languages y
 
 ## Ignore & coexistence
 
-Tidy gives you fine-grained control over *what* it touches and gets out of the way when another formatter already owns the project (three things the abandoned incumbent never did; the leftmost column cites the issue or review that shows it). None of this can corrupt a file: every protected span is restored **verbatim**, so the equivalence guard sees output equal to the input and accepts it; if a splice ever produced non-parsable output the guard rejects it and your file is left intact.
+Tidy gives you fine-grained control over *what* it touches and gets out of the way when another formatter already owns the project (three things the incumbent, not updated since 2017, never did; the leftmost column cites the issue or review that shows it). None of this can corrupt a file: every protected span is restored **verbatim**, so the equivalence guard sees output equal to the input and accepts it; if a splice ever produced non-parsable output the guard rejects it and your file is left intact.
 
-| Capability | lonefy (#16, abandoned 2017) | Tidy |
+| Capability | lonefy (#16, last updated 2017) | Tidy |
 |---|---|---|
 | Skip a region / node in-source | ✗ none ([#16](https://github.com/lonefy/vscode-js-css-html-formatter/issues/16)) | `tidy-ignore-start/end`, `// tidy-ignore`, `// prettier-ignore` |
 | Exclude files project-wide | ✗ none | `.soukformatignore` (gitignore syntax) |
@@ -709,7 +717,7 @@ Yes. Tidy reads a `.soukformatrc` (JSONC) from your project root, per-language s
 Yes, for the files Prettier prints: TypeScript, TSX, JSX, and a plain `.js` file that contains JSX. Tidy reads the same data config files Prettier does (`.prettierrc`, `.prettierrc.json`/`.json5`/`.yaml`/`.yml`/`.toml`, or the `prettier` key of `package.json`), in Prettier's own search order but never above your workspace folder, and honours the twelve AST-safe stylistic keys, layered between `.editorconfig` and `.soukformatrc`. Code-based configs (`.prettierrc.js` and friends) are never executed, and a shareable config reference is not resolved. Disable with `"tidy.prettier.respectProjectConfig": false`.
 
 **Where's the indented-`.sass` / Vue support?**
-Not in this build. The remaining roadmap covers `.soukformatrc` YAML, real CSS-in-JS reformatting, Vue SFCs, and more languages. Ignore directives, `.soukformatignore`, the preview diff, deference notifications, and Open VSX distribution **are** shipped, see [Ignore & coexistence](#ignore--coexistence).
+Vue SFCs are supported since 1.0.0 (v1: template + style under guard, `<script>` kept verbatim, see [Vue](#vue-v1-template--style)). Indented `.sass` is not in this build. The remaining roadmap covers `.soukformatrc` YAML, real CSS-in-JS reformatting, Vue `<script>` formatting, and more languages. Ignore directives, `.soukformatignore`, the preview diff, deference notifications, and Open VSX distribution **are** shipped, see [Ignore & coexistence](#ignore--coexistence).
 
 ---
 

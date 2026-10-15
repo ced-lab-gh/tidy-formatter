@@ -1,6 +1,6 @@
 # Safety first : nothing is written until it is proven equivalent
 
-Tidy's core promise: **it will never write a file that fails an equivalence check against your original.** This is the behaviour that the abandoned *JS-CSS-HTML Formatter* got wrong. Every write is gated on that check, and a check that could not be completed counts as a failure, never as a pass : a format Tidy cannot prove safe produces **zero edits** rather than a rewritten file.
+Tidy's core promise: **it will never write a file that fails an equivalence check against your original.** This is the behaviour that *JS-CSS-HTML Formatter* (not updated since 2017) got wrong. Every write is gated on that check, and a check that could not be completed counts as a failure, never as a pass : a format Tidy cannot prove safe produces **zero edits** rather than a rewritten file.
 
 After every format, Tidy compares the input and the output before writing anything:
 
