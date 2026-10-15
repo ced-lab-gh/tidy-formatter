@@ -916,7 +916,7 @@ describe('README : activation is described including implicit command activation
         `${event} is not an onLanguage activation`
       );
     }
-    assert.equal(PACKAGE_JSON.activationEvents.length, 10);
+    assert.equal(PACKAGE_JSON.activationEvents.length, 11);
   });
 
   it('the README does not claim languages are the ONLY way Tidy activates', () => {
@@ -2468,11 +2468,13 @@ describe('CHANGELOG : the 0.3.0 settings count is the count that shipped', () =>
     'tidy.content_unformatted',
     'tidy.void_elements',
     'tidy.prettier.singleAttributePerLine',
-    'tidy.prettier.objectWrap'
+    'tidy.prettier.objectWrap',
+    // 0.5.0 (ADD-15): the per-language switch for Vue single-file components.
+    'tidy.vue.enable'
   ];
 
-  it('the manifest declares 53 settings today', () => {
-    assert.equal(Object.keys(manifestProperties()).length, 53);
+  it('the manifest declares 54 settings today', () => {
+    assert.equal(Object.keys(manifestProperties()).length, 54);
   });
 
   it('today minus what landed after 0.3.0 is the 46 the entry now states', () => {

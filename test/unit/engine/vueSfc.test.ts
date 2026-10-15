@@ -1,7 +1,13 @@
 // Unit tests for the Vue SFC engine (ADD-15). Pure: dispatchFormat + guard only.
 import assert from 'node:assert/strict';
+import { chunksForLanguages } from '../../../src/chunks/loader';
 import { dispatchFormat, pickEngine } from '../../../src/engine/dispatcher';
 import { VueSfcEngine } from '../../../src/engine/vueSfc';
+import {
+  buildMaskPlan,
+  UNHONOURED_IGNORE_VUE_REGIONS
+} from '../../../src/engine/maskPlan';
+import { scanMarkers } from '../../../src/ignore/markers';
 import { guard } from '../../../src/safety/guard';
 import type { ResolvedOptions } from '../../../src/types';
 import { vueFixtures, VUE_BASIC } from '../../fixtures/vueFixtures';
@@ -21,6 +27,10 @@ describe('engine/vueSfc : dispatcher routing', () => {
     assert.equal(pickEngine('vue').id, 'vue-sfc');
     assert.equal(pickEngine('vue').supports('vue'), true);
     assert.equal(pickEngine('vue').supports('html'), false);
+  });
+
+  it('preloads only the two verifier chunks a first vue format reaches', () => {
+    assert.deepEqual(chunksForLanguages(['vue']), ['chunk-guard-css', 'chunk-guard-html']);
   });
 });
 
@@ -113,5 +123,21 @@ describe('engine/vueSfc : degraded blocks and defensive paths', () => {
     });
     const styleBody = output.slice(output.indexOf('<style>'), output.indexOf('</style>'));
     assert.ok(styleBody.includes('\r\n'), 'style block joins must use CRLF');
+  });
+});
+
+describe('engine/vueSfc : ignore markers (v1)', () => {
+  it('the top-of-file marker is recognised in a .vue file (SGML comments)', () => {
+    const doc = '<!-- tidy-ignore-file -->\n<template>\n<p   >x</p>\n</template>\n';
+    assert.equal(scanMarkers(doc, 'vue').ignoreFile, true);
+  });
+
+  it('a region marker gets the Vue notice, never the Prettier sentence', () => {
+    const doc =
+      '<template>\n<!-- tidy-ignore-start -->\n<p   >x</p>\n<!-- tidy-ignore-end -->\n</template>\n';
+    const plan = buildMaskPlan('vue', doc, 'document');
+    assert.equal(plan.unhonouredIgnore, UNHONOURED_IGNORE_VUE_REGIONS);
+    assert.ok(!UNHONOURED_IGNORE_VUE_REGIONS.includes('Prettier'));
+    assert.match(UNHONOURED_IGNORE_VUE_REGIONS, /^[\x20-\x7e]+$/, 'ASCII only');
   });
 });

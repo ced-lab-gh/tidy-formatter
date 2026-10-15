@@ -2,6 +2,12 @@
 // Adversarial by design: every reject case is a corruption the engine COULD
 // produce and the guard MUST stop before any byte reaches the file.
 import assert from 'node:assert/strict';
+import {
+  __resetChunksForTests,
+  __setChunkLoadForTests,
+  isChunkLoadError
+} from '../../../src/chunks/loader';
+import { dispatchFormat } from '../../../src/engine/dispatcher';
 import { guard, vueSfcEqual } from '../../../src/safety/guard';
 
 const SFC = [
@@ -106,5 +112,43 @@ describe('safety/vueGuard : rejects corruption (zero edit upstream)', () => {
     const verdict = guard.check('vue', secret, broken);
     assert.equal(verdict.equivalent, false);
     assert.ok(!verdict.reason!.includes('sk-SECRET'));
+  });
+});
+
+describe('safety/vueGuard : a verifier that cannot load is never a verdict (ADD-11)', () => {
+  afterEach(() => {
+    __resetChunksForTests();
+  });
+
+  const unavailable = (): never => {
+    throw new Error('unavailable');
+  };
+
+  it('the splitter chunk (parse5) failing makes guard.check THROW, not answer', () => {
+    __setChunkLoadForTests('chunk-guard-html', unavailable);
+    assert.throws(
+      () => guard.check('vue', SFC, SFC.replace('Hello', 'Hi')),
+      (error: unknown) => isChunkLoadError(error)
+    );
+  });
+
+  it('the style chunk (postcss) failing makes guard.check THROW, not answer', () => {
+    __setChunkLoadForTests('chunk-guard-css', unavailable);
+    assert.throws(
+      () => guard.check('vue', SFC, SFC.replace('color: red', 'color:  red')),
+      (error: unknown) => isChunkLoadError(error)
+    );
+  });
+
+  it('the engine does not turn a verifier load failure into a quiet no-op', async () => {
+    __setChunkLoadForTests('chunk-guard-css', unavailable);
+    await assert.rejects(
+      dispatchFormat({
+        languageId: 'vue',
+        code: SFC.replace('.x { color: red; }', '.x{color:red}'),
+        options: { tabSize: 2, insertSpaces: true, engineOptions: {}, sources: {} }
+      }),
+      (error: unknown) => isChunkLoadError(error)
+    );
   });
 });

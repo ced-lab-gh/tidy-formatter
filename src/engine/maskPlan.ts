@@ -225,6 +225,15 @@ export const UNHONOURED_IGNORE_MASK_UNAVAILABLE =
   `${UNHONOURED_IGNORE_PREFIX}: no safe placeholder could be used for the marked span, so it was formatted normally`;
 
 /**
+ * The span carries a tidy-ignore REGION marker inside a Vue file (ADD-15 v1).
+ * The Vue engine has no region mask, and the Prettier sentence would be false
+ * here, so this says what is true: the region was formatted, and the file-level
+ * marker is the supported way to leave a whole .vue file alone.
+ */
+export const UNHONOURED_IGNORE_VUE_REGIONS =
+  `${UNHONOURED_IGNORE_PREFIX}: regions are not supported in Vue files yet, so the marked span was formatted normally (a tidy-ignore-file marker at the top of the file works)`;
+
+/**
  * Languages whose engine does NOT natively honour in-source ignore directives,
  * so Tidy protects regions itself via mask/restore (the js-beautify family).
  * The Prettier path honours `// prettier-ignore` natively at the node level :
@@ -325,7 +334,9 @@ function unhonouredIgnoreFor(
     return undefined;
   }
   if (!REGION_MASKING_LANGUAGES.has(languageId)) {
-    return UNHONOURED_IGNORE_PRETTIER_PATH;
+    return languageId === 'vue'
+      ? UNHONOURED_IGNORE_VUE_REGIONS
+      : UNHONOURED_IGNORE_PRETTIER_PATH;
   }
   return regionMask === undefined
     ? UNHONOURED_IGNORE_MASK_UNAVAILABLE

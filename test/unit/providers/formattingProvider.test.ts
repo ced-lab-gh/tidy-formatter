@@ -2171,6 +2171,65 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
   }
 
   /* ------------------------------------------------------------------ */
+  /* ADD-15 : Vue SFC through the real provider                          */
+  /* ------------------------------------------------------------------ */
+
+  describe('ADD-15 : a Vue SFC goes through the same provider seam', () => {
+    const SFC =
+      '<template>\n<div   class="a">\n<p>x</p>\n</div>\n</template>\n' +
+      '<script>\nexport default {name:"x"}\n</script>\n' +
+      '<style>\n.a{color:red}\n</style>\n';
+
+    it('formats template and style in one whole-document edit, script untouched', async () => {
+      const document = new FakeDocument('vue', SFC, '/w/App.vue');
+
+      const edits = await formatDocument(document);
+
+      assert.equal(edits.length, 1, 'one whole-document edit');
+      assert.equal(edits[0].range.start.offset, 0);
+      assert.equal(edits[0].range.end.offset, SFC.length);
+      assert.ok(edits[0].newText.includes('<script>\nexport default {name:"x"}\n</script>'));
+      assert.match(edits[0].newText, /\.a \{\n\s+color: red/);
+      assert.equal(lastRecord(document).status, 'applied');
+      assert.equal(lastRecord(document).engineId, 'vue-sfc');
+    });
+
+    it('a pug template is a clean no-op: zero edits, already-tidy, no toast', async () => {
+      const pug = '<template lang="pug">\ndiv.a\n</template>\n<style>\n.a{color:red}\n</style>\n';
+      const document = new FakeDocument('vue', pug, '/w/Pug.vue');
+
+      const edits = await formatDocument(document);
+
+      assert.deepEqual(edits, []);
+      assert.equal(lastRecord(document).status, 'already-tidy');
+      assert.deepEqual(state.warnings, []);
+    });
+
+    it('the top-of-file marker leaves the whole .vue file alone', async () => {
+      const document = new FakeDocument('vue', '<!-- tidy-ignore-file -->\n' + SFC, '/w/Ign.vue');
+
+      const edits = await formatDocument(document);
+
+      assert.deepEqual(edits, []);
+      assert.equal(lastRecord(document).status, 'ignored-marker');
+    });
+
+    it('a region marker is not applied and the notice says so without naming Prettier', async () => {
+      const source =
+        '<template>\n<!-- tidy-ignore-start -->\n<p   >x</p>\n<!-- tidy-ignore-end -->\n</template>\n';
+      const document = new FakeDocument('vue', source, '/w/Region.vue');
+
+      await formatDocument(document);
+
+      const notice = state.channelLines.find((line) =>
+        line.includes(UNHONOURED_IGNORE_PREFIX)
+      );
+      assert.ok(notice, 'the output channel must carry the notice');
+      assert.ok(!notice.includes('Prettier'), `wrong sentence: ${notice}`);
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
   /* F4 : overrides that could not be fully evaluated -> format nothing   */
   /* ------------------------------------------------------------------ */
 
