@@ -61,6 +61,7 @@ import {
   styleGuardLangFor,
   type VueBlock
 } from '../vue/sfcBlocks';
+import { vueTemplateEqual } from './vueTemplate';
 
 // --- shared verdicts -------------------------------------------------------
 
@@ -1514,7 +1515,8 @@ export function htmlTreeEqual(input: string, output: string): GuardVerdict {
 function vueBlockAttrsKey(block: VueBlock): string {
   return JSON.stringify(
     block.attrs
-      .map((attr): [string, string] => [attr.name, attr.value])
+      // Source spelling: Vue reads `setup`, `lang`, `scoped`, `src` case-sensitively.
+      .map((attr): [string, string] => [attr.rawName, attr.value])
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0))
   );
 }
@@ -1526,9 +1528,9 @@ function vueBlockAttrsKey(block: VueBlock): string {
  *   - the block sequence must match (count, tag names, attributes),
  *   - the skeleton BETWEEN blocks (comments, blank lines, stray text) must be
  *     byte-identical: v1 never formats it,
- *   - each <template> in a supported language is compared with the HTML tree
- *     guard (Vue directives are plain parse5 attributes: names and values are
- *     compared verbatim, never rewritten),
+ *   - each <template> in a supported language is compared as Vue COMPILES it
+ *     (src/safety/vueTemplate.ts: whitespace condensed by Vue's rules, names and
+ *     attributes as written, interpolations verbatim, never the HTML rules),
  *   - each <style> in a supported dialect is compared with the PostCSS tree
  *     guard for that dialect (css/scss/less),
  *   - every <script> block, custom block, and unsupported-language block must
@@ -1567,7 +1569,7 @@ export function vueSfcEqual(input: string, output: string): GuardVerdict {
     const before = inputBlocks[i];
     const after = outputBlocks[i];
 
-    if (before.tagName !== after.tagName) {
+    if (before.rawTagName !== after.rawTagName) {
       return rejected('SFC block tags changed after formatting');
     }
     if (vueBlockAttrsKey(before) !== vueBlockAttrsKey(after)) {
@@ -1585,7 +1587,9 @@ export function vueSfcEqual(input: string, output: string): GuardVerdict {
     }
 
     if (before.kind === 'template' && isSupportedTemplateBlock(before)) {
-      const verdict = htmlTreeEqual(innerBefore, innerAfter);
+      // Vue compiles the template with its own whitespace rules (audit 21): the
+      // HTML tree comparison would accept `<A/> <B/>` becoming two lines.
+      const verdict = vueTemplateEqual(innerBefore, innerAfter);
       if (!verdict.equivalent) {
         return verdict;
       }

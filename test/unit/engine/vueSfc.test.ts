@@ -1,6 +1,11 @@
 // Unit tests for the Vue SFC engine (ADD-15). Pure: dispatchFormat + guard only.
 import assert from 'node:assert/strict';
-import { chunksForLanguages } from '../../../src/chunks/loader';
+import {
+  __resetChunksForTests,
+  __setChunkLoadForTests,
+  chunksForLanguages,
+  isChunkLoadError
+} from '../../../src/chunks/loader';
 import { dispatchFormat, pickEngine } from '../../../src/engine/dispatcher';
 import { VueSfcEngine } from '../../../src/engine/vueSfc';
 import {
@@ -123,6 +128,70 @@ describe('engine/vueSfc : degraded blocks and defensive paths', () => {
     });
     const styleBody = output.slice(output.indexOf('<style>'), output.indexOf('</style>'));
     assert.ok(styleBody.includes('\r\n'), 'style block joins must use CRLF');
+  });
+});
+
+describe('engine/vueSfc : Vue whitespace, duplicate attributes, chunk failures', () => {
+  afterEach(() => {
+    __resetChunksForTests();
+  });
+
+  it('leaves a template verbatim when the format would change how Vue renders it (V1, V2)', async () => {
+    for (const body of [
+      '<div><MyBtn>A</MyBtn> <MyBtn>B</MyBtn></div>',
+      '<h2>Inbox<Badge :count="n" /></h2>',
+      '<div><Star /> <Star /> <Star /></div>'
+    ]) {
+      const input = `<template>\n${body}\n</template>\n`;
+      assert.equal(await format(input), input, body);
+    }
+  });
+
+  it('still formats the styles when the template is left verbatim', async () => {
+    const input =
+      '<template>\n<div><MyBtn>A</MyBtn> <MyBtn>B</MyBtn></div>\n</template>\n<style>\n.a{color:red}\n</style>\n';
+    const output = await format(input);
+    assert.ok(output.startsWith('<template>\n<div><MyBtn>A</MyBtn> <MyBtn>B</MyBtn></div>\n</template>'));
+    assert.ok(output.includes('color: red'));
+    assert.equal(guard.check('vue', input, output).equivalent, true);
+  });
+
+  it('is a clean no-op when a block tag repeats an attribute (V4)', async () => {
+    for (const input of [
+      '<template lang="html" lang="pug">\ndiv\n  p   hello\n</template>\n',
+      '<template>\n<p   >x</p>\n</template>\n<script setup lang="ts" lang="js">\nlet a  =  1\n</script>\n'
+    ]) {
+      assert.equal(await format(input), input);
+    }
+  });
+
+  it('lets a Prettier chunk load failure during the CSS fallback abort the format (V8)', async () => {
+    const input =
+      '<template>\n<p   >x</p>\n</template>\n' +
+      '<style lang="scss">\n@import \'mixins\';\n.a{ @if $x == 1 { color: red } @else { color: blue } }\n</style>\n';
+    __setChunkLoadForTests('chunk-prettier', () => {
+      throw new Error('unavailable');
+    });
+    await assert.rejects(format(input), (error: unknown) => {
+      assert.match((error as Error).message, /^prettier engine unavailable: failed to load chunk-prettier/);
+      return isChunkLoadError(error);
+    });
+  });
+
+  it('formats a style whose body starts on the opening-tag line idempotently', async () => {
+    for (const styleBlock of [
+      '<style> .a{color:red}\n.b{color:blue}\n</style>',
+      '<style scoped>   \n  .a{color:red}\n  .b{color:blue}\n</style>',
+      '<style>\t.a{color:red} .b{color:blue}</style>'
+    ]) {
+      const input = `<template>\n<p>x</p>\n</template>\n${styleBlock}\n`;
+      const first = await format(input);
+      assert.notEqual(first, input);
+      assert.equal(guard.check('vue', input, first).equivalent, true);
+      assert.equal(await format(first), first, 'a second pass must change nothing');
+      // The first rule is not left alone in column 0 while the rest is shifted.
+      assert.match(first, /\n\.a \{\n {2}color: red;?\n\}\n\n\.b \{/);
+    }
   });
 });
 

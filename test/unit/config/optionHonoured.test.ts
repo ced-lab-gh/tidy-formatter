@@ -268,6 +268,8 @@ describe('package.json : every setting that gates a per-file project config is r
 const JS_CONTROL =
   'if (a) { b() }\nfor (var i = 0; i < 2; i++) {}\nwhile (x) {}\nswitch (x) { case 1: y(); }\nvar f = function() { return 1 };\n';
 const HTML_TAGS = '<div><code>a    b\n   c</code><my-icon><p>x</p></div>\n';
+// The same probe as valid Vue: Vue only compiles an element that has its end tag.
+const HTML_TAGS_VUE = '<div><code>a    b\n   c</code><my-icon>\n<p>x</p>\n</my-icon></div>\n';
 const JSX_AND_OBJECT = 'const a = <Foo a="1" b="2" c="3" />;\nconst o = {\n  b: 1, c: 2 };\n';
 const TS_OBJECT = 'const o = {\n  b: 1, c: 2 };\n';
 const TS_ANGLE = 'const id = <T,>(v: T) => v;\nconst n = <number>x;\n';
@@ -301,7 +303,7 @@ function samplesFor(kind: SampleKind): Readonly<Record<CatalogLang, readonly str
       return {
         ...others,
         html: [HTML_TAGS],
-        vue: [inTemplate(HTML_TAGS)],
+        vue: [inTemplate(HTML_TAGS_VUE)],
         javascript: [JS_CONTROL],
         typescript: [JS_CONTROL],
         typescriptreact: [JS_CONTROL],
@@ -312,7 +314,7 @@ function samplesFor(kind: SampleKind): Readonly<Record<CatalogLang, readonly str
       return {
         ...others,
         html: [HTML_TAGS],
-        vue: [inTemplate(HTML_TAGS)],
+        vue: [inTemplate(HTML_TAGS_VUE)],
         // A .js file is printed by Prettier only when it holds JSX, so both shapes
         // are tried: the option works on a .js file if it works on either.
         javascript: [JSX_AND_OBJECT, JS_CONTROL],

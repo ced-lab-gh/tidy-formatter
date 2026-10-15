@@ -6,7 +6,7 @@
 // the text between blocks is restored byte-for-byte through the hardened
 // mask/restore splice (src/ignore/mask.ts).
 //
-// SAFETY: this engine performs per-block PRE-checks (htmlTreeEqual /
+// SAFETY: this engine performs per-block PRE-checks (vueSfcEqual /
 // cssTreeEqual) only to DEGRADE a mangled block to verbatim instead of aborting
 // the whole file. The authoritative accept/reject decision stays in the
 // provider's guard.check('vue', input, output) -> vueSfcEqual, which re-splits
@@ -30,7 +30,7 @@ import { JsBeautifyEngine } from './jsbeautify';
 import { PrettierEngine } from './prettier';
 import { applyMask, restoreMask, type Restoration } from '../ignore/mask';
 import type { ProtectedRange } from '../ignore/markers';
-import { cssTreeEqual, htmlTreeEqual } from '../safety/guard';
+import { cssTreeEqual, vueSfcEqual } from '../safety/guard';
 import {
   isSupportedTemplateBlock,
   splitVueSfc,
@@ -45,6 +45,9 @@ const prettierEngine = new PrettierEngine();
 
 /** Trailing newlines of an engine's block output (block joins are explicit). */
 const TRAILING_NEWLINES = /(?:\r\n|\r|\n)+$/;
+
+/** Spaces and tabs before the first line break of a style body. */
+const LEADING_BLANKS = /^[ \t]+/;
 
 /**
  * Options for a block-level sub-format: identical to the document's resolved
@@ -121,10 +124,13 @@ function cssTreeEqualSafe(
   }
 }
 
-/** Same, for the HTML tree comparison. */
-function htmlTreeEqualSafe(input: string, output: string): boolean {
+/**
+ * Same, for a template block: the whole `<template>` outer text goes through
+ * the guard's SFC comparison, so the pre-check IS the Vue-compiled comparison.
+ */
+function templateEqualSafe(input: string, output: string): boolean {
   try {
-    return htmlTreeEqual(input, output).equivalent;
+    return vueSfcEqual(input, output).equivalent;
   } catch (error: unknown) {
     if (isChunkLoadError(error)) {
       throw error;
@@ -170,12 +176,15 @@ async function formatCssBody(
   inner: string,
   options: ResolvedOptions
 ): Promise<string | undefined> {
-  const first = await tryEngine(jsBeautifyEngine, cssLang, inner, options);
+  // Blanks on the opening-tag line are not part of the first rule: js-beautify
+  // would take them as the base indent of every later line (not idempotent).
+  const body = inner.replace(LEADING_BLANKS, '');
+  const first = await tryEngine(jsBeautifyEngine, cssLang, body, options);
   if (first !== undefined && cssTreeEqualSafe(cssLang, inner, first)) {
     return first;
   }
   if (prettierEngine.supports(cssLang)) {
-    const second = await tryEngine(prettierEngine, cssLang, inner, options);
+    const second = await tryEngine(prettierEngine, cssLang, body, options);
     if (second !== undefined && cssTreeEqualSafe(cssLang, inner, second)) {
       return second;
     }
@@ -208,7 +217,7 @@ async function formatTemplateBlock(
   // Pre-check with the same comparison the global guard will run, so a mangled
   // template degrades to verbatim (styles still format) instead of aborting
   // the whole file at the provider's guard.
-  if (!htmlTreeEqualSafe(outer, candidate)) {
+  if (!templateEqualSafe(outer, candidate)) {
     return undefined;
   }
   return candidate;

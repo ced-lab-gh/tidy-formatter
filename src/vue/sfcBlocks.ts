@@ -25,9 +25,14 @@ import { requireGuardHtmlChunk } from '../chunks/loader';
 /** The role of a top-level SFC block. Anything unknown is a custom block. */
 export type VueBlockKind = 'template' | 'script' | 'style' | 'custom';
 
-/** One parsed attribute of a block tag (parse5 lower-cases attribute names). */
+/**
+ * One parsed attribute of a block tag. `name` is parse5's lower-cased name;
+ * `rawName` is the name as written in the source (Vue reads `setup`, `lang`,
+ * `scoped` and `src` case-sensitively, so the guard compares `rawName`).
+ */
 export interface VueBlockAttr {
   readonly name: string;
+  readonly rawName: string;
   readonly value: string;
 }
 
@@ -39,6 +44,8 @@ export interface VueBlockAttr {
 export interface VueBlock {
   readonly kind: VueBlockKind;
   readonly tagName: string;
+  /** The tag name as written in the source (case kept); Vue matches it exactly. */
+  readonly rawTagName: string;
   readonly attrs: readonly VueBlockAttr[];
   /** The `lang` attribute, trimmed + lower-cased, or undefined when absent. */
   readonly lang: string | undefined;
@@ -64,6 +71,8 @@ interface Parse5Span {
 interface Parse5NodeLocation extends Parse5Span {
   startTag?: Parse5Span;
   endTag?: Parse5Span;
+  /** Location of each attribute, keyed by its lower-cased token name. */
+  attrs?: Record<string, Parse5Span>;
 }
 
 interface Parse5ChildNode {
@@ -73,6 +82,38 @@ interface Parse5ChildNode {
   sourceCodeLocation?: Parse5NodeLocation | null;
 }
 
+/** The tag name as written in a start tag span, or undefined if unreadable. */
+export function rawTagNameAt(source: string, startTag: Parse5Span): string | undefined {
+  const match = /^<([^\s/>]+)/.exec(source.slice(startTag.startOffset, startTag.endOffset));
+  return match === null ? undefined : match[1];
+}
+
+/**
+ * The attribute name as written in the source, or undefined when it cannot be
+ * read back or does not match parse5's name once lower-cased (the caller then
+ * treats the tag as unsupported rather than guess).
+ */
+export function rawAttrNameAt(
+  source: string,
+  spans: Record<string, Parse5Span> | undefined,
+  parse5Name: string
+): string | undefined {
+  // Own keys only: an attribute named `__proto__` must not reach Object.prototype.
+  const span =
+    spans !== undefined && Object.prototype.hasOwnProperty.call(spans, parse5Name)
+      ? spans[parse5Name]
+      : undefined;
+  if (span === undefined) {
+    return undefined;
+  }
+  const match = /^=?[^\s=/>]*/.exec(source.slice(span.startOffset, span.endOffset));
+  if (match === null || match[0].toLowerCase() !== parse5Name.toLowerCase()) {
+    return undefined;
+  }
+  return match[0];
+}
+
+/** Vue matches the three standard block names exactly (`<Script>` is custom). */
 function kindOf(tagName: string): VueBlockKind {
   switch (tagName) {
     case 'template':
@@ -122,9 +163,17 @@ export function splitVueSfc(source: string): VueSfcSplit | undefined {
   const { parseHtmlFragment } = requireGuardHtmlChunk();
 
   let childNodes: Parse5ChildNode[];
+  // parse5 keeps the FIRST of two same-named attributes, Vue the LAST: a block
+  // tag with a duplicate cannot be read the same way by both (V4).
+  const duplicateAttrOffsets: number[] = [];
   try {
     const fragment = parseHtmlFragment(source, {
-      sourceCodeLocationInfo: true
+      sourceCodeLocationInfo: true,
+      onParseError: (error: { code: string; startOffset: number }) => {
+        if (error.code === 'duplicate-attribute') {
+          duplicateAttrOffsets.push(error.startOffset);
+        }
+      }
     }) as unknown as { childNodes?: Parse5ChildNode[] };
     childNodes = Array.isArray(fragment.childNodes) ? fragment.childNodes : [];
   } catch {
@@ -169,13 +218,23 @@ export function splitVueSfc(source: string): VueSfcSplit | undefined {
       return undefined;
     }
 
-    const attrs: VueBlockAttr[] = Array.isArray(node.attrs)
-      ? node.attrs.map((attr) => ({ name: attr.name, value: attr.value }))
-      : [];
+    const rawTagName = rawTagNameAt(source, location.startTag);
+    if (rawTagName === undefined || rawTagName.toLowerCase() !== node.tagName) {
+      return undefined;
+    }
+    const attrs: VueBlockAttr[] = [];
+    for (const attr of node.attrs ?? []) {
+      const rawName = rawAttrNameAt(source, location.attrs, attr.name);
+      if (rawName === undefined) {
+        return undefined;
+      }
+      attrs.push({ name: attr.name, rawName, value: attr.value });
+    }
 
     blocks.push({
-      kind: kindOf(node.tagName),
+      kind: kindOf(rawTagName),
       tagName: node.tagName,
+      rawTagName,
       attrs,
       lang: langOf(attrs),
       outerStart,
@@ -186,6 +245,11 @@ export function splitVueSfc(source: string): VueSfcSplit | undefined {
     previousEnd = outerEnd;
   }
 
+  for (const offset of duplicateAttrOffsets) {
+    if (blocks.some((block) => offset >= block.outerStart && offset < block.innerStart)) {
+      return undefined;
+    }
+  }
   return { blocks };
 }
 
