@@ -4,6 +4,24 @@ All notable changes to **Tidy** are documented in this
 file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-10-15
+
+A patch release that closes four of the known limitations listed for 0.5.0. Nothing changes for an ordinary project.
+
+### Fixed
+
+- **A `.soukformatrc` whose `overrides` are too costly to evaluate no longer formats with guessed options.** The remaining overrides used to be skipped, with a warning only in *Show Effective Configuration*, so a file could be formatted with options you did not set. Tidy now leaves the file alone and says why, in the output channel, *Explain Last Format* and the status bar; *Preview Format* refuses too.
+- **The search for a `.soukformatignore` now always reaches the root of the drive.** It stopped 64 folders above the file.
+- **On Linux and macOS, a backslash in a file name is part of the name**, as git treats it. It was read as a folder separator, so a pattern could miss the file.
+
+### Changed
+
+- **A `.soukformatignore` is read once and kept until it changes**, instead of on every format. Tidy checks the file's size, timestamps and identity before reusing it, and reads it again when it cannot prove the file is unchanged (a file changed in the last two seconds, or a file system with coarse timestamps). For a 1 MiB file, a format after the first one went from about 200 ms to about 10 to 40 ms.
+
+### Known limitations
+
+- On a network share modified from another machine, the cached `.soukformatrc` or `.soukformatignore` can stay stale for a few seconds (the share's attribute cache).
+
 ## [0.5.0] - 2026-10-15
 
 The release that makes Tidy's settings do what their descriptions say, lets the

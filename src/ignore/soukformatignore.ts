@@ -29,8 +29,16 @@
 // (`failClosed`: which line, and why) so "Show Effective Configuration" and the
 // output channel can tell the user, instead of leaving them with a bare "ignored
 // by .soukformatignore" on every file.
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+// One stat per level hands the file's identity on to the memo below; the rule that
+// says when an unchanged identity can be trusted is the one .soukformatrc uses.
+import {
+  canProveFreshness,
+  sameIdentity,
+  statFileIdentity,
+  type FileIdentity
+} from '../config/fileIdentity';
 import {
   compileIgnorePattern,
   describeBudgetExceeded,
@@ -311,7 +319,12 @@ export interface IgnoreEvaluation {
  * would after any other pattern; an unevaluable negation never re-includes.
  */
 export function evaluateIgnore(text: string, relPath: string): IgnoreEvaluation {
-  const { patterns, lines } = parseLines(text);
+  return evaluateParsed(parseLines(text), relPath);
+}
+
+/** {@link evaluateIgnore} on an already parsed file (the memoised patterns, never a verdict). */
+function evaluateParsed(parsed: ParsedIgnoreFile, relPath: string): IgnoreEvaluation {
+  const { patterns, lines } = parsed;
   const decision = decideIgnore(relPath, patterns);
   if (decision.budgetExceeded === true) {
     return { ignored: true, failClosed: failClosedForBudget(patterns.length) };
@@ -324,18 +337,17 @@ export function evaluateIgnore(text: string, relPath: string): IgnoreEvaluation 
 }
 
 /** A .soukformatignore found by the walk, with the stat that found it. */
-interface LocatedIgnoreFile {
+interface LocatedIgnoreFile extends FileIdentity {
   readonly path: string;
-  readonly size: number;
 }
 
 /**
  * Walk up from a file's directory to the nearest .soukformatignore and return it
- * with the size the stat that found it reported: one stat per level, and the
- * size feeds the cap without a second syscall. Goes up to the root of the disk,
- * like git (see the header). The walk is lexical (no symlink is followed), so it
- * always ends at the root; a stat error (permission, not a directory) is
- * fail-soft and the walk keeps going.
+ * with the identity the stat that found it reported: one stat per level, and the
+ * identity feeds the cap and the memo without a second syscall. Goes up to the
+ * root of the disk, like git (see the header). The walk is lexical (no symlink is
+ * followed), so it always ends at the root; a stat error (permission, not a
+ * directory) is fail-soft and the walk keeps going.
  */
 function locateSoukformatignore(startFsPath: string): LocatedIgnoreFile | undefined {
   if (typeof startFsPath !== 'string' || startFsPath.trim() === '') {
@@ -345,15 +357,10 @@ function locateSoukformatignore(startFsPath: string): LocatedIgnoreFile | undefi
   let dir = dirname(resolve(startFsPath));
   for (;;) {
     const candidate = join(dir, SOUKFORMATIGNORE_FILENAME);
-    try {
-      const stats = statSync(candidate, { throwIfNoEntry: false });
-      if (stats?.isFile() === true) {
-        return { path: candidate, size: stats.size };
-      }
-    } catch {
-      // Ignore stat/permission errors and keep walking up (fail-soft). The empty
-      // block is intentional; ESLint's no-empty requires a statement here.
-      void 0;
+    // A stat error is swallowed by statFileIdentity: fail-soft, keep walking up.
+    const found = statFileIdentity(candidate);
+    if (found !== undefined) {
+      return { path: candidate, ...found };
     }
     const parent = dirname(dir);
     if (parent === dir) {
@@ -401,9 +408,93 @@ export function ignoreRecordDetail(lookup: IgnoreLookup): string | undefined {
   return lookup.failClosed?.detail ?? lookup.path;
 }
 
-/** Whether a recorded ignore detail is a fail-closed reason (true) or a file path (false). */
+/**
+ * Starts every fail-closed detail the .soukformatrc reader builds (its overrides
+ * could not be fully evaluated). It is recorded like a .soukformatignore one, so
+ * the status surfaces tell it from a file path with the same test.
+ */
+export const SOUKFORMATRC_FAIL_CLOSED_DETAIL_PREFIX = '.soukformatrc ';
+
+/** Whether a recorded detail is a .soukformatrc fail-closed reason (see SoukReadResult.failClosed). */
+export function isSoukformatrcFailClosedDetail(detail: string | undefined): boolean {
+  return detail !== undefined && detail.startsWith(SOUKFORMATRC_FAIL_CLOSED_DETAIL_PREFIX);
+}
+
+/**
+ * Whether a recorded ignore detail is a fail-closed reason (true) or a file path
+ * (false). A .soukformatrc whose overrides could not be fully evaluated is
+ * recorded the same way.
+ */
 export function isFailClosedDetail(detail: string | undefined): boolean {
-  return detail !== undefined && detail.startsWith(FAIL_CLOSED_DETAIL_PREFIX);
+  return (
+    (detail !== undefined && detail.startsWith(FAIL_CLOSED_DETAIL_PREFIX)) ||
+    isSoukformatrcFailClosedDetail(detail)
+  );
+}
+
+/** Most parsed ignore files kept in memory at once (one per distinct file path). */
+const MAX_CACHED_IGNORE_FILES = 32;
+
+/** A parsed ignore file kept in memory, valid while its identity is unchanged. */
+interface CachedIgnoreFile {
+  readonly identity: FileIdentity;
+  readonly parsed: ParsedIgnoreFile;
+}
+
+/** Insertion-ordered, so the oldest entry is the first key (evicted first). */
+const ignoreCache = new Map<string, CachedIgnoreFile>();
+
+/** Forget every memoised ignore file. Tests use it; a normal session never needs it. */
+export function clearSoukformatignoreCache(): void {
+  ignoreCache.clear();
+}
+
+/** The clock the freshness window reads. */
+let clock: () => number = Date.now;
+
+/**
+ * Replace the clock the freshness window reads (a test moves it forward to make a
+ * file "settled" without waiting); call with no argument to restore the real one.
+ */
+export function setSoukformatignoreClock(now?: () => number): void {
+  clock = now ?? Date.now;
+}
+
+/**
+ * The parsed patterns of a located ignore file: from the memo when its identity is
+ * exactly the one memoised, otherwise read and parsed once. Only the patterns are
+ * kept, never a verdict. Same rule as .soukformatrc (see ../config/fileIdentity): a
+ * file whose freshness cannot be proved (coarse timestamps, no inode, touched less
+ * than 2 s ago) is never memoised, so it is read every time. Returns undefined
+ * when the file cannot be read.
+ */
+function loadParsedIgnore(located: LocatedIgnoreFile): ParsedIgnoreFile | undefined {
+  const cached = ignoreCache.get(located.path);
+  if (cached !== undefined && sameIdentity(cached.identity, located)) {
+    return cached.parsed;
+  }
+
+  let text: string;
+  try {
+    text = readFileSync(located.path, 'utf8');
+  } catch {
+    ignoreCache.delete(located.path);
+    return undefined;
+  }
+
+  const parsed = parseLines(text);
+  ignoreCache.delete(located.path);
+  if (canProveFreshness(located, clock())) {
+    if (ignoreCache.size >= MAX_CACHED_IGNORE_FILES) {
+      const oldest = ignoreCache.keys().next();
+      if (oldest.done !== true) {
+        ignoreCache.delete(oldest.value);
+      }
+    }
+    const { size, mtimeNs, ctimeNs, ino, dev } = located;
+    ignoreCache.set(located.path, { identity: { size, mtimeNs, ctimeNs, ino, dev }, parsed });
+  }
+  return parsed;
 }
 
 /**
@@ -431,15 +522,13 @@ export function resolveIgnore(fsPath: string): IgnoreLookup {
     return { path: located.path, ignored: true, failClosed: failClosedForSize(located.size) };
   }
 
-  let text: string;
-  try {
-    text = readFileSync(located.path, 'utf8');
-  } catch {
+  const parsed = loadParsedIgnore(located);
+  if (parsed === undefined) {
     // Unreadable ignore file => fail-safe: format anyway.
     return { path: located.path, ignored: false };
   }
 
   const ignoreDir = dirname(located.path);
   const rel = relative(ignoreDir, fsPath).split(sep).join('/');
-  return { path: located.path, ...evaluateIgnore(text, rel) };
+  return { path: located.path, ...evaluateParsed(parsed, rel) };
 }

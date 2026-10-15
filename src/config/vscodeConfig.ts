@@ -450,6 +450,8 @@ export interface SoukformatrcLayers {
   readonly path?: string;
   readonly layers: ConfigLayer[];
   readonly warnings: string[];
+  /** Why the options may be wrong and the file must not be formatted (see SoukReadResult). */
+  readonly failClosed?: string;
 }
 
 /**
@@ -493,7 +495,8 @@ function buildSoukformatrcLayers(
   return {
     path: result.path,
     layers: result.layers,
-    warnings: result.warnings.map((w) => w.message)
+    warnings: result.warnings.map((w) => w.message),
+    failClosed: result.failClosed
   };
 }
 
@@ -666,8 +669,8 @@ export function readResolvedOptions(
   languageId: LangId,
   formattingOptions: vscode.FormattingOptions
 ): ResolvedOptions {
-  const { layers } = buildLayers(document, languageId, formattingOptions);
-  return resolveOptions({ languageId, layers });
+  const { layers, souk } = buildLayers(document, languageId, formattingOptions);
+  return resolveOptions({ languageId, layers, failClosed: souk.failClosed });
 }
 
 /**
@@ -695,7 +698,7 @@ export function readResolvedOptionsWithDiagnostics(
     languageId,
     formattingOptions
   );
-  const options = resolveOptions({ languageId, layers });
+  const options = resolveOptions({ languageId, layers, failClosed: souk.failClosed });
   return {
     options,
     soukformatrcPath: souk.path,

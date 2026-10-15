@@ -438,4 +438,35 @@ describe('config/vscodeConfig : the layers built from the host (C-12, C-15, LOW-
       assert.equal(resolve('css', 'a.css').insertFinalNewline, false);
     });
   });
+
+  describe('F4 : a .soukformatrc whose overrides cannot be fully evaluated reaches the options', () => {
+    const costly = `**/*${'a'.repeat(60)}c`.repeat(Math.floor(1024 / (60 + 5)));
+    const exhausting = JSON.stringify({
+      overrides: Array.from({ length: 20 }, () => ({ files: costly, options: { indent: 8 } }))
+    });
+    const deep = Array.from({ length: 16 }, () => `${'a'.repeat(254)}c`).join('/');
+
+    function resolveAt(relPath: string): ResolvedOptions {
+      const fsPath = join(workspace, ...relPath.split('/'));
+      return vscodeConfig.readResolvedOptions(new FakeDocument('css', '', fsPath), 'css', {
+        tabSize: 2,
+        insertSpaces: true
+      });
+    }
+
+    it('an exhausted budget sets failClosed on the resolved options', () => {
+      write({ '.soukformatrc': exhausting });
+      const r = resolveAt(`${deep}/x.css`);
+      assert.match(r.failClosed ?? '', /^.soukformatrc overrides: matching 20 patterns/);
+    });
+
+    it('an ordinary .soukformatrc, or none, leaves failClosed unset', () => {
+      write({ '.soukformatrc': '{"css": {"indent": 5}, "overrides": [{"files": "*.css", "options": {"indent": 6}}]}' });
+      const r = resolveAt('a.css');
+      assert.equal(r.failClosed, undefined);
+      assert.equal(r.tabSize, 6);
+      rmSync(join(workspace, '.soukformatrc'));
+      assert.equal(resolveAt('a.css').failClosed, undefined);
+    });
+  });
 });

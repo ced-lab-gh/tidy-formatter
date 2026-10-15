@@ -40,6 +40,8 @@ export interface ResolvedOptions {
   insertFinalNewline?: boolean;
   engineOptions: Record<string, unknown>;
   sources: Record<string, string>;
+  /** Set when the options may be wrong (a .soukformatrc that could not be fully evaluated): do not format. */
+  failClosed?: string;
 }
 
 export interface FormatRequest {

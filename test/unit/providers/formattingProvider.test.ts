@@ -48,6 +48,7 @@ import {
   UNHONOURED_IGNORE_PRETTIER_PATH
 } from '../../../src/engine/maskPlan';
 import { JSX_TEXT_WHITESPACE_REASON } from '../../../src/safety/guard';
+import { isFailClosedDetail } from '../../../src/ignore/soukformatignore';
 
 /* -------------------------------------------------------------------------- */
 /* A minimal but faithful 'vscode' stub                                        */
@@ -124,6 +125,13 @@ interface StubState {
    * fail-safe path is exercised rather than trusted.
    */
   ignoreCheckFault: 'unchecked' | 'throw' | undefined;
+  /**
+   * F4: when set, the resolved options come back carrying this fail-closed reason,
+   * as they do when the overrides of a .soukformatrc cannot be fully evaluated. The
+   * real chain (.soukformatrc -> options) is covered in vscodeConfigLayers.test.ts;
+   * here only the provider's reaction is exercised, on an untrusted stub.
+   */
+  rcFailClosed: string | undefined;
 }
 
 const state: StubState = {
@@ -132,7 +140,8 @@ const state: StubState = {
   warningActions: [],
   infos: [],
   files: {},
-  ignoreCheckFault: undefined
+  ignoreCheckFault: undefined,
+  rcFailClosed: undefined
 };
 
 const vscodeStub = {
@@ -257,6 +266,21 @@ function withIgnoreCheckFault(real: PrettierIgnoreModule): PrettierIgnoreModule 
   };
 }
 
+type VscodeConfigModule = typeof import('../../../src/config/vscodeConfig');
+
+/** The real module, except that the resolved options can be made to carry a fail-closed reason. */
+function withConfigFailClosed(real: VscodeConfigModule): VscodeConfigModule {
+  return {
+    ...real,
+    readResolvedOptions: (...args) => {
+      const options = real.readResolvedOptions(...args);
+      return state.rcFailClosed === undefined
+        ? options
+        : { ...options, failClosed: state.rcFailClosed };
+    }
+  };
+}
+
 describe('providers/formattingProvider : the format seam, end to end', () => {
   const loader = Module as unknown as { _load: LoadFn };
   let originalLoad: LoadFn;
@@ -278,6 +302,9 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
       const loaded = originalLoad.call(this, request, parent, isMain);
       if (request.endsWith('/engine/prettierIgnore')) {
         return withIgnoreCheckFault(loaded as PrettierIgnoreModule);
+      }
+      if (request.endsWith('/config/vscodeConfig')) {
+        return withConfigFailClosed(loaded as VscodeConfigModule);
       }
       return loaded;
     };
@@ -301,6 +328,7 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
     state.infos = [];
     state.files = {};
     state.ignoreCheckFault = undefined;
+    state.rcFailClosed = undefined;
     clearLastFormat();
   });
 
@@ -2141,4 +2169,50 @@ describe('providers/formattingProvider : the format seam, end to end', () => {
       assert.equal(edits[0].newText, expected);
     });
   }
+
+  /* ------------------------------------------------------------------ */
+  /* F4 : overrides that could not be fully evaluated -> format nothing   */
+  /* ------------------------------------------------------------------ */
+
+  describe('F4 : a .soukformatrc whose overrides could not be fully evaluated', () => {
+    const REASON =
+      '.soukformatrc overrides: matching 20 patterns against this path needs more than ' +
+      '2000000 steps; Tidy left the file alone';
+    const SOURCE = '.a{color:red}';
+
+    it('the same document does format without the reason (the test is not vacuous)', async () => {
+      const document = new FakeDocument('css', SOURCE, '/w/base.css');
+      assert.equal((await formatDocument(document)).length, 1);
+      assert.equal(lastRecord(document).status, 'applied');
+    });
+
+    it('returns NO edit for a document, and records the reason like a fail-closed ignore file', async () => {
+      state.rcFailClosed = REASON;
+      const document = new FakeDocument('css', SOURCE, '/w/closed.css');
+
+      const edits = await formatDocument(document);
+
+      assert.deepEqual(edits, []);
+      const record = lastRecord(document);
+      assert.equal(record.status, 'ignored-file');
+      assert.equal(record.scope, 'document');
+      assert.equal(record.detail, REASON);
+      assert.equal(isFailClosedDetail(record.detail), true, 'told from a file path');
+      assert.ok(
+        state.channelLines.some((line) => line.includes('ignored-file') && line.includes(REASON)),
+        `the output channel names the reason, got ${JSON.stringify(state.channelLines)}`
+      );
+    });
+
+    it('returns NO edit for a selection either', async () => {
+      state.rcFailClosed = REASON;
+      const document = new FakeDocument('css', SOURCE, '/w/closed-selection.css');
+
+      assert.deepEqual(await formatSelection(document, 0, SOURCE.length), []);
+      const record = lastRecord(document);
+      assert.equal(record.status, 'ignored-file');
+      assert.equal(record.scope, 'selection');
+      assert.equal(record.detail, REASON);
+    });
+  });
 });

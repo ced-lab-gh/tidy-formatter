@@ -43,9 +43,17 @@
 // walk's stat per directory level: it cannot be cached without missing a nearer
 // .soukformatrc that appeared since. `overrides[].files` globs go through the
 // shared LINEAR matcher of ../ignore/glob, never a RegExp.
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { parse as parseJsonc, type ParseError, printParseErrorCode } from 'jsonc-parser';
+// File identity and the "can an unchanged identity be trusted" rule, shared with
+// the .soukformatignore memo.
+import {
+  canProveFreshness,
+  sameIdentity,
+  statFileIdentity,
+  type FileIdentity
+} from './fileIdentity';
 import type { ConfigLayer } from './resolver';
 // Path containment, REUSED from the .prettierrc layer rather than reinvented:
 // one implementation of the workspace bound means one place where it has to be
@@ -57,6 +65,9 @@ import { comparableDir, isWithinDir } from './prettierrc';
 // The ONE glob matcher, shared with .soukformatignore: linear, gitignore
 // semantics (a slash-less pattern matches at any depth), fail-closed on a
 // pattern it cannot evaluate. Pure and dependency-free, so no host coupling.
+// The prefix that tells a recorded fail-closed reason from a file path lives with
+// the ignore reporting (isFailClosedDetail), which the status surfaces already use.
+import { SOUKFORMATRC_FAIL_CLOSED_DETAIL_PREFIX } from '../ignore/soukformatignore';
 import {
   MatchBudget,
   compileFilesGlob,
@@ -94,19 +105,12 @@ const MAX_WALK_DEPTH = 64;
  */
 export const MAX_SOUKFORMATRC_BYTES = 1_048_576;
 
-/**
- * A file modified (mtime or ctime) less than this long before it was read is NOT
- * memoised. Two writes inside one timestamp tick can leave the identity
- * unchanged, so a fresh file could otherwise be served stale; waiting until it has
- * settled (the same idea as git's "racily clean" entries) closes that window.
- */
-const RACY_WINDOW_MS = 2000;
-
 /** Most parsed configs kept in memory at once (one per distinct file path). */
 const MAX_CACHED_CONFIGS = 32;
 
 /** Origin label prefix surfaced verbatim in "Show Effective Configuration". */
 export const SOURCE_SOUKFORMATRC = '.soukformatrc';
+
 
 /**
  * A non-fatal problem encountered while reading/parsing/validating the file.
@@ -128,6 +132,13 @@ export interface SoukReadResult {
   readonly layers: ConfigLayer[];
   /** Non-fatal warnings (malformed JSON, unknown keys, invalid values...). */
   readonly warnings: SoukWarning[];
+  /**
+   * Set only when the overrides could not be fully evaluated (their work budget
+   * ran out), so the options this result yields may be wrong: the caller must NOT
+   * format with them. One line, starting with `.soukformatrc `, suited to the
+   * last-format record (see isSoukformatrcFailClosedDetail in ../ignore/soukformatignore).
+   */
+  readonly failClosed?: string;
 }
 
 /** Strip the "tidy." prefix from a setting key so the file can omit it. */
@@ -212,27 +223,29 @@ function mapSection(
 /**
  * Build the ordered override layers that match `relativePosixPath`, validating
  * each override's options against the catalogue for `lang`. Non-array `overrides`
- * or malformed entries are skipped with a warning (fail-soft).
+ * or malformed entries are skipped with a warning (fail-soft). When the work
+ * budget runs out the options may be wrong, so `failClosed` carries the reason.
  */
 function mapOverrides(
   overrides: unknown,
   lang: CatalogLang,
   relativePosixPath: string | undefined,
   warnings: SoukWarning[]
-): ConfigLayer[] {
+): { layers: ConfigLayer[]; failClosed?: string } {
   if (overrides === undefined) {
-    return [];
+    return { layers: [] };
   }
   if (!Array.isArray(overrides)) {
     warnings.push({ message: `${SOURCE_SOUKFORMATRC}: "overrides" must be an array; ignored.` });
-    return [];
+    return { layers: [] };
   }
   if (relativePosixPath === undefined) {
     // No on-disk path to match globs against (e.g. untitled doc): skip silently.
-    return [];
+    return { layers: [] };
   }
 
   const layers: ConfigLayer[] = [];
+  let failClosed: string | undefined;
   // ONE work budget for the whole lookup: many overrides times long globs times a
   // deep path must not add up to a freeze, however each one is bounded alone.
   const budget = new MatchBudget();
@@ -281,8 +294,8 @@ function mapOverrides(
     const covered = patternMatches(glob, path, false, budget);
     if (budget.exhausted) {
       // Out of work budget: this and every later override is skipped, and the
-      // user is told (an override cannot exclude a file, so skipping is the safe
-      // fallback: the base options apply).
+      // user is told. The options left may be wrong, so the file is not formatted
+      // (failClosed), like a .soukformatignore that cannot be evaluated.
       const skipped = overrides.length - index;
       warnings.push({
         message:
@@ -292,6 +305,10 @@ function mapOverrides(
             `overrides[${index}] and the ${skipped - 1} after it are skipped`
           )
       });
+      // No final full stop, so a caller can append its own punctuation.
+      failClosed =
+        `${SOUKFORMATRC_FAIL_CLOSED_DETAIL_PREFIX}overrides: ` +
+        describeBudgetExceeded(overrides.length, 'Tidy left the file alone').replace(/\.$/, '');
       break;
     }
     if (!covered) {
@@ -303,7 +320,7 @@ function mapOverrides(
       layers.push({ source: where, values });
     }
   }
-  return layers;
+  return failClosed === undefined ? { layers } : { layers, failClosed };
 }
 
 /**
@@ -354,7 +371,7 @@ function layersFromRoot(
   root: Readonly<Record<string, unknown>>,
   lang: CatalogLang,
   relativePosixPath: string | undefined
-): { layers: ConfigLayer[]; warnings: SoukWarning[] } {
+): { layers: ConfigLayer[]; warnings: SoukWarning[]; failClosed?: string } {
   const warnings: SoukWarning[] = [];
   const layers: ConfigLayer[] = [];
 
@@ -375,9 +392,12 @@ function layersFromRoot(
   }
 
   // Glob overrides (layer 5) : appended after the language section so they win.
-  layers.push(...mapOverrides(root.overrides, lang, relativePosixPath, warnings));
+  const overrides = mapOverrides(root.overrides, lang, relativePosixPath, warnings);
+  layers.push(...overrides.layers);
 
-  return { layers, warnings };
+  return overrides.failClosed === undefined
+    ? { layers, warnings }
+    : { layers, warnings, failClosed: overrides.failClosed };
 }
 
 /**
@@ -392,7 +412,7 @@ export function parseSoukformatrc(
   lang: CatalogLang,
   sourcePath: string,
   relativePosixPath?: string
-): { layers: ConfigLayer[]; warnings: SoukWarning[] } {
+): { layers: ConfigLayer[]; warnings: SoukWarning[]; failClosed?: string } {
   const parsed = parseRoot(text, sourcePath);
   if ('failure' in parsed) {
     return { layers: [], warnings: [{ message: parsed.failure }] };
@@ -400,47 +420,9 @@ export function parseSoukformatrc(
   return layersFromRoot(parsed.root, lang, relativePosixPath);
 }
 
-/**
- * What identifies the CONTENT GENERATION of a config file, taken from one stat
- * in nanoseconds (bigint): a rewrite that keeps the size and even the mtime
- * (cp -p, rsync -t, unzip, touch -r, a copy on Windows) still changes the ctime,
- * and replacing the file changes its inode, so none of them can be mistaken for
- * the file that was memoised.
- */
-interface FileIdentity {
-  readonly size: number;
-  readonly mtimeNs: bigint;
-  readonly ctimeNs: bigint;
-  readonly ino: bigint;
-  readonly dev: bigint;
-}
-
 /** A .soukformatrc found by the walk, with the stat that found it. */
 interface LocatedConfig extends FileIdentity {
   readonly path: string;
-}
-
-/**
- * Stat a candidate ONCE: it answers "is it a regular file" and, for the file
- * that wins, hands its identity on to the cap and the memo so neither needs a
- * second syscall. Stat errors are fail-soft (no such file).
- */
-function statConfigFile(candidate: string): FileIdentity | undefined {
-  try {
-    const stats = statSync(candidate, { throwIfNoEntry: false, bigint: true });
-    if (stats?.isFile() !== true) {
-      return undefined;
-    }
-    return {
-      size: Number(stats.size),
-      mtimeNs: stats.mtimeNs,
-      ctimeNs: stats.ctimeNs,
-      ino: stats.ino,
-      dev: stats.dev
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -464,7 +446,7 @@ function locateSoukformatrc(startFsPath: string, stopDir: string): LocatedConfig
   // Guard against pathological inputs / symlink loops with a generous bound.
   for (let depth = 0; depth < MAX_WALK_DEPTH; depth += 1) {
     const candidate = join(dir, SOUKFORMATRC_FILENAME);
-    const found = statConfigFile(candidate);
+    const found = statFileIdentity(candidate);
     if (found !== undefined) {
       return { path: candidate, ...found };
     }
@@ -512,49 +494,6 @@ export function findSoukformatrc(
 interface CachedConfig {
   readonly identity: FileIdentity;
   readonly parsed: ParsedRoot;
-}
-
-function sameIdentity(a: FileIdentity, b: FileIdentity): boolean {
-  return (
-    a.size === b.size &&
-    a.mtimeNs === b.mtimeNs &&
-    a.ctimeNs === b.ctimeNs &&
-    a.ino === b.ino &&
-    a.dev === b.dev
-  );
-}
-
-const NANOSECONDS_PER_SECOND = 1_000_000_000n;
-const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
-
-/**
- * Whether this platform and this file let us PROVE that an unchanged identity
- * means unchanged content. If not, the answer is no and the file is simply read
- * again: a stale config is never served.
- *
- *   - the file system must identify files (a non-zero inode);
- *   - its timestamps must be finer than a second: a whole-second mtime or ctime
- *     means a coarse clock (FAT, HFS+, SMB1, NFS), where two writes of the same
- *     size inside one second are indistinguishable;
- *   - the file must have SETTLED: neither timestamp is within RACY_WINDOW_MS of
- *     the local clock (or in its future), so a rewrite inside the same timestamp
- *     tick cannot hide behind the identity already stored.
- */
-function canProveFreshness(identity: FileIdentity, nowMs: number): boolean {
-  if (identity.ino === 0n) {
-    return false;
-  }
-  if (
-    identity.mtimeNs % NANOSECONDS_PER_SECOND === 0n ||
-    identity.ctimeNs % NANOSECONDS_PER_SECOND === 0n
-  ) {
-    return false;
-  }
-  const newestMs = Number(
-    (identity.mtimeNs > identity.ctimeNs ? identity.mtimeNs : identity.ctimeNs) /
-      NANOSECONDS_PER_MILLISECOND
-  );
-  return nowMs - newestMs > RACY_WINDOW_MS;
 }
 
 /** Insertion-ordered, so the oldest entry is the first key (evicted first). */
@@ -671,6 +610,8 @@ export function readSoukformatrcLayers(
   const rel = relative(configDir, fsPath);
   const relativePosixPath = rel.split(sep).join('/');
 
-  const { layers, warnings } = layersFromRoot(parsed.root, lang, relativePosixPath);
-  return { path: configPath, layers, warnings };
+  const { layers, warnings, failClosed } = layersFromRoot(parsed.root, lang, relativePosixPath);
+  return failClosed === undefined
+    ? { path: configPath, layers, warnings }
+    : { path: configPath, layers, warnings, failClosed };
 }

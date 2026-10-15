@@ -29,7 +29,7 @@ import { SUPPORTED_LANG_IDS } from '../types';
 import { settingKeyFromDescription } from '../config/sizeLimit';
 // Pure module (no 'vscode'): tells a recorded fail-closed REASON from an ignore
 // file PATH, both of which land in the "ignored-file" record's detail.
-import { isFailClosedDetail } from '../ignore/soukformatignore';
+import { isFailClosedDetail, isSoukformatrcFailClosedDetail } from '../ignore/soukformatignore';
 import { REPORT_ISSUE_COMMAND_ID } from './reportIssue';
 import { USE_AS_FORMATTER_COMMAND_ID } from './useAsFormatter';
 
@@ -218,6 +218,18 @@ function explainRecord(record: LastFormatRecord): Explanation {
       };
     }
     case 'ignored-file': {
+      // A .soukformatrc whose overrides could not be fully evaluated is recorded the
+      // same way: its detail is a reason, not a file path.
+      if (isSoukformatrcFailClosedDetail(record.detail)) {
+        return {
+          headline:
+            'Tidy skipped this file: the overrides of its .soukformatrc could not be fully evaluated, so Tidy left the file alone.',
+          lines: [
+            `Reason: ${record.detail}.`,
+            'Shorten or simplify the overrides, or set tidy.soukformatrc to false to format without that file.'
+          ]
+        };
+      }
       const pathLine = record.detail ? `Ignore file: ${record.detail}.` : undefined;
       // A fail-closed verdict (budget, unevaluable line, oversized file) is not a rule.
       const failClosed = isFailClosedDetail(record.detail);

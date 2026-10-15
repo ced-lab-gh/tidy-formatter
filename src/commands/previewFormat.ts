@@ -680,6 +680,14 @@ export async function previewFormat(): Promise<void> {
   let verdict: GuardVerdict;
   try {
     const options = readResolvedOptions(document, languageId, formattingOptions);
+    if (options.failClosed !== undefined) {
+      // Same refusal as Format Document: the .soukformatrc overrides could not be
+      // fully evaluated, so the options may be wrong.
+      void vscode.window.showInformationMessage(
+        'Tidy: the overrides of the .soukformatrc could not be fully evaluated, so the file is left alone.'
+      );
+      return;
+    }
     // Same protect-and-restore plan as the providers (ignore regions + HTML
     // template islands): without it, previewing a template file would SHOW, and
     // Apply would WRITE, islands reflowed in ways the guard cannot see, because

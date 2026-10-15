@@ -26,7 +26,7 @@ import { EXTENSION_ID } from '../commands/setDefaultFormatter';
 // applied (json/jsonc have their own) instead of always the generic key.
 import { settingKeyFromDescription } from '../config/sizeLimit';
 // Pure module too: tells a fail-closed exclusion (no rule involved) from a rule's.
-import { isFailClosedDetail } from '../ignore/soukformatignore';
+import { isFailClosedDetail, isSoukformatrcFailClosedDetail } from '../ignore/soukformatignore';
 
 /** Setting key relative to the 'tidy' section (declared in package.json). */
 export const STATUS_BAR_ENABLE_KEY = 'statusBar.enable';
@@ -245,6 +245,9 @@ function transientSentence(record: LastFormatRecord): string {
         `${settingKeyFromDescription(record.detail) ?? 'tidy.maxFileSizeKB'}.`
       );
     case 'ignored-file':
+      if (isSoukformatrcFailClosedDetail(record.detail)) {
+        return 'Skipped: the overrides of .soukformatrc could not be fully evaluated.';
+      }
       return isFailClosedDetail(record.detail)
         ? 'Skipped: .soukformatignore could not be fully evaluated.'
         : 'Skipped: a .soukformatignore rule excludes this file.';

@@ -101,6 +101,8 @@ interface HostState {
   readonly messages: string[];
   /** Answer the Apply toast gives: 'Apply' to apply, undefined to dismiss. */
   answer: string | undefined;
+  /** F4: when set, the resolved options carry this fail-closed reason. */
+  failClosed: string | undefined;
 }
 
 const state: HostState = {
@@ -110,7 +112,8 @@ const state: HostState = {
   diffUris: [],
   applied: [],
   messages: [],
-  answer: 'Apply'
+  answer: 'Apply',
+  failClosed: undefined
 };
 
 let document = new FakeDocument('css', '.a{color:red}');
@@ -225,7 +228,18 @@ describe('commands/previewFormat : the diff shows what Apply writes (C-10)', () 
       if (request === 'vscode') {
         return vscodeStub;
       }
-      return originalLoad.call(this, request, parent, isMain);
+      const loaded = originalLoad.call(this, request, parent, isMain);
+      if (request.endsWith('/config/vscodeConfig')) {
+        const real = loaded as { readResolvedOptions: (...args: unknown[]) => object };
+        return {
+          ...real,
+          readResolvedOptions: (...args: unknown[]) => ({
+            ...real.readResolvedOptions(...args),
+            ...(state.failClosed === undefined ? {} : { failClosed: state.failClosed })
+          })
+        };
+      }
+      return loaded;
     };
     preview = require('../../../src/commands/previewFormat') as PreviewModule;
   });
@@ -245,6 +259,7 @@ describe('commands/previewFormat : the diff shows what Apply writes (C-10)', () 
     state.applied.length = 0;
     state.messages.length = 0;
     state.answer = 'Apply';
+    state.failClosed = undefined;
     state.resolved.clear();
     document = new FakeDocument('css', '.a{color:red}');
   });
@@ -274,6 +289,19 @@ describe('commands/previewFormat : the diff shows what Apply writes (C-10)', () 
     const first = await previewOnce();
     assert.equal(first.shown, first.wrote);
     assert.match(first.shown, /\.a \{/);
+  });
+
+  it('F4: a .soukformatrc that could not be fully evaluated gets no preview, like Format Document', async () => {
+    state.failClosed = '.soukformatrc overrides: matching 20 patterns against this path needs more than 2000000 steps; Tidy left the file alone';
+
+    await preview.previewFormat();
+
+    assert.equal(state.displayed.length, 0, 'no diff opens');
+    assert.equal(state.applied.length, 0, 'nothing is written');
+    assert.ok(
+      state.messages.some((m) => m.includes('.soukformatrc') && m.includes('left alone')),
+      JSON.stringify(state.messages)
+    );
   });
 
   it('preview 2 of the SAME file, after an edit, shows the CURRENT text', async () => {

@@ -1037,6 +1037,15 @@ async function provideEdits(
     // Cannot safely format without resolved options: leave the file intact.
     return [];
   }
+  // A .soukformatrc whose overrides could not be fully evaluated may have given the
+  // wrong options: nothing is formatted, and the reason is reported exactly like a
+  // fail-closed .soukformatignore (history, Explain Last Format, status bar, channel).
+  if (options.failClosed !== undefined) {
+    recordOutcome(document, languageId, scope, 'ignored-file', {
+      detail: options.failClosed
+    });
+    return [];
+  }
 
   // Determine the input span and offsets. For range formatting we feed only the
   // selection to the engine and replace exactly that span.

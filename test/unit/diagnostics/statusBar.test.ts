@@ -320,6 +320,23 @@ describe('diagnostics/statusBar : renderTransient (exhaustive over 12 statuses)'
     assert.ok(!closed.tooltipMarkdown.includes('rule excludes'), closed.tooltipMarkdown);
   });
 
+  it('F4: overrides of a .soukformatrc that could not be fully evaluated have their own sentence', () => {
+    const closed = renderTransient(
+      rec('ignored-file', {
+        detail:
+          '.soukformatrc overrides: matching 20 patterns against this path needs more than ' +
+          '2000000 steps; Tidy left the file alone'
+      })
+    );
+    assert.ok(
+      closed.tooltipMarkdown.includes(
+        'Skipped: the overrides of .soukformatrc could not be fully evaluated.'
+      ),
+      closed.tooltipMarkdown
+    );
+    assert.ok(!closed.tooltipMarkdown.includes('rule excludes'), closed.tooltipMarkdown);
+  });
+
   it('F5: a real rule (the detail is the ignore file path) keeps its wording', () => {
     const rule = renderTransient(rec('ignored-file', { detail: '/w/.soukformatignore' }));
     assert.ok(

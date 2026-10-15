@@ -334,6 +334,21 @@ describe('commands/explainLastFormat : actions mapping (ADD-06)', () => {
       }
     });
 
+    it('F4: a .soukformatrc whose overrides could not be fully evaluated says so, with no file to open', () => {
+      const detail =
+        '.soukformatrc overrides: matching 20 patterns against this path needs more than ' +
+        '2000000 steps; Tidy left the file alone';
+      const e = buildExplanation(rec('ignored-file', { detail }), ctx());
+      assert.equal(
+        e.headline,
+        'Tidy skipped this file: the overrides of its .soukformatrc could not be fully evaluated, so Tidy left the file alone.'
+      );
+      assert.equal(actionsOf(e).length, 0, 'the detail is a sentence, not a path');
+      assert.ok(e.lines.includes(`Reason: ${detail}.`));
+      assert.ok(e.lines.some((l) => l.includes('tidy.soukformatrc')));
+      assert.ok(!e.lines.some((l) => l.includes('respectSoukformatignore')));
+    });
+
     it('F5: a real rule keeps its wording (path detail, or no detail)', () => {
       for (const over of [{ detail: '/w/project/.soukformatignore' }, {}]) {
         const e = buildExplanation(rec('ignored-file', over), ctx());

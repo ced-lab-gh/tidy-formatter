@@ -28,6 +28,8 @@ export interface ResolveInput {
   languageId: LangId;
   /** Ordered general -> specific; later overrides earlier (deep merge by key). */
   layers: ConfigLayer[];
+  /** A reason the layers may be wrong (a .soukformatrc that could not be fully evaluated); carried to the result. */
+  failClosed?: string;
 }
 
 /**
@@ -351,6 +353,9 @@ export function resolveOptions(input: ResolveInput): ResolvedOptions {
     sources
   };
 
+  if (input.failClosed !== undefined) {
+    result.failClosed = input.failClosed;
+  }
   if (acc.endOfLine !== undefined) {
     result.endOfLine = acc.endOfLine.value;
     sources[END_OF_LINE_KEY] = acc.endOfLine.source;
