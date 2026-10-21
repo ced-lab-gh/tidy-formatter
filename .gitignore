@@ -38,3 +38,46 @@ HANDOFF.md
 *secret*.json
 .DS_Store
 Thumbs.db
+
+# === BLOC SECURITE â€” ajoute automatiquement avant tout commit ===
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+*secret*
+*credential*
+*mot-de-passe*
+cle-api*
+.secrets
+_raw_secrets.json
+SECRETS.local.md
+ADMIN_CREDENTIALS*
+# Donnees clients / personnelles (RGPD) â€” jamais sur GitHub
+sortie-scalability/
+Archives/
+*.xlsx
+*.csv
+*.jsonl
+# Caches et dependances
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+dist/
+build/
+.next/
+.cache/
+.pytest_cache/
+target/
+.worker-chrome-profile/
+# Divers
+*.log
+.DS_Store
+Thumbs.db
+
